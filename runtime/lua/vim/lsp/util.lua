@@ -30,6 +30,16 @@ local default_border = {
   {" ", "NormalFloat"},
 }
 
+
+local DiagnosticSeverity = protocol.DiagnosticSeverity
+local loclist_type_map = {
+  [DiagnosticSeverity.Error] = 'E',
+  [DiagnosticSeverity.Warning] = 'W',
+  [DiagnosticSeverity.Information] = 'I',
+  [DiagnosticSeverity.Hint] = 'I',
+}
+
+
 --@private
 -- Check the border given by opts or the default border for the additional
 -- size it adds to a float.
@@ -40,9 +50,12 @@ local function get_border_size(opts)
   local width = 0
 
   if type(border) == 'string' then
-    -- 'single', 'double', etc.
-    height = 2
-    width = 2
+    local border_size = {none = {0, 0}, single = {2, 2}, double = {2, 2}, shadow = {1, 1}}
+    if border_size[border] == nil then
+      error("floating preview border is not correct. Please refer to the docs |vim.api.nvim_open_win()|"
+              .. vim.inspect(border))
+    end
+    height, width = unpack(border_size[border])
   else
     local function border_width(id)
       if type(border[id]) == "table" then
@@ -1372,6 +1385,13 @@ function M.open_floating_preview(contents, syntax, opts)
     end
   end
 
+  -- check if another floating preview already exists for this buffer
+  -- and close it if needed
+  local existing_float = npcall(api.nvim_buf_get_var, bufnr, "lsp_floating_preview")
+  if existing_float and api.nvim_win_is_valid(existing_float) then
+    api.nvim_win_close(existing_float, true)
+  end
+
   local floating_bufnr = api.nvim_create_buf(false, true)
   local do_stylize = syntax == "markdown" and opts.stylize_markdown
 
@@ -1417,6 +1437,7 @@ function M.open_floating_preview(contents, syntax, opts)
   if opts.focus_id then
     api.nvim_win_set_var(floating_winnr, opts.focus_id, bufnr)
   end
+  api.nvim_buf_set_var(bufnr, "lsp_floating_preview", floating_winnr)
 
   return floating_bufnr, floating_winnr
 end
@@ -1595,12 +1616,13 @@ function M.locations_to_items(locations)
   return items
 end
 
---- Fills current window's location list with given list of items.
+--- Fills target window's location list with given list of items.
 --- Can be obtained with e.g. |vim.lsp.util.locations_to_items()|.
+--- Defaults to current window.
 ---
 --@param items (table) list of items
-function M.set_loclist(items)
-  vim.fn.setloclist(0, {}, ' ', {
+function M.set_loclist(items, win_id)
+  vim.fn.setloclist(win_id or 0, {}, ' ', {
     title = 'Language Server';
     items = items;
   })
@@ -1841,8 +1863,9 @@ end
 --@param row 0-indexed line
 --@param col 0-indexed byte offset in line
 --@returns (number, number) UTF-32 and UTF-16 index of the character in line {row} column {col} in buffer {buf}
-function M.character_offset(buf, row, col)
-  local line = api.nvim_buf_get_lines(buf, row, row+1, true)[1]
+function M.character_offset(bufnr, row, col)
+  local uri = vim.uri_from_bufnr(bufnr)
+  local line = M.get_line(uri, row)
   -- If the col is past the EOL, use the line length.
   if col > #line then
     return str_utfindex(line)
@@ -1864,6 +1887,40 @@ function M.lookup_section(settings, section)
   end
   return settings
 end
+
+
+--- Convert diagnostics grouped by bufnr to a list of items for use in the
+--- quickfix or location list.
+---
+--@param diagnostics_by_bufnr table bufnr -> Diagnostic[]
+--@param predicate an optional function to filter the diagnostics.
+--                  If present, only diagnostic items matching will be included.
+--@return table (A list of items)
+function M.diagnostics_to_items(diagnostics_by_bufnr, predicate)
+  local items = {}
+  for bufnr, diagnostics in pairs(diagnostics_by_bufnr or {}) do
+    for _, d in pairs(diagnostics) do
+      if not predicate or predicate(d) then
+        table.insert(items, {
+          bufnr = bufnr,
+          lnum = d.range.start.line + 1,
+          col = d.range.start.character + 1,
+          text = d.message,
+          type = loclist_type_map[d.severity or DiagnosticSeverity.Error] or 'E'
+        })
+      end
+    end
+  end
+  table.sort(items, function(a, b)
+    if a.bufnr == b.bufnr then
+      return a.lnum < b.lnum
+    else
+      return a.bufnr < b.bufnr
+    end
+  end)
+  return items
+end
+
 
 M._get_line_byte_from_position = get_line_byte_from_position
 M._warn_once = warn_once
