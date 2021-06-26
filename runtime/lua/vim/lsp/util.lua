@@ -1153,7 +1153,7 @@ function M.stylize_markdown(bufnr, contents, opts)
         table.insert(highlights, {
           ft = match.ft;
           start = start + 1;
-          finish = #stripped + 1 - 1;
+          finish = #stripped;
         })
       else
         table.insert(stripped, line)
@@ -1237,7 +1237,7 @@ function M.stylize_markdown(bufnr, contents, opts)
       apply_syntax_to_region(h.ft, h.start, h.finish)
       last = h.finish + 1
     end
-    if last < #stripped then
+    if last <= #stripped then
       apply_syntax_to_region("lsp_markdown", last, #stripped)
     end
   end)
