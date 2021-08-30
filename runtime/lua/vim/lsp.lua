@@ -381,7 +381,7 @@ do
       end
       state.pending_change = function()
         state.pending_change = nil
-        if client.is_stopped() then
+        if client.is_stopped() or not vim.api.nvim_buf_is_valid(bufnr) then
           return
         end
         local contentChanges
@@ -1152,7 +1152,7 @@ end
 ---@param bufnr (number) Buffer handle, or 0 for current
 ---@param client_id (number) the client id
 function lsp.buf_is_attached(bufnr, client_id)
-  return (all_buffer_active_clients[bufnr] or {})[client_id] == true
+  return (all_buffer_active_clients[resolve_bufnr(bufnr)] or {})[client_id] == true
 end
 
 --- Gets a client by id, or nil if the id is invalid.
