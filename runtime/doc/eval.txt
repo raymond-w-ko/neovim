@@ -1856,7 +1856,7 @@ v:null		Special value used to put "null" in JSON and NIL in msgpack.
 v:numbermax	Maximum value of a number.
 
 					*v:numbermin* *numbermin-variable*
-v:numbermin	Minimum value of a number (negative)
+v:numbermin	Minimum value of a number (negative).
 
 					*v:numbersize* *numbersize-variable*
 v:numbersize	Number of bits in a Number.  This is normally 64, but on some
@@ -2149,7 +2149,7 @@ chanclose({id}[, {stream}])	Number	Closes a channel or one of its streams
 chansend({id}, {data})		Number	Writes {data} to channel
 char2nr({expr}[, {utf8}])	Number	ASCII/UTF8 value of first char in {expr}
 charidx({string}, {idx} [, {countcc}])
-				Number  char index of byte {idx} in {string}
+				Number	char index of byte {idx} in {string}
 cindent({lnum})		Number	C indent for line {lnum}
 clearmatches([{win}])		none	clear all matches
 col({expr})			Number	column nr of cursor or mark
@@ -2368,6 +2368,7 @@ matchstr({expr}, {pat}[, {start}[, {count}]])
 matchstrpos({expr}, {pat}[, {start}[, {count}]])
 				List	{count}'th match of {pat} in {expr}
 max({expr})			Number	maximum value of items in {expr}
+menu_get({path} [, {modes}])	List	description of |menus| matched by {path}
 min({expr})			Number	minimum value of items in {expr}
 mkdir({name} [, {path} [, {prot}]])
 				Number	create directory {name}
@@ -4195,11 +4196,15 @@ foldclosed({lnum})					*foldclosed()*
 		The result is a Number.  If the line {lnum} is in a closed
 		fold, the result is the number of the first line in that fold.
 		If the line {lnum} is not in a closed fold, -1 is returned.
+		{lnum} is used like with |getline()|.  Thus "." is the current
+		line, "'m" mark m, etc.
 
 foldclosedend({lnum})					*foldclosedend()*
 		The result is a Number.  If the line {lnum} is in a closed
 		fold, the result is the number of the last line in that fold.
 		If the line {lnum} is not in a closed fold, -1 is returned.
+		{lnum} is used like with |getline()|.  Thus "." is the current
+		line, "'m" mark m, etc.
 
 foldlevel({lnum})					*foldlevel()*
 		The result is a Number, which is the foldlevel of line {lnum}
@@ -4210,6 +4215,8 @@ foldlevel({lnum})					*foldlevel()*
 		returned for lines where folds are still to be updated and the
 		foldlevel is unknown.  As a special case the level of the
 		previous line is usually available.
+		{lnum} is used like with |getline()|.  Thus "." is the current
+		line, "'m" mark m, etc.
 
 							*foldtext()*
 foldtext()	Returns a String, to be displayed for a closed fold.  This is
@@ -4700,9 +4707,9 @@ getcurpos()	Get the position of the cursor.  This is like getpos('.'), but
 		|winrestview()| for restoring more state.
 
 getcwd([{winnr}[, {tabnr}]])				*getcwd()*
-		With no arguments the result is a String, which is the name of
-		the current effective working directory. With {winnr} or
-		{tabnr} the working directory of that scope is returned.
+		With no arguments, returns the name of the effective
+		|current-directory|. With {winnr} or {tabnr} the working
+		directory of that scope is returned.
 		Tabs and windows are identified by their respective numbers,
 		0 means current tab or window. Missing argument implies 0.
 		Thus the following are equivalent: >
@@ -4861,11 +4868,11 @@ getmarklist([{expr}])					*getmarklist()*
 		see |bufname()|.
 
 		Each item in the returned List is a |Dict| with the following:
-		    name - name of the mark prefixed by "'"
-		    pos - a |List| with the position of the mark:
+		    mark   name of the mark prefixed by "'"
+		    pos	   a |List| with the position of the mark:
 				[bufnum, lnum, col, off]
-			  Refer to |getpos()| for more information.
-		    file - file name
+			   Refer to |getpos()| for more information.
+		    file   file name
 
 		Refer to |getpos()| for getting information about a specific
 		mark.
@@ -4876,6 +4883,8 @@ getmatches([{win}])					*getmatches()*
 		|getmatches()| is useful in combination with |setmatches()|,
 		as |setmatches()| can restore a list of matches saved by
 		|getmatches()|.
+		If {win} is specified, use the window with this number or
+		window ID instead of the current window.
 		Example: >
 			:echo getmatches()
 <			[{'group': 'MyGroup1', 'pattern': 'TODO',
@@ -4944,8 +4953,10 @@ getqflist([{what}])					*getqflist()*
 			valid	|TRUE|: recognized error message
 
 		When there is no error list or it's empty, an empty list is
-		returned. Quickfix list entries with non-existing buffer
-		number are returned with "bufnr" set to zero.
+		returned. Quickfix list entries with a non-existing buffer
+		number are returned with "bufnr" set to zero (Note: some
+		functions accept buffer number zero for the alternate buffer,
+		you may need to explicitly check for zero).
 
 		Useful application: Find pattern matches in multiple files and
 		do something with them: >
@@ -5049,12 +5060,12 @@ getregtype([{regname}])					*getregtype()*
 		<CTRL-V> is one character with value 0x16.
 		If {regname} is not specified, |v:register| is used.
 
-gettabinfo([{arg}])					*gettabinfo()*
-		If {arg} is not specified, then information about all the tab
-		pages is returned as a |List|. Each List item is a |Dictionary|.
-		Otherwise, {arg} specifies the tab page number and information
-		about that one is returned.  If the tab page does not exist an
-		empty List is returned.
+gettabinfo([{tabnr}])					*gettabinfo()*
+		If {tabnr} is not specified, then information about all the
+		tab pages is returned as a |List|. Each List item is a
+		|Dictionary|.  Otherwise, {tabnr} specifies the tab page
+		number and information about that one is returned.  If the tab
+		page does not exist an empty List is returned.
 
 		Each List item is a |Dictionary| with the following entries:
 			tabnr		tab page number.
@@ -5098,11 +5109,11 @@ gettabwinvar({tabnr}, {winnr}, {varname} [, {def}])		*gettabwinvar()*
 		To obtain all window-local variables use: >
 			gettabwinvar({tabnr}, {winnr}, '&')
 
-gettagstack([{nr}])					*gettagstack()*
-		The result is a Dict, which is the tag stack of window {nr}.
-		{nr} can be the window number or the |window-ID|.
-		When {nr} is not specified, the current window is used.
-		When window {nr} doesn't exist, an empty Dict is returned.
+gettagstack([{winnr}])					*gettagstack()*
+		The result is a Dict, which is the tag stack of window {winnr}.
+		{winnr} can be the window number or the |window-ID|.
+		When {winnr} is not specified, the current window is used.
+		When window {winnr} doesn't exist, an empty Dict is returned.
 
 		The returned dictionary contains the following entries:
 			curidx		Current index in the stack. When at
@@ -5873,8 +5884,8 @@ jobwait({jobs}[, {timeout}])				*jobwait()*
 		Waits for jobs and their |on_exit| handlers to complete.
 
 		{jobs} is a List of |job-id|s to wait for.
-		{timeout} is the maximum waiting time in milliseconds, -1
-		means forever.
+		{timeout} is the maximum waiting time in milliseconds. If
+		omitted or -1, wait forever.
 
 		Timeout of 0 can be used to check the status of a job: >
 			let running = jobwait([{job-id}], 0)[0] == -1
@@ -6400,7 +6411,7 @@ matcharg({nr})							*matcharg()*
 		Highlighting matches using the |:match| commands are limited
 		to three matches. |matchadd()| does not have this limitation.
 
-matchdelete({id} [, {win})		       *matchdelete()* *E802* *E803*
+matchdelete({id} [, {win}])		       *matchdelete()* *E802* *E803*
 		Deletes a match with ID {id} previously defined by |matchadd()|
 		or one of the |:match| commands.  Returns 0 if successful,
 		otherwise -1.  See example for |matchadd()|.  All matches can
@@ -6479,7 +6490,7 @@ max({expr})	Return the maximum value of all items in {expr}.
 		Can also be used as a |method|: >
 			mylist->max()
 
-menu_get({path}, {modes})				*menu_get()*
+menu_get({path} [, {modes}])				*menu_get()*
 		Returns a |List| of |Dictionaries| describing |menus| (defined
 		by |:menu|, |:amenu|, …), including |hidden-menus|.
 
@@ -8364,7 +8375,7 @@ sinh({expr})						*sinh()*
 		Can also be used as a |method|: >
 			Compute()->sinh()
 
-sockconnect({mode}, {address}, {opts})			 *sockconnect()*
+sockconnect({mode}, {address} [, {opts}])		 *sockconnect()*
 		Connect a socket to an address. If {mode} is "pipe" then
 		{address} should be the path of a named pipe. If {mode} is
 		"tcp" then {address} should be of the form "host:port" where
@@ -8376,7 +8387,7 @@ sockconnect({mode}, {address}, {opts})			 *sockconnect()*
 		|rpcrequest()| and |rpcnotify()| to communicate with a RPC
 		socket.
 
-		{opts} is a dictionary with these keys:
+		{opts} is an optional dictionary with these keys:
 		  |on_data| : callback invoked when data was read from socket
 		  data_buffered : read socket data in |channel-buffered| mode.
 		  rpc     : If set, |msgpack-rpc| will be used to communicate
@@ -9084,7 +9095,7 @@ system({cmd} [, {input}])				*system()* *E677*
 								*E5677*
 		Note: system() cannot write to or read from backgrounded ("&")
 		shell commands, e.g.: >
-		    :echo system("cat - &", "foo"))
+		    :echo system("cat - &", "foo")
 <		which is equivalent to: >
 		    $ echo foo | bash -c 'cat - &'
 <		The pipes are disconnected (unless overridden by shell
@@ -9275,7 +9286,7 @@ tanh({expr})						*tanh()*
 
 		Can also be used as a |method|: >
 			Compute()->tanh()
-
+<
 							*timer_info()*
 timer_info([{id}])
 		Return a list with information about timers.
