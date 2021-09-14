@@ -387,7 +387,7 @@ static void shift_block(oparg_T *oap, int amount)
     }
     for (; ascii_iswhite(*bd.textstart); ) {
       // TODO: is passing bd.textstart for start of the line OK?
-      incr = lbr_chartabsize_adv(bd.textstart, &bd.textstart, (colnr_T)(bd.start_vcol));
+      incr = lbr_chartabsize_adv(bd.textstart, &bd.textstart, (bd.start_vcol));
       total += incr;
       bd.start_vcol += incr;
     }
@@ -506,7 +506,7 @@ static void shift_block(oparg_T *oap, int amount)
   }
   // replace the line
   ml_replace(curwin->w_cursor.lnum, newp, false);
-  changed_bytes(curwin->w_cursor.lnum, (colnr_T)bd.textcol);
+  changed_bytes(curwin->w_cursor.lnum, bd.textcol);
   extmark_splice_cols(curbuf, (int)curwin->w_cursor.lnum-1, startcol,
                       oldlen, newlen,
                       kExtmarkUndo);
@@ -1253,7 +1253,7 @@ static void stuffescaped(const char *arg, int literally)
       arg++;
     }
     if (arg > start) {
-      stuffReadbuffLen(start, (long)(arg - start));
+      stuffReadbuffLen(start, (arg - start));
     }
 
     // stuff a single special character
@@ -3227,7 +3227,7 @@ void do_put(int regname, yankreg_T *reg, int dir, long count, int flags)
       oldlen = STRLEN(oldp);
       for (ptr = oldp; vcol < col && *ptr; ) {
         // Count a tab for what it's worth (if list mode not on)
-        incr = lbr_chartabsize_adv(oldp, &ptr, (colnr_T)vcol);
+        incr = lbr_chartabsize_adv(oldp, &ptr, vcol);
         vcol += incr;
       }
       bd.textcol = (colnr_T)(ptr - oldp);
@@ -4026,8 +4026,8 @@ int do_join(size_t count, int insert_space, int save_undo, int use_formatoptions
     const int spaces_removed = (int)((curr - curr_start) - spaces[t]);
     linenr_T lnum = curwin->w_cursor.lnum + t;
     colnr_T mincol = (colnr_T)0;
-    long lnum_amount = (linenr_T)-t;
-    long col_amount = (long)(cend - newp - spaces_removed);
+    long lnum_amount = -t;
+    long col_amount = (cend - newp - spaces_removed);
 
     mark_col_adjust(lnum, mincol, lnum_amount, col_amount, spaces_removed);
 
@@ -4532,7 +4532,7 @@ static int fmt_check_par(linenr_T lnum, int *leader_len, char_u **leader_flags, 
 
   ptr = ml_get(lnum);
   if (do_comments) {
-    *leader_len = get_leader_len(ptr, leader_flags, FALSE, TRUE);
+    *leader_len = get_leader_len(ptr, leader_flags, false, true);
   } else {
     *leader_len = 0;
   }
@@ -4635,7 +4635,7 @@ static void block_prep(oparg_T *oap, struct block_def *bdp, linenr_T lnum, bool 
   prev_pstart = line;
   while (bdp->start_vcol < oap->start_vcol && *pstart) {
     // Count a tab for what it's worth (if list mode not on)
-    incr = lbr_chartabsize(line, pstart, (colnr_T)bdp->start_vcol);
+    incr = lbr_chartabsize(line, pstart, bdp->start_vcol);
     bdp->start_vcol += incr;
     if (ascii_iswhite(*pstart)) {
       bdp->pre_whitesp += incr;
@@ -4686,7 +4686,7 @@ static void block_prep(oparg_T *oap, struct block_def *bdp, linenr_T lnum, bool 
       while (bdp->end_vcol <= oap->end_vcol && *pend != NUL) {
         // Count a tab for what it's worth (if list mode not on)
         prev_pend = pend;
-        incr = lbr_chartabsize_adv(line, &pend, (colnr_T)bdp->end_vcol);
+        incr = lbr_chartabsize_adv(line, &pend, bdp->end_vcol);
         bdp->end_vcol += incr;
       }
       if (bdp->end_vcol <= oap->end_vcol
@@ -5017,7 +5017,7 @@ int do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
                0 + (do_bin ? STR2NR_BIN : 0)
                + (do_oct ? STR2NR_OCT : 0)
                + (do_hex ? STR2NR_HEX : 0),
-               NULL, &n, maxlen);
+               NULL, &n, maxlen, false);
 
     // ignore leading '-' for hex, octal and bin numbers
     if (pre && negative) {
@@ -5726,16 +5726,19 @@ void cursor_pos_info(dict_T *dict)
       }
 
       if (l_VIsual_mode == Ctrl_V) {
-        char_u * saved_sbr = p_sbr;
+        char_u *const saved_sbr = p_sbr;
+        char_u *const saved_w_sbr = curwin->w_p_sbr;
 
         // Make 'sbr' empty for a moment to get the correct size.
         p_sbr = empty_option;
+        curwin->w_p_sbr = empty_option;
         oparg.is_VIsual = true;
         oparg.motion_type = kMTBlockWise;
         oparg.op_type = OP_NOP;
         getvcols(curwin, &min_pos, &max_pos,
                  &oparg.start_vcol, &oparg.end_vcol);
         p_sbr = saved_sbr;
+        curwin->w_p_sbr = saved_w_sbr;
         if (curwin->w_curswant == MAXCOL) {
           oparg.end_vcol = MAXCOL;
         }
@@ -5905,18 +5908,18 @@ void cursor_pos_info(dict_T *dict)
 
   if (dict != NULL) {
     // Don't shorten this message, the user asked for it.
-    tv_dict_add_nr(dict, S_LEN("words"), (varnumber_T)word_count);
-    tv_dict_add_nr(dict, S_LEN("chars"), (varnumber_T)char_count);
+    tv_dict_add_nr(dict, S_LEN("words"), word_count);
+    tv_dict_add_nr(dict, S_LEN("chars"), char_count);
     tv_dict_add_nr(dict, S_LEN("bytes"), (varnumber_T)(byte_count + bom_count));
 
     STATIC_ASSERT(sizeof("visual") == sizeof("cursor"),
                   "key_len argument in tv_dict_add_nr is wrong");
     tv_dict_add_nr(dict, l_VIsual_active ? "visual_bytes" : "cursor_bytes",
-                   sizeof("visual_bytes") - 1, (varnumber_T)byte_count_cursor);
+                   sizeof("visual_bytes") - 1, byte_count_cursor);
     tv_dict_add_nr(dict, l_VIsual_active ? "visual_chars" : "cursor_chars",
-                   sizeof("visual_chars") - 1, (varnumber_T)char_count_cursor);
+                   sizeof("visual_chars") - 1, char_count_cursor);
     tv_dict_add_nr(dict, l_VIsual_active ? "visual_words" : "cursor_words",
-                   sizeof("visual_words") - 1, (varnumber_T)word_count_cursor);
+                   sizeof("visual_words") - 1, word_count_cursor);
   }
 }
 

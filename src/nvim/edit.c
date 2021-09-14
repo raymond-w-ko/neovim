@@ -84,6 +84,7 @@
 #define CTRL_X_SPELL            14
 #define CTRL_X_LOCAL_MSG        15  ///< only used in "ctrl_x_msgs"
 #define CTRL_X_EVAL             16  ///< for builtin function complete()
+#define CTRL_X_CMDLINE_CTRL_X   17  ///< CTRL-X typed in CTRL_X_CMDLINE
 
 #define CTRL_X_MSG(i) ctrl_x_msgs[(i) & ~CTRL_X_WANT_IDENT]
 #define CTRL_X_MODE_LINE_OR_EVAL(m) \
@@ -109,6 +110,7 @@ static char *ctrl_x_msgs[] =
   N_(" Spelling suggestion (s^N^P)"),
   N_(" Keyword Local completion (^N^P)"),
   NULL,  // CTRL_X_EVAL doesn't use msg.
+  N_(" Command-line completion (^V^N^P)"),
 };
 
 static char *ctrl_x_mode_names[] = {
@@ -128,7 +130,8 @@ static char *ctrl_x_mode_names[] = {
   "omni",
   "spell",
   NULL,               // CTRL_X_LOCAL_MSG only used in "ctrl_x_msgs"
-  "eval"
+  "eval",
+  "cmdline",
 };
 
 static char e_hitend[] = N_("Hit end of paragraph");
@@ -171,8 +174,7 @@ static int compl_enter_selects = FALSE;
  * are used. */
 static char_u *compl_leader = NULL;
 
-static int compl_get_longest = FALSE;           /* put longest common string
-                                                   in compl_leader */
+static bool compl_get_longest = false;          // put longest common string in compl_leader
 
 static int compl_no_insert = FALSE;             /* FALSE: select & insert
                                                    TRUE: noinsert */
@@ -208,7 +210,7 @@ static char_u *compl_orig_text = NULL;  /* text as it was before
 static int compl_cont_mode = 0;
 static expand_T compl_xp;
 
-static int compl_opt_refresh_always = FALSE;
+static bool compl_opt_refresh_always = false;
 
 static int pum_selected_item = -1;
 
@@ -762,7 +764,8 @@ static int insert_execute(VimState *state, int key)
 
   s->c = do_digraph(s->c);
 
-  if ((s->c == Ctrl_V || s->c == Ctrl_Q) && ctrl_x_mode == CTRL_X_CMDLINE) {
+  if ((s->c == Ctrl_V || s->c == Ctrl_Q)
+      && (ctrl_x_mode == CTRL_X_CMDLINE || ctrl_x_mode == CTRL_X_CMDLINE_CTRL_X)) {
     insert_do_complete(s);
     return 1;
   }
@@ -2028,11 +2031,8 @@ static bool del_char_after_col(int limit_col)
  */
 static void ins_ctrl_x(void)
 {
-  /* CTRL-X after CTRL-X CTRL-V doesn't do anything, so that CTRL-X
-   * CTRL-V works like CTRL-N */
-  if (ctrl_x_mode != CTRL_X_CMDLINE) {
-    /* if the next ^X<> won't ADD nothing, then reset
-     * compl_cont_status */
+  if (ctrl_x_mode != CTRL_X_CMDLINE && ctrl_x_mode != CTRL_X_CMDLINE_CTRL_X) {
+    // if the next ^X<> won't ADD nothing, then reset compl_cont_status
     if (compl_cont_status & CONT_N_ADDS) {
       compl_cont_status |= CONT_INTRPT;
     } else {
@@ -2043,6 +2043,10 @@ static void ins_ctrl_x(void)
     edit_submode = (char_u *)_(CTRL_X_MSG(ctrl_x_mode));
     edit_submode_pre = NULL;
     showmode();
+  } else {
+    // CTRL-X in CTRL-X CTRL-V mode behaves differently to make CTRL-X
+    // CTRL-V look like CTRL-N
+    ctrl_x_mode = CTRL_X_CMDLINE_CTRL_X;
   }
 }
 
@@ -2052,7 +2056,8 @@ bool ctrl_x_mode_not_default(void)
   return ctrl_x_mode != CTRL_X_NORMAL;
 }
 
-// Whether CTRL-X was typed without a following character.
+// Whether CTRL-X was typed without a following character,
+// not including when in CTRL-X CTRL-V mode.
 bool ctrl_x_mode_not_defined_yet(void)
 {
   return ctrl_x_mode == CTRL_X_NOT_DEFINED_YET;
@@ -2104,12 +2109,14 @@ bool vim_is_ctrl_x_key(int c)
   case 0:  // Not in any CTRL-X mode
     return c == Ctrl_N || c == Ctrl_P || c == Ctrl_X;
   case CTRL_X_NOT_DEFINED_YET:
+  case CTRL_X_CMDLINE_CTRL_X:
     return c == Ctrl_X || c == Ctrl_Y || c == Ctrl_E
            || c == Ctrl_L || c == Ctrl_F || c == Ctrl_RSB
            || c == Ctrl_I || c == Ctrl_D || c == Ctrl_P
            || c == Ctrl_N || c == Ctrl_T || c == Ctrl_V
            || c == Ctrl_Q || c == Ctrl_U || c == Ctrl_O
-           || c == Ctrl_S || c == Ctrl_K || c == 's';
+           || c == Ctrl_S || c == Ctrl_K || c == 's'
+           || c == Ctrl_Z;
   case CTRL_X_SCROLL:
     return c == Ctrl_Y || c == Ctrl_E;
   case CTRL_X_WHOLE_LINE:
@@ -2163,6 +2170,7 @@ static bool ins_compl_accept_char(int c)
     return vim_isfilec(c) && !vim_ispathsep(c);
 
   case CTRL_X_CMDLINE:
+  case CTRL_X_CMDLINE_CTRL_X:
   case CTRL_X_OMNI:
     // Command line and Omni completion can work with just about any
     // printable character, but do stop at white space.
@@ -3567,6 +3575,26 @@ static bool ins_compl_prep(int c)
     return retval;
   }
 
+  if (ctrl_x_mode == CTRL_X_CMDLINE_CTRL_X && c != Ctrl_X) {
+    if (c == Ctrl_V || c == Ctrl_Q || c == Ctrl_Z || ins_compl_pum_key(c)
+        || !vim_is_ctrl_x_key(c)) {
+      // Not starting another completion mode.
+      ctrl_x_mode = CTRL_X_CMDLINE;
+
+      // CTRL-X CTRL-Z should stop completion without inserting anything
+      if (c == Ctrl_Z) {
+        retval = true;
+      }
+    } else {
+      ctrl_x_mode = CTRL_X_CMDLINE;
+
+      // Other CTRL-X keys first stop completion, then start another
+      // completion mode.
+      ins_compl_prep(' ');
+      ctrl_x_mode = CTRL_X_NOT_DEFINED_YET;
+    }
+  }
+
   // Set "compl_get_longest" when finding the first matches.
   if (ctrl_x_mode == CTRL_X_NOT_DEFINED_YET
       || (ctrl_x_mode == CTRL_X_NORMAL && !compl_started)) {
@@ -3632,6 +3660,12 @@ static bool ins_compl_prep(int c)
     case Ctrl_V:
     case Ctrl_Q:
       ctrl_x_mode = CTRL_X_CMDLINE;
+      break;
+    case Ctrl_Z:
+      ctrl_x_mode = CTRL_X_NORMAL;
+      edit_submode = NULL;
+      showmode();
+      retval = true;
       break;
     case Ctrl_P:
     case Ctrl_N:
@@ -4050,7 +4084,7 @@ int ins_compl_add_tv(typval_T *const tv, const Direction dir, bool fast)
       flags |= CP_EQUAL;
     }
   } else {
-    word = (const char *)tv_get_string_chk(tv);
+    word = tv_get_string_chk(tv);
     memset(cptext, 0, sizeof(cptext));
   }
   if (word == NULL || (!empty && *word == NUL)) {
@@ -4075,7 +4109,7 @@ static int ins_compl_get_exp(pos_T *ini)
   static pos_T first_match_pos;
   static pos_T last_match_pos;
   static char_u *e_cpt = (char_u *)"";   // curr. entry in 'complete'
-  static int found_all = false;          // Found all matches of a
+  static bool found_all = false;         // Found all matches of a
                                          // certain type.
   static buf_T *ins_buf = NULL;          // buffer being scanned
 
@@ -4092,7 +4126,7 @@ static int ins_compl_get_exp(pos_T *ini)
   char_u *ptr;
   char_u *dict = NULL;
   int dict_f = 0;
-  int set_match_pos;
+  bool set_match_pos;
   int l_ctrl_x_mode = ctrl_x_mode;
 
   assert(curbuf != NULL);
@@ -4101,7 +4135,7 @@ static int ins_compl_get_exp(pos_T *ini)
     FOR_ALL_BUFFERS(buf) {
       buf->b_scanned = false;
     }
-    found_all = FALSE;
+    found_all = false;
     ins_buf = curbuf;
     e_cpt = (compl_cont_status & CONT_LOCAL)
             ? (char_u *)"." : curbuf->b_p_cpt;
@@ -4116,7 +4150,7 @@ static int ins_compl_get_exp(pos_T *ini)
   // For ^N/^P loop over all the flags/windows/buffers in 'complete'
   for (;; ) {
     found_new_match = FAIL;
-    set_match_pos = FALSE;
+    set_match_pos = false;
 
     assert(l_ctrl_x_mode == ctrl_x_mode);
 
@@ -4126,7 +4160,7 @@ static int ins_compl_get_exp(pos_T *ini)
     if ((l_ctrl_x_mode == CTRL_X_NORMAL
          || CTRL_X_MODE_LINE_OR_EVAL(l_ctrl_x_mode))
         && (!compl_started || found_all)) {
-      found_all = FALSE;
+      found_all = false;
       while (*e_cpt == ',' || *e_cpt == ' ') {
         e_cpt++;
       }
@@ -4206,7 +4240,7 @@ static int ins_compl_get_exp(pos_T *ini)
         // in any case e_cpt is advanced to the next entry
         (void)copy_option_part(&e_cpt, IObuff, IOSIZE, ",");
 
-        found_all = TRUE;
+        found_all = true;
         if (type == -1) {
           continue;
         }
@@ -4292,10 +4326,11 @@ static int ins_compl_get_exp(pos_T *ini)
       break;
 
     case CTRL_X_CMDLINE:
+    case CTRL_X_CMDLINE_CTRL_X:
       if (expand_cmdline(&compl_xp, compl_pattern,
                          (int)STRLEN(compl_pattern),
                          &num_matches, &matches) == EXPAND_OK) {
-        ins_compl_add_matches(num_matches, matches, FALSE);
+        ins_compl_add_matches(num_matches, matches, false);
       }
       break;
 
@@ -4361,7 +4396,7 @@ static int ins_compl_get_exp(pos_T *ini)
         }
         if (found_new_match == FAIL) {
           if (ins_buf == curbuf) {
-            found_all = TRUE;
+            found_all = true;
           }
           break;
         }
@@ -5135,7 +5170,7 @@ static int ins_complete(int c, bool enable_pum)
       compl_col += startcol;
       compl_length = (int)curs_col - startcol;
       compl_pattern = addstar(line + compl_col, compl_length, EXPAND_FILES);
-    } else if (ctrl_x_mode == CTRL_X_CMDLINE) {
+    } else if (ctrl_x_mode == CTRL_X_CMDLINE || ctrl_x_mode == CTRL_X_CMDLINE_CTRL_X) {
       compl_pattern = vim_strnsave(line, curs_col);
       set_cmd_context(&compl_xp, compl_pattern,
                       (int)STRLEN(compl_pattern), curs_col, false);
@@ -5211,11 +5246,9 @@ static int ins_complete(int c, bool enable_pum)
         return FAIL;
       }
 
-      /*
-       * Reset extended parameters of completion, when start new
-       * completion.
-       */
-      compl_opt_refresh_always = FALSE;
+      // Reset extended parameters of completion, when start new
+      // completion.
+      compl_opt_refresh_always = false;
 
       if (col < 0) {
         col = curs_col;
@@ -5496,8 +5529,8 @@ int get_literal(void)
   int cc;
   int nc;
   int i;
-  int hex = FALSE;
-  int octal = FALSE;
+  bool hex = false;
+  bool octal = false;
   int unicode = 0;
 
   if (got_int) {
@@ -5514,9 +5547,9 @@ int get_literal(void)
       add_to_showcmd(nc);
     }
     if (nc == 'x' || nc == 'X') {
-      hex = TRUE;
+      hex = true;
     } else if (nc == 'o' || nc == 'O') {
-      octal = TRUE;
+      octal = true;
     } else if (nc == 'u' || nc == 'U') {
       unicode = nc;
     } else {
@@ -6293,7 +6326,7 @@ void auto_format(bool trailblank, bool prev_line)
   /* With the 'c' flag in 'formatoptions' and 't' missing: only format
    * comments. */
   if (has_format_option(FO_WRAP_COMS) && !has_format_option(FO_WRAP)
-      && get_leader_len(old, NULL, FALSE, TRUE) == 0) {
+      && get_leader_len(old, NULL, false, true) == 0) {
     return;
   }
 
@@ -6442,7 +6475,8 @@ static void start_arrow(pos_T *end_insert_pos)
 }
 
 /// Like start_arrow() but with end_change argument.
-/// Will prepare for redo of CTRL-G U if "end_change" is FALSE.
+/// Will prepare for redo of CTRL-G U if "end_change" is false.
+///
 /// @param end_insert_pos  can be NULL
 /// @param end_change      end undoable change
 static void start_arrow_with_change(pos_T *end_insert_pos, bool end_change)
@@ -6487,7 +6521,7 @@ static void check_spell_redraw(void)
 static void spell_back_to_badword(void)
 {
   pos_T tpos = curwin->w_cursor;
-  spell_bad_len = spell_move_to(curwin, BACKWARD, TRUE, TRUE, NULL);
+  spell_bad_len = spell_move_to(curwin, BACKWARD, true, true, NULL);
   if (curwin->w_cursor.col != tpos.col) {
     start_arrow(&tpos);
   }
@@ -6505,7 +6539,7 @@ int stop_arrow(void)
     if (Insstart.col > Insstart_orig.col && !ins_need_undo) {
       // Don't update the original insert position when moved to the
       // right, except when nothing was inserted yet.
-      update_Insstart_orig = FALSE;
+      update_Insstart_orig = false;
     }
     Insstart_textlen = (colnr_T)linetabsize(get_cursor_line_ptr());
 
@@ -7347,7 +7381,7 @@ bool in_cinkeys(int keytyped, int when, bool line_is_empty)
   int try_match_word;
   char_u *p;
   char_u *line;
-  int icase;
+  bool icase;
 
   if (keytyped == NUL) {
     // Can happen with CTRL-Y and CTRL-E on a short line.
@@ -7475,10 +7509,10 @@ bool in_cinkeys(int keytyped, int when, bool line_is_empty)
     else if (*look == '=' && look[1] != ',' && look[1] != NUL) {
       ++look;
       if (*look == '~') {
-        icase = TRUE;
-        ++look;
+        icase = true;
+        look++;
       } else {
-        icase = FALSE;
+        icase = false;
       }
       p = vim_strchr(look, ',');
       if (p == NULL) {
@@ -7635,7 +7669,7 @@ int hkmap(int c)
 
 static void ins_reg(void)
 {
-  int need_redraw = FALSE;
+  bool need_redraw = false;
   int regname;
   int literally = 0;
   int vis_active = VIsual_active;
@@ -7747,14 +7781,14 @@ static void ins_ctrl_g(void)
   case K_UP:
   case Ctrl_K:
   case 'k':
-    ins_up(TRUE);
+    ins_up(true);
     break;
 
   // CTRL-G j and CTRL-G <Down>: cursor down to Insstart.col
   case K_DOWN:
   case Ctrl_J:
   case 'j':
-    ins_down(TRUE);
+    ins_down(true);
     break;
 
   // CTRL-G u: start new undoable edit
@@ -8311,7 +8345,7 @@ static bool ins_bs(int c, int mode, int *inserted_space_p)
       getvcol(curwin, &curwin->w_cursor, NULL, NULL, &want_vcol);
       inc_cursor();
       if (p_sta && in_indent) {
-        ts = (int)get_sw_value(curbuf);
+        ts = get_sw_value(curbuf);
         want_vcol = (want_vcol / ts) * ts;
       } else {
         want_vcol = tabstop_start(want_vcol,
@@ -8504,7 +8538,7 @@ static void ins_mousescroll(int dir)
     if (dir == MSCR_DOWN || dir == MSCR_UP) {
       if (mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL)) {
         scroll_redraw(dir,
-                      (long)(curwin->w_botline - curwin->w_topline));
+                      (curwin->w_botline - curwin->w_topline));
       } else {
         scroll_redraw(dir, 3L);
       }
@@ -8818,7 +8852,7 @@ static bool ins_tab(void)
   AppendToRedobuff("\t");
 
   if (p_sta && ind) {  // insert tab in indent, use 'shiftwidth'
-    temp = (int)get_sw_value(curbuf);
+    temp = get_sw_value(curbuf);
     temp -= get_nolist_virtcol() % temp;
   } else if (tabstop_count(curbuf->b_p_vsts_array) > 0
              || curbuf->b_p_sts != 0) {
@@ -9193,7 +9227,7 @@ static void ins_try_si(int c)
   pos_T *pos, old_pos;
   char_u *ptr;
   int i;
-  int temp;
+  bool temp;
 
   /*
    * do some very smart indenting when entering '{' or '}'
@@ -9230,11 +9264,9 @@ static void ins_try_si(int c)
         (void)set_indent(i, SIN_CHANGED);
       }
     } else if (curwin->w_cursor.col > 0) {
-      /*
-       * when inserting '{' after "O" reduce indent, but not
-       * more than indent of previous line
-       */
-      temp = TRUE;
+      // when inserting '{' after "O" reduce indent, but not
+      // more than indent of previous line
+      temp = true;
       if (c == '{' && can_si_back && curwin->w_cursor.lnum > 1) {
         old_pos = curwin->w_cursor;
         i = get_indent();
@@ -9247,7 +9279,7 @@ static void ins_try_si(int c)
           }
         }
         if (get_indent() >= i) {
-          temp = FALSE;
+          temp = false;
         }
         curwin->w_cursor = old_pos;
       }

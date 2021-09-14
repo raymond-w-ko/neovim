@@ -398,6 +398,7 @@ let s:filename_checks = {
     \ 'psf': ['file.psf'],
     \ 'psl': ['file.psl'],
     \ 'puppet': ['file.pp'],
+    \ 'pyret': ['file.arr'],
     \ 'pyrex': ['file.pyx', 'file.pxd'],
     \ 'python': ['file.py', 'file.pyw', '.pythonstartup', '.pythonrc', 'file.ptl', 'file.pyi', 'SConstruct'],
     \ 'quake': ['anybaseq2/file.cfg', 'anyid1/file.cfg', 'quake3/file.cfg', 'baseq2/file.cfg', 'id1/file.cfg', 'quake1/file.cfg', 'some-baseq2/file.cfg', 'some-id1/file.cfg', 'some-quake1/file.cfg'],
@@ -429,7 +430,7 @@ let s:filename_checks = {
     \ 'sather': ['file.sa'],
     \ 'sbt': ['file.sbt'],
     \ 'scala': ['file.scala', 'file.sc'],
-    \ 'scheme': ['file.scm', 'file.ss', 'file.rkt'],
+    \ 'scheme': ['file.scm', 'file.ss', 'file.rkt', 'file.rktd', 'file.rktl'],
     \ 'scilab': ['file.sci', 'file.sce'],
     \ 'screen': ['.screenrc', 'screenrc'],
     \ 'sexplib': ['file.sexp'],
@@ -867,16 +868,6 @@ func Test_m_file()
   call assert_equal('octave', &filetype)
   bwipe!
 
-  call writefile(['#{', 'Octave block comment',  '#}'], 'Xfile.m')
-  split Xfile.m
-  call assert_equal('octave', &filetype)
-  bwipe!
-
-  call writefile(['%{', 'Octave block comment', '%}'], 'Xfile.m')
-  split Xfile.m
-  call assert_equal('octave', &filetype)
-  bwipe!
-
   call writefile(['%!test "Octave test"'], 'Xfile.m')
   split Xfile.m
   call assert_equal('octave', &filetype)
@@ -887,7 +878,7 @@ func Test_m_file()
   call assert_equal('octave', &filetype)
   bwipe!
 
-  call writefile(['function test(); 42; endfunction'], 'Xfile.m')
+  call writefile(['try; 42; end_try_catch'], 'Xfile.m')
   split Xfile.m
   call assert_equal('octave', &filetype)
   bwipe!
@@ -897,6 +888,13 @@ func Test_m_file()
   call writefile(['(* Mathematica comment'], 'Xfile.m')
   split Xfile.m
   call assert_equal('mma', &filetype)
+  bwipe!
+
+  " MATLAB
+
+  call writefile(['% MATLAB line comment'], 'Xfile.m')
+  split Xfile.m
+  call assert_equal('matlab', &filetype)
   bwipe!
 
   " Murphi

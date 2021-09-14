@@ -737,6 +737,37 @@ void win_config_float(win_T *wp, FloatConfig fconfig)
     redraw_later(wp, NOT_VALID);
   }
 
+  // compute initial position
+  if (wp->w_float_config.relative == kFloatRelativeWindow) {
+    int row = wp->w_float_config.row;
+    int col = wp->w_float_config.col;
+    Error dummy = ERROR_INIT;
+    win_T *parent = find_window_by_handle(wp->w_float_config.window, &dummy);
+    if (parent) {
+      row += parent->w_winrow;
+      col += parent->w_wincol;
+      ScreenGrid *grid = &parent->w_grid;
+      int row_off = 0, col_off = 0;
+      screen_adjust_grid(&grid, &row_off, &col_off);
+      row += row_off;
+      col += col_off;
+    }
+    api_clear_error(&dummy);
+    if (wp->w_float_config.bufpos.lnum >= 0) {
+      pos_T pos = { wp->w_float_config.bufpos.lnum + 1,
+                    wp->w_float_config.bufpos.col, 0 };
+      int trow, tcol, tcolc, tcole;
+      textpos2screenpos(wp, &pos, &trow, &tcol, &tcolc, &tcole, true);
+      row += trow - 1;
+      col += tcol - 1;
+    }
+    wp->w_winrow = row;
+    wp->w_wincol = col;
+  } else {
+    wp->w_winrow = fconfig.row;
+    wp->w_wincol = fconfig.col;
+  }
+
   // changing border style while keeping border only requires redrawing border
   if (fconfig.border) {
     wp->w_redr_border = true;
@@ -769,7 +800,6 @@ int win_fdccol_count(win_T *wp)
     return fdc[0] - '0';
   }
 }
-
 
 void ui_ext_win_position(win_T *wp)
 {
@@ -817,6 +847,8 @@ void ui_ext_win_position(win_T *wp)
 
       int comp_row = (int)row - (south ? wp->w_height : 0);
       int comp_col = (int)col - (east ? wp->w_width : 0);
+      comp_row += grid->comp_row;
+      comp_col += grid->comp_col;
       comp_row = MAX(MIN(comp_row, Rows-wp->w_height_outer-1), 0);
       comp_col = MAX(MIN(comp_col, Columns-wp->w_width_outer), 0);
       wp->w_winrow = comp_row;
@@ -840,14 +872,15 @@ void ui_ext_win_viewport(win_T *wp)
 {
   if ((wp == curwin || ui_has(kUIMultigrid)) && wp->w_viewport_invalid) {
     int botline = wp->w_botline;
-    if (botline == wp->w_buffer->b_ml.ml_line_count+1
-        && wp->w_empty_rows == 0) {
+    int line_count = wp->w_buffer->b_ml.ml_line_count;
+    if (botline == line_count+1 && wp->w_empty_rows == 0) {
       // TODO(bfredl): The might be more cases to consider, like how does this
       // interact with incomplete final line? Diff filler lines?
       botline = wp->w_buffer->b_ml.ml_line_count;
     }
     ui_call_win_viewport(wp->w_grid_alloc.handle, wp->handle, wp->w_topline-1,
-                         botline, wp->w_cursor.lnum-1, wp->w_cursor.col);
+                         botline, wp->w_cursor.lnum-1, wp->w_cursor.col,
+                         line_count);
     wp->w_viewport_invalid = false;
   }
 }
@@ -2426,7 +2459,7 @@ int win_close(win_T *win, bool free_buf)
     if (wp->w_buffer != curbuf) {
       other_buffer = true;
       win->w_closing = true;
-      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, FALSE, curbuf);
+      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, false, curbuf);
       if (!win_valid(win)) {
         return FAIL;
       }
@@ -3926,16 +3959,16 @@ static int leave_tabpage(buf_T *new_curbuf, bool trigger_leave_autocmds)
   reset_VIsual_and_resel();     // stop Visual mode
   if (trigger_leave_autocmds) {
     if (new_curbuf != curbuf) {
-      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, FALSE, curbuf);
+      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, false, curbuf);
       if (curtab != tp) {
         return FAIL;
       }
     }
-    apply_autocmds(EVENT_WINLEAVE, NULL, NULL, FALSE, curbuf);
+    apply_autocmds(EVENT_WINLEAVE, NULL, NULL, false, curbuf);
     if (curtab != tp) {
       return FAIL;
     }
-    apply_autocmds(EVENT_TABLEAVE, NULL, NULL, FALSE, curbuf);
+    apply_autocmds(EVENT_TABLEAVE, NULL, NULL, false, curbuf);
     if (curtab != tp) {
       return FAIL;
     }
@@ -4011,9 +4044,9 @@ static void enter_tabpage(tabpage_T *tp, buf_T *old_curbuf, bool trigger_enter_a
   /* Apply autocommands after updating the display, when 'rows' and
    * 'columns' have been set correctly. */
   if (trigger_enter_autocmds) {
-    apply_autocmds(EVENT_TABENTER, NULL, NULL, FALSE, curbuf);
+    apply_autocmds(EVENT_TABENTER, NULL, NULL, false, curbuf);
     if (old_curbuf != curbuf) {
-      apply_autocmds(EVENT_BUFENTER, NULL, NULL, FALSE, curbuf);
+      apply_autocmds(EVENT_BUFENTER, NULL, NULL, false, curbuf);
     }
   }
 
@@ -4439,7 +4472,7 @@ void win_enter(win_T *wp, bool undo_sync)
 static void win_enter_ext(win_T *wp, bool undo_sync, bool curwin_invalid, bool trigger_new_autocmds,
                           bool trigger_enter_autocmds, bool trigger_leave_autocmds)
 {
-  int other_buffer = FALSE;
+  bool other_buffer = false;
 
   if (wp == curwin && !curwin_invalid) {        // nothing to do
     return;
@@ -4450,13 +4483,13 @@ static void win_enter_ext(win_T *wp, bool undo_sync, bool curwin_invalid, bool t
      * Be careful: If autocommands delete the window, return now.
      */
     if (wp->w_buffer != curbuf) {
-      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, FALSE, curbuf);
-      other_buffer = TRUE;
+      apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, false, curbuf);
+      other_buffer = true;
       if (!win_valid(wp)) {
         return;
       }
     }
-    apply_autocmds(EVENT_WINLEAVE, NULL, NULL, FALSE, curbuf);
+    apply_autocmds(EVENT_WINLEAVE, NULL, NULL, false, curbuf);
     if (!win_valid(wp)) {
       return;
     }

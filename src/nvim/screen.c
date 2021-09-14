@@ -385,7 +385,7 @@ int update_screen(int type)
       // non-displayed part of msg_grid is considered invalid.
       for (int i = 0; i < MIN(msg_scrollsize(), msg_grid.Rows); i++) {
         grid_clear_line(&msg_grid, msg_grid.line_offset[i],
-                        (int)msg_grid.Columns, false);
+                        msg_grid.Columns, false);
       }
     }
     if (msg_use_msgsep()) {
@@ -504,7 +504,7 @@ int update_screen(int type)
   }
 
   if (clear_cmdline) {          // going to clear cmdline (done below)
-    check_for_delay(FALSE);
+    check_for_delay(false);
   }
 
   /* Force redraw when width of 'number' or 'relativenumber' column
@@ -2037,14 +2037,13 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
   int tocol = MAXCOL;                   // end of inverting
   int fromcol_prev = -2;                // start of inverting after cursor
   bool noinvcur = false;                // don't invert the cursor
-  int lnum_in_visual_area = false;
+  bool lnum_in_visual_area = false;
   pos_T pos;
   long v;
 
   int char_attr = 0;                    // attributes for next character
-  int attr_pri = FALSE;                 // char_attr has priority
-  int area_highlighting = FALSE;           /* Visual or incsearch highlighting
-                                              in this line */
+  bool attr_pri = false;                // char_attr has priority
+  bool area_highlighting = false;       // Visual or incsearch highlighting in this line
   int attr = 0;                         // attributes for area highlighting
   int area_attr = 0;                    // attributes desired by highlighting
   int search_attr = 0;                  // attributes desired by 'hlsearch'
@@ -2363,7 +2362,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
       diff_hlf = HLF_ADD;               // added line
     }
     filler_lines = 0;
-    area_highlighting = TRUE;
+    area_highlighting = true;
   }
   if (lnum == wp->w_topline) {
     filler_lines = wp->w_topfill;
@@ -2559,7 +2558,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
       pos = wp->w_cursor;
       wp->w_cursor.lnum = lnum;
       wp->w_cursor.col = linecol;
-      len = spell_move_to(wp, FORWARD, TRUE, TRUE, &spell_hlf);
+      len = spell_move_to(wp, FORWARD, true, true, &spell_hlf);
 
       // spell_move_to() may call ml_get() and make "line" invalid
       line = ml_get_buf(wp->w_buffer, lnum, false);
@@ -2628,7 +2627,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
     shl->endcol = MAXCOL;
     shl->attr_cur = 0;
     shl->is_addpos = false;
-    v = (long)(ptr - line);
+    v = (ptr - line);
     if (cur != NULL) {
       cur->pos.cur = 0;
     }
@@ -2850,7 +2849,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
       }
 
       if (wp->w_briopt_sbr && draw_state == WL_BRI - 1
-          && n_extra == 0 && *p_sbr != NUL) {
+          && n_extra == 0 && *get_showbreak_value(wp) != NUL) {
         // draw indent after showbreak value
         draw_state = WL_BRI;
       } else if (wp->w_briopt_sbr && draw_state == WL_SBR && n_extra == 0) {
@@ -2909,19 +2908,20 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
           }
           char_attr = win_hl_attr(wp, HLF_DED);
         }
-        if (*p_sbr != NUL && need_showbreak) {
+        char_u *const sbr = get_showbreak_value(wp);
+        if (*sbr != NUL && need_showbreak) {
           // Draw 'showbreak' at the start of each broken line.
-          p_extra = p_sbr;
+          p_extra = sbr;
           c_extra = NUL;
           c_final = NUL;
-          n_extra = (int)STRLEN(p_sbr);
+          n_extra = (int)STRLEN(sbr);
           char_attr = win_hl_attr(wp, HLF_AT);
           if (wp->w_skipcol == 0 || !wp->w_p_wrap) {
             need_showbreak = false;
           }
-          vcol_sbr = vcol + MB_CHARLEN(p_sbr);
-          /* Correct end of highlighted area for 'showbreak',
-           * required when 'linebreak' is also set. */
+          vcol_sbr = vcol + MB_CHARLEN(sbr);
+          // Correct end of highlighted area for 'showbreak',
+          // required when 'linebreak' is also set.
           if (tocol == vcol) {
             tocol += n_extra;
           }
@@ -3061,7 +3061,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
          * Do this for 'search_hl' and the match list (ordered by
          * priority).
          */
-        v = (long)(ptr - line);
+        v = (ptr - line);
         cur = wp->w_match_head;
         shl_flag = false;
         while (cur != NULL || !shl_flag) {
@@ -3405,7 +3405,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
 
         /* Get syntax attribute, unless still at the start of the line
          * (double-wide char that doesn't fit). */
-        v = (long)(ptr - line);
+        v = (ptr - line);
         if (has_syntax && v > 0) {
           /* Get the syntax attribute for the character.  If there
            * is an error, disable syntax highlighting. */
@@ -3453,7 +3453,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
          * Only do this when there is no syntax highlighting, the
          * @Spell cluster is not used or the current syntax item
          * contains the @Spell cluster. */
-        v = (long)(ptr - line);
+        v = (ptr - line);
         if (has_spell && v >= word_end && v > cur_checked_col) {
           spell_attr = 0;
           if (!attr_pri) {
@@ -3553,6 +3553,16 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
           char_u *p = ptr - (mb_off + 1);
           // TODO: is passing p for start of the line OK?
           n_extra = win_lbr_chartabsize(wp, line, p, (colnr_T)vcol, NULL) - 1;
+
+          // We have just drawn the showbreak value, no need to add
+          // space for it again.
+          if (vcol == vcol_sbr) {
+            n_extra -= MB_CHARLEN(get_showbreak_value(wp));
+            if (n_extra < 0) {
+              n_extra = 0;
+            }
+          }
+
           if (c == TAB && n_extra + col > grid->Columns) {
             n_extra = tabstop_padding(vcol, wp->w_buffer->b_p_ts,
                                       wp->w_buffer->b_p_vts_array) - 1;
@@ -3619,10 +3629,12 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
         if (c == TAB && (!wp->w_p_list || wp->w_p_lcs_chars.tab1)) {
           int tab_len = 0;
           long vcol_adjusted = vcol;  // removed showbreak length
+          char_u *const sbr = get_showbreak_value(wp);
+
           // Only adjust the tab_len, when at the first column after the
           // showbreak value was drawn.
-          if (*p_sbr != NUL && vcol == vcol_sbr && wp->w_p_wrap) {
-            vcol_adjusted = vcol - MB_CHARLEN(p_sbr);
+          if (*sbr != NUL && vcol == vcol_sbr && wp->w_p_wrap) {
+            vcol_adjusted = vcol - MB_CHARLEN(sbr);
           }
           // tab amount depends on current column
           tab_len = tabstop_padding(vcol_adjusted,
@@ -3932,7 +3944,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
 
     // At end of the text line or just after the last character.
     if (c == NUL && eol_hl_off == 0) {
-      long prevcol = (long)(ptr - line) - 1;
+      long prevcol = (ptr - line) - 1;
 
       // we're not really at that column when skipping some text
       if ((long)(wp->w_p_wrap ? wp->w_skipcol : wp->w_leftcol) > prevcol) {
@@ -6289,11 +6301,9 @@ void grid_fill(ScreenGrid *grid, int start_row, int end_row, int start_col, int 
   }
 }
 
-/*
- * Check if there should be a delay.  Used before clearing or redrawing the
- * screen or the command line.
- */
-void check_for_delay(int check_msg_scroll)
+/// Check if there should be a delay.  Used before clearing or redrawing the
+/// screen or the command line.
+void check_for_delay(bool check_msg_scroll)
 {
   if ((emsg_on_display || (check_msg_scroll && msg_scroll))
       && !did_wait_return
@@ -6477,9 +6487,9 @@ retry:
    * in case applying autocommands always changes Rows or Columns.
    */
   if (starting == 0 && ++retry_count <= 3) {
-    apply_autocmds(EVENT_VIMRESIZED, NULL, NULL, FALSE, curbuf);
-    /* In rare cases, autocommands may have altered Rows or Columns,
-    * jump back to check if we need to allocate the screen again. */
+    apply_autocmds(EVENT_VIMRESIZED, NULL, NULL, false, curbuf);
+    // In rare cases, autocommands may have altered Rows or Columns,
+    // jump back to check if we need to allocate the screen again.
     goto retry;
   }
 
@@ -6587,7 +6597,7 @@ void screenclear(void)
   // blank out the default grid
   for (i = 0; i < default_grid.Rows; i++) {
     grid_clear_line(&default_grid, default_grid.line_offset[i],
-                    (int)default_grid.Columns, true);
+                    default_grid.Columns, true);
     default_grid.line_wraps[i] = false;
   }
 
@@ -6760,7 +6770,7 @@ void grid_ins_lines(ScreenGrid *grid, int row, int line_count, int end, int col,
       }
       grid->line_offset[j + line_count] = temp;
       grid->line_wraps[j + line_count] = false;
-      grid_clear_line(grid, temp, (int)grid->Columns, false);
+      grid_clear_line(grid, temp, grid->Columns, false);
     }
   }
 
@@ -6812,7 +6822,7 @@ void grid_del_lines(ScreenGrid *grid, int row, int line_count, int end, int col,
       }
       grid->line_offset[j - line_count] = temp;
       grid->line_wraps[j - line_count] = false;
-      grid_clear_line(grid, temp, (int)grid->Columns, false);
+      grid_clear_line(grid, temp, grid->Columns, false);
     }
   }
 
@@ -6864,7 +6874,7 @@ int showmode(void)
     bool nwr_save = need_wait_return;
 
     // wait a bit before overwriting an important message
-    check_for_delay(FALSE);
+    check_for_delay(false);
 
     // if the cmdline is more than one line high, erase top lines
     need_clear = clear_cmdline;
@@ -6909,7 +6919,7 @@ int showmode(void)
           }
           if (edit_submode_extra != NULL) {
             MSG_PUTS_ATTR(" ", attr);  // Add a space in between.
-            if ((int)edit_submode_highl < (int)HLF_COUNT) {
+            if ((int)edit_submode_highl < HLF_COUNT) {
               sub_attr = win_hl_attr(curwin, edit_submode_highl);
             } else {
               sub_attr = attr;
