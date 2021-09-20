@@ -9,6 +9,12 @@ M.severity = {
 
 vim.tbl_add_reverse_lookup(M.severity)
 
+-- Mappings from qflist/loclist error types to severities
+M.severity.E = M.severity.ERROR
+M.severity.W = M.severity.WARN
+M.severity.I = M.severity.INFO
+M.severity.N = M.severity.HINT
+
 local global_diagnostic_options = {
   signs = true,
   underline = true,
@@ -375,35 +381,6 @@ local function show_diagnostics(opts, diagnostics)
   return popup_bufnr, winnr
 end
 
-local errlist_type_map = {
-  [M.severity.ERROR] = 'E',
-  [M.severity.WARN] = 'W',
-  [M.severity.INFO] = 'I',
-  [M.severity.HINT] = 'I',
-}
-
----@private
-local function diagnostics_to_list_items(diagnostics)
-  local items = {}
-  for _, d in pairs(diagnostics) do
-    table.insert(items, {
-      bufnr = d.bufnr,
-      lnum = d.lnum + 1,
-      col = d.col + 1,
-      text = d.message,
-      type = errlist_type_map[d.severity or M.severity.ERROR] or 'E'
-    })
-  end
-  table.sort(items, function(a, b)
-    if a.bufnr == b.bufnr then
-      return a.lnum < b.lnum
-    else
-      return a.bufnr < b.bufnr
-    end
-  end)
-  return items
-end
-
 ---@private
 local function set_list(loclist, opts)
   opts = opts or {}
@@ -415,7 +392,7 @@ local function set_list(loclist, opts)
     bufnr = vim.api.nvim_win_get_buf(winnr)
   end
   local diagnostics = M.get(bufnr, opts)
-  local items = diagnostics_to_list_items(diagnostics)
+  local items = M.toqflist(diagnostics)
   if loclist then
     vim.fn.setloclist(winnr, {}, ' ', { title = title, items = items })
   else
@@ -425,6 +402,70 @@ local function set_list(loclist, opts)
     vim.api.nvim_command(loclist and "lopen" or "copen")
   end
 end
+
+---@private
+local function next_diagnostic(position, search_forward, bufnr, opts, namespace)
+  position[1] = position[1] - 1
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local wrap = vim.F.if_nil(opts.wrap, true)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  opts.namespace = namespace
+  for i = 0, line_count do
+    local offset = i * (search_forward and 1 or -1)
+    local lnum = position[1] + offset
+    if lnum < 0 or lnum >= line_count then
+      if not wrap then
+        return
+      end
+      lnum = (lnum + line_count) % line_count
+    end
+    opts.lnum = lnum
+    local line_diagnostics = M.get(bufnr, opts)
+    if line_diagnostics and not vim.tbl_isempty(line_diagnostics) then
+      local sort_diagnostics, is_next
+      if search_forward then
+        sort_diagnostics = function(a, b) return a.col < b.col end
+        is_next = function(diagnostic) return diagnostic.col > position[2] end
+      else
+        sort_diagnostics = function(a, b) return a.col > b.col end
+        is_next = function(diagnostic) return diagnostic.col < position[2] end
+      end
+      table.sort(line_diagnostics, sort_diagnostics)
+      if i == 0 then
+        for _, v in pairs(line_diagnostics) do
+          if is_next(v) then
+            return v
+          end
+        end
+      else
+        return line_diagnostics[1]
+      end
+    end
+  end
+end
+
+---@private
+local function diagnostic_move_pos(opts, pos)
+  opts = opts or {}
+
+  local enable_popup = vim.F.if_nil(opts.enable_popup, true)
+  local win_id = opts.win_id or vim.api.nvim_get_current_win()
+
+  if not pos then
+    vim.api.nvim_echo({{"No more valid diagnostics to move to", "WarningMsg"}}, true, {})
+    return
+  end
+
+  vim.api.nvim_win_set_cursor(win_id, {pos[1] + 1, pos[2]})
+
+  if enable_popup then
+    -- This is a bit weird... I'm surprised that we need to wait til the next tick to do this.
+    vim.schedule(function()
+      M.show_position_diagnostics(opts.popup_opts, vim.api.nvim_win_get_buf(win_id))
+    end)
+  end
+end
+
 
 -- }}}
 
@@ -452,7 +493,9 @@ end
 ---       - update_in_insert: (default false) Update diagnostics in Insert mode (if false,
 ---                           diagnostics are updated on InsertLeave)
 ---       - severity_sort: (default false) Sort diagnostics by severity. This affects the order in
----                         which signs and virtual text are displayed. Options:
+---                         which signs and virtual text are displayed. When true, higher severities
+---                         are displayed before lower severities (e.g. ERROR is displayed before WARN).
+---                         Options:
 ---                         * reverse: (boolean) Reverse sort order
 ---@param namespace number|nil Update the options for the given namespace. When omitted, update the
 ---                            global diagnostic options.
@@ -478,14 +521,16 @@ function M.config(opts, namespace)
 
   if namespace then
     for bufnr, v in pairs(diagnostic_cache) do
-      if v[namespace] then
+      if vim.api.nvim_buf_is_loaded(bufnr) and v[namespace] then
         M.show(namespace, bufnr)
       end
     end
   else
     for bufnr, v in pairs(diagnostic_cache) do
-      for ns in pairs(v) do
-        M.show(ns, bufnr)
+      if vim.api.nvim_buf_is_loaded(bufnr) then
+        for ns in pairs(v) do
+          M.show(ns, bufnr)
+        end
       end
     end
   end
@@ -523,12 +568,10 @@ function M.set(namespace, bufnr, diagnostics, opts)
 
   set_diagnostic_cache(namespace, diagnostics, bufnr)
 
-  if opts then
-    M.config(opts, namespace)
-  end
-
   if vim.api.nvim_buf_is_loaded(bufnr) then
-    M.show(namespace, bufnr)
+    M.show(namespace, bufnr, diagnostics, opts)
+  elseif opts then
+    M.config(opts, namespace)
   end
 
   vim.api.nvim_command("doautocmd <nomodeline> User DiagnosticsChanged")
@@ -592,70 +635,6 @@ function M.get(bufnr, opts)
   end
 
   return diagnostics
-end
-
--- Diagnostic Movements {{{
-
-local next_diagnostic = function(position, search_forward, bufnr, opts, namespace)
-  position[1] = position[1] - 1
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local wrap = vim.F.if_nil(opts.wrap, true)
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  opts.namespace = namespace
-  for i = 0, line_count do
-    local offset = i * (search_forward and 1 or -1)
-    local lnum = position[1] + offset
-    if lnum < 0 or lnum >= line_count then
-      if not wrap then
-        return
-      end
-      lnum = (lnum + line_count) % line_count
-    end
-    opts.lnum = lnum
-    local line_diagnostics = M.get(bufnr, opts)
-    if line_diagnostics and not vim.tbl_isempty(line_diagnostics) then
-      local sort_diagnostics, is_next
-      if search_forward then
-        sort_diagnostics = function(a, b) return a.col < b.col end
-        is_next = function(diagnostic) return diagnostic.col > position[2] end
-      else
-        sort_diagnostics = function(a, b) return a.col > b.col end
-        is_next = function(diagnostic) return diagnostic.col < position[2] end
-      end
-      table.sort(line_diagnostics, sort_diagnostics)
-      if i == 0 then
-        for _, v in pairs(line_diagnostics) do
-          if is_next(v) then
-            return v
-          end
-        end
-      else
-        return line_diagnostics[1]
-      end
-    end
-  end
-end
-
----@private
-local function diagnostic_move_pos(opts, pos)
-  opts = opts or {}
-
-  local enable_popup = vim.F.if_nil(opts.enable_popup, true)
-  local win_id = opts.win_id or vim.api.nvim_get_current_win()
-
-  if not pos then
-    vim.api.nvim_echo({{"No more valid diagnostics to move to", "WarningMsg"}}, true, {})
-    return
-  end
-
-  vim.api.nvim_win_set_cursor(win_id, {pos[1] + 1, pos[2]})
-
-  if enable_popup then
-    -- This is a bit weird... I'm surprised that we need to wait til the next tick to do this.
-    vim.schedule(function()
-      M.show_position_diagnostics(opts.popup_opts, vim.api.nvim_win_get_buf(win_id))
-    end)
-  end
 end
 
 --- Get the previous diagnostic closest to the cursor position.
@@ -998,9 +977,9 @@ function M.show(namespace, bufnr, diagnostics, opts)
 
   if vim.F.if_nil(opts.severity_sort, false) then
     if type(opts.severity_sort) == "table" and opts.severity_sort.reverse then
-      table.sort(diagnostics, function(a, b) return a.severity > b.severity end)
-    else
       table.sort(diagnostics, function(a, b) return a.severity < b.severity end)
+    else
+      table.sort(diagnostics, function(a, b) return a.severity > b.severity end)
     end
   end
 
@@ -1071,6 +1050,7 @@ function M.show_line_diagnostics(opts, bufnr, lnum)
   opts = opts or {}
   opts.focus_id = "line_diagnostics"
   opts.lnum = lnum or (vim.api.nvim_win_get_cursor(0)[1] - 1)
+  bufnr = get_bufnr(bufnr)
   local line_diagnostics = M.get(bufnr, opts)
   return show_diagnostics(opts, line_diagnostics)
 end
@@ -1165,7 +1145,134 @@ function M.enable(bufnr, namespace)
   end
 end
 
--- }}}
+--- Parse a diagnostic from a string.
+---
+--- For example, consider a line of output from a linter:
+--- <pre>
+--- WARNING filename:27:3: Variable 'foo' does not exist
+--- </pre>
+--- This can be parsed into a diagnostic |diagnostic-structure|
+--- with:
+--- <pre>
+--- local s = "WARNING filename:27:3: Variable 'foo' does not exist"
+--- local pattern = "^(%w+) %w+:(%d+):(%d+): (.+)$"
+--- local groups = {"severity", "lnum", "col", "message"}
+--- vim.diagnostic.match(s, pattern, groups, {WARNING = vim.diagnostic.WARN})
+--- </pre>
+---
+---@param str string String to parse diagnostics from.
+---@param pat string Lua pattern with capture groups.
+---@param groups table List of fields in a |diagnostic-structure| to
+---                    associate with captures from {pat}.
+---@param severity_map table A table mapping the severity field from {groups}
+---                          with an item from |vim.diagnostic.severity|.
+---@param defaults table|nil Table of default values for any fields not listed in {groups}.
+---                          When omitted, numeric values default to 0 and "severity" defaults to
+---                          ERROR.
+---@return diagnostic |diagnostic-structure| or `nil` if {pat} fails to match {str}.
+function M.match(str, pat, groups, severity_map, defaults)
+  vim.validate {
+    str = { str, 's' },
+    pat = { pat, 's' },
+    groups = { groups, 't' },
+    severity_map = { severity_map, 't', true },
+    defaults = { defaults, 't', true },
+  }
 
+  severity_map = severity_map or M.severity
+
+  local diagnostic = {}
+  local matches = {string.match(str, pat)}
+  if vim.tbl_isempty(matches) then
+    return
+  end
+
+  for i, match in ipairs(matches) do
+    local field = groups[i]
+    if field == "severity" then
+      match = severity_map[match]
+    elseif field == "lnum" or field == "end_lnum" or field == "col" or field == "end_col" then
+      match = assert(tonumber(match)) - 1
+    end
+    diagnostic[field] = match
+  end
+
+  diagnostic = vim.tbl_extend("keep", diagnostic, defaults or {})
+  diagnostic.severity = diagnostic.severity or M.severity.ERROR
+  diagnostic.col = diagnostic.col or 0
+  diagnostic.end_lnum = diagnostic.end_lnum or diagnostic.lnum
+  diagnostic.end_col = diagnostic.end_col or diagnostic.col
+  return diagnostic
+end
+
+local errlist_type_map = {
+  [M.severity.ERROR] = 'E',
+  [M.severity.WARN] = 'W',
+  [M.severity.INFO] = 'I',
+  [M.severity.HINT] = 'N',
+}
+
+--- Convert a list of diagnostics to a list of quickfix items that can be
+--- passed to |setqflist()| or |setloclist()|.
+---
+---@param diagnostics table List of diagnostics |diagnostic-structure|.
+---@return array of quickfix list items |setqflist-what|
+function M.toqflist(diagnostics)
+  vim.validate { diagnostics = {diagnostics, 't'} }
+
+  local list = {}
+  for _, v in ipairs(diagnostics) do
+    local item = {
+      bufnr = v.bufnr,
+      lnum = v.lnum + 1,
+      col = v.col and (v.col + 1) or nil,
+      end_lnum = v.end_lnum and (v.end_lnum + 1) or nil,
+      end_col = v.end_col and (v.end_col + 1) or nil,
+      text = v.message,
+      type = errlist_type_map[v.severity] or 'E',
+    }
+    table.insert(list, item)
+  end
+  table.sort(list, function(a, b)
+    if a.bufnr == b.bufnr then
+      return a.lnum < b.lnum
+    else
+      return a.bufnr < b.bufnr
+    end
+  end)
+  return list
+end
+
+--- Convert a list of quickfix items to a list of diagnostics.
+---
+---@param list table A list of quickfix items from |getqflist()| or
+---            |getloclist()|.
+---@return array of diagnostics |diagnostic-structure|
+function M.fromqflist(list)
+  vim.validate { list = {list, 't'} }
+
+  local diagnostics = {}
+  for _, item in ipairs(list) do
+    if item.valid == 1 then
+      local lnum = math.max(0, item.lnum - 1)
+      local col = item.col > 0 and (item.col - 1) or nil
+      local end_lnum = item.end_lnum > 0 and (item.end_lnum - 1) or lnum
+      local end_col = item.end_col > 0 and (item.end_col - 1) or col
+      local severity = item.type ~= "" and M.severity[item.type] or M.severity.ERROR
+      table.insert(diagnostics, {
+        bufnr = item.bufnr,
+        lnum = lnum,
+        col = col,
+        end_lnum = end_lnum,
+        end_col = end_col,
+        severity = severity,
+        message = item.text,
+      })
+    end
+  end
+  return diagnostics
+end
+
+-- }}}
 
 return M
