@@ -703,8 +703,6 @@ void terminal_get_line_attributes(Terminal *term, win_T *wp, int linenr,
     int hl_attrs = (cell.attrs.bold ? HL_BOLD : 0)
                  | (cell.attrs.italic ? HL_ITALIC : 0)
                  | (cell.attrs.reverse ? HL_INVERSE : 0)
-                 | (cell.attrs.underline ? HL_UNDERLINE : 0)
-                 | (cell.attrs.strike ? HL_STRIKETHROUGH: 0)
                  | ((fg_indexed && !fg_set) ? HL_FG_INDEXED : 0)
                  | ((bg_indexed && !bg_set) ? HL_BG_INDEXED : 0);
 
