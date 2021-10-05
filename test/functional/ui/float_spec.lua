@@ -46,6 +46,7 @@ describe('float window', function()
     [24] = {foreground = Screen.colors.Black, background = Screen.colors.Grey80};
     [25] = {blend = 100, background = Screen.colors.Gray0};
     [26] = {blend = 80, background = Screen.colors.Gray0};
+    [27] = {background = Screen.colors.LightGray};
   }
 
   it('behavior', function()
@@ -105,6 +106,21 @@ describe('float window', function()
         end
         crashes{'foo'}
         crashes{'bar'}
+    ]]))
+    assert_alive()
+  end)
+
+  it('closed immediately by autocmd after win_enter #15548', function()
+    eq('Error executing lua: [string "<nvim>"]:0: Window was closed immediately',
+      pcall_err(exec_lua, [[
+        vim.cmd "autocmd BufLeave * ++once quit!"
+        local buf = vim.api.nvim_create_buf(true, true)
+        vim.api.nvim_open_win(buf, true, {
+          relative = "win",
+          row = 0, col = 0,
+          width = 1, height = 1,
+          noautocmd = false,
+        })
     ]]))
     assert_alive()
   end)
@@ -1514,7 +1530,7 @@ describe('float window', function()
 
     it('API has proper error messages', function()
       local buf = meths.create_buf(false,false)
-      eq("Invalid key 'bork'",
+      eq("Invalid key: 'bork'",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,bork=true}))
       eq("'win' key is only valid with relative='win'",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor',row=0,col=0,win=0}))
@@ -1527,13 +1543,15 @@ describe('float window', function()
       eq("'relative' requires 'row'/'col' or 'bufpos'",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor'}))
       eq("'width' key must be a positive Integer",
-         pcall_err(meths.open_win,buf, false, {width=-1,height=2,relative='editor'}))
+         pcall_err(meths.open_win,buf, false, {width=-1,height=2,relative='editor', row=0, col=0}))
       eq("'height' key must be a positive Integer",
-         pcall_err(meths.open_win,buf, false, {width=20,height=-1,relative='editor'}))
+         pcall_err(meths.open_win,buf, false, {width=20,height=-1,relative='editor', row=0, col=0}))
       eq("'height' key must be a positive Integer",
-         pcall_err(meths.open_win,buf, false, {width=20,height=0,relative='editor'}))
-      eq("Must specify 'width' and 'height'",
-         pcall_err(meths.open_win,buf, false, {relative='editor'}))
+         pcall_err(meths.open_win,buf, false, {width=20,height=0,relative='editor', row=0, col=0}))
+      eq("Must specify 'width'",
+         pcall_err(meths.open_win,buf, false, {relative='editor', row=0, col=0}))
+      eq("Must specify 'height'",
+         pcall_err(meths.open_win,buf, false, {relative='editor', row=0, col=0, width=2}))
     end)
 
     it('can be placed relative window or cursor', function()
@@ -6155,6 +6173,132 @@ describe('float window', function()
         ]], float_pos=expected_pos}
         end
       end)
+    end)
+
+    it("left drag changes visual selection in float window", function()
+      local buf = meths.create_buf(false,false)
+      meths.buf_set_lines(buf, 0, -1, true, {'foo', 'bar'})
+      meths.open_win(buf, false, {relative='editor', width=20, height=3, row=2, col=5})
+      if multigrid then
+        screen:expect{grid=[[
+        ## grid 1
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [3:----------------------------------------]|
+        ## grid 2
+          ^                                        |
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+        ## grid 3
+                                                  |
+        ## grid 5
+          {1:foo                 }|
+          {1:bar                 }|
+          {2:~                   }|
+        ]], float_pos={
+          [5] = {{id = 1002}, "NW", 1, 2, 5, true, 50};
+        }, win_viewport={
+          [2] = {win = {id = 1000}, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1};
+          [5] = {win = {id = 1002}, topline = 0, botline = 3, curline = 0, curcol = 0, linecount = 2};
+        }}
+        meths.input_mouse('left', 'press', '', 5, 0, 0)
+        screen:expect{grid=[[
+        ## grid 1
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [3:----------------------------------------]|
+        ## grid 2
+                                                  |
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+        ## grid 3
+                                                  |
+        ## grid 5
+          {1:^foo                 }|
+          {1:bar                 }|
+          {2:~                   }|
+        ]], float_pos={
+          [5] = {{id = 1002}, "NW", 1, 2, 5, true, 50};
+        }, win_viewport={
+          [2] = {win = {id = 1000}, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1};
+          [5] = {win = {id = 1002}, topline = 0, botline = 3, curline = 0, curcol = 0, linecount = 2};
+        }}
+        meths.input_mouse('left', 'drag', '', 5, 1, 2)
+        screen:expect{grid=[[
+        ## grid 1
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [2:----------------------------------------]|
+          [3:----------------------------------------]|
+        ## grid 2
+                                                  |
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+          {0:~                                       }|
+        ## grid 3
+          {3:-- VISUAL --}                            |
+        ## grid 5
+          {27:foo}{1:                 }|
+          {27:ba}{1:^r                 }|
+          {2:~                   }|
+        ]], float_pos={
+          [5] = {{id = 1002}, "NW", 1, 2, 5, true, 50};
+        }, win_viewport={
+          [2] = {win = {id = 1000}, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1};
+          [5] = {win = {id = 1002}, topline = 0, botline = 3, curline = 1, curcol = 2, linecount = 2};
+        }}
+      else
+        screen:expect{grid=[[
+          ^                                        |
+          {0:~                                       }|
+          {0:~    }{1:foo                 }{0:               }|
+          {0:~    }{1:bar                 }{0:               }|
+          {0:~    }{2:~                   }{0:               }|
+          {0:~                                       }|
+                                                  |
+        ]]}
+
+        meths.input_mouse('left', 'press', '', 0, 2, 5)
+        screen:expect{grid=[[
+                                                  |
+          {0:~                                       }|
+          {0:~    }{1:^foo                 }{0:               }|
+          {0:~    }{1:bar                 }{0:               }|
+          {0:~    }{2:~                   }{0:               }|
+          {0:~                                       }|
+                                                  |
+        ]]}
+
+        meths.input_mouse('left', 'drag', '', 0, 3, 7)
+        screen:expect{grid=[[
+                                                  |
+          {0:~                                       }|
+          {0:~    }{27:foo}{1:                 }{0:               }|
+          {0:~    }{27:ba}{1:^r                 }{0:               }|
+          {0:~    }{2:~                   }{0:               }|
+          {0:~                                       }|
+          {3:-- VISUAL --}                            |
+        ]]}
+      end
     end)
 
     it("'winblend' option", function()

@@ -59,7 +59,6 @@
 #endif
 
 void api_vim_free_all_mem(void)
-  FUNC_API_NOEXPORT
 {
   String name;
   handle_T id;
@@ -264,7 +263,6 @@ void nvim__set_hl_ns(Integer ns_id, Error *err)
 }
 
 static void on_redraw_event(void **argv)
-  FUNC_API_NOEXPORT
 {
   redraw_all_later(NOT_VALID);
 }
@@ -1221,7 +1219,7 @@ fail:
 /// buffer in a configured window before calling this. For instance, for a
 /// floating display, first create an empty buffer using |nvim_create_buf()|,
 /// then display it using |nvim_open_win()|, and then  call this function.
-/// Then |nvim_chan_send()| cal be called immediately to process sequences
+/// Then |nvim_chan_send()| can be called immediately to process sequences
 /// in a virtual terminal having the intended size.
 ///
 /// @param buffer the buffer to use (expected to be empty)
@@ -1303,155 +1301,6 @@ void nvim_chan_send(Integer chan, String data, Error *err)
   if (error) {
     api_set_error(err, kErrorTypeValidation, "%s", error);
   }
-}
-
-/// Open a new window.
-///
-/// Currently this is used to open floating and external windows.
-/// Floats are windows that are drawn above the split layout, at some anchor
-/// position in some other window. Floats can be drawn internally or by external
-/// GUI with the |ui-multigrid| extension. External windows are only supported
-/// with multigrid GUIs, and are displayed as separate top-level windows.
-///
-/// For a general overview of floats, see |api-floatwin|.
-///
-/// Exactly one of `external` and `relative` must be specified. The `width` and
-/// `height` of the new window must be specified.
-///
-/// With relative=editor (row=0,col=0) refers to the top-left corner of the
-/// screen-grid and (row=Lines-1,col=Columns-1) refers to the bottom-right
-/// corner. Fractional values are allowed, but the builtin implementation
-/// (used by non-multigrid UIs) will always round down to nearest integer.
-///
-/// Out-of-bounds values, and configurations that make the float not fit inside
-/// the main editor, are allowed. The builtin implementation truncates values
-/// so floats are fully within the main screen grid. External GUIs
-/// could let floats hover outside of the main window like a tooltip, but
-/// this should not be used to specify arbitrary WM screen positions.
-///
-/// Example (Lua): window-relative float
-/// <pre>
-///     vim.api.nvim_open_win(0, false,
-///       {relative='win', row=3, col=3, width=12, height=3})
-/// </pre>
-///
-/// Example (Lua): buffer-relative float (travels as buffer is scrolled)
-/// <pre>
-///     vim.api.nvim_open_win(0, false,
-///       {relative='win', width=12, height=3, bufpos={100,10}})
-/// </pre>
-///
-/// @param buffer Buffer to display, or 0 for current buffer
-/// @param enter  Enter the window (make it the current window)
-/// @param config Map defining the window configuration. Keys:
-///   - `relative`: Sets the window layout to "floating", placed at (row,col)
-///                 coordinates relative to:
-///      - "editor" The global editor grid
-///      - "win"    Window given by the `win` field, or current window.
-///      - "cursor" Cursor position in current window.
-///   - `win`: |window-ID| for relative="win".
-///   - `anchor`: Decides which corner of the float to place at (row,col):
-///      - "NW" northwest (default)
-///      - "NE" northeast
-///      - "SW" southwest
-///      - "SE" southeast
-///   - `width`: Window width (in character cells). Minimum of 1.
-///   - `height`: Window height (in character cells). Minimum of 1.
-///   - `bufpos`: Places float relative to buffer text (only when
-///               relative="win"). Takes a tuple of zero-indexed [line, column].
-///               `row` and `col` if given are applied relative to this
-///               position, else they default to:
-///               - `row=1` and `col=0` if `anchor` is "NW" or "NE"
-///               - `row=0` and `col=0` if `anchor` is "SW" or "SE"
-///               (thus like a tooltip near the buffer text).
-///   - `row`: Row position in units of "screen cell height", may be fractional.
-///   - `col`: Column position in units of "screen cell width", may be
-///            fractional.
-///   - `focusable`: Enable focus by user actions (wincmds, mouse events).
-///       Defaults to true. Non-focusable windows can be entered by
-///       |nvim_set_current_win()|.
-///   - `external`: GUI should display the window as an external
-///       top-level window. Currently accepts no other positioning
-///       configuration together with this.
-///   - `zindex`: Stacking order. floats with higher `zindex` go on top on
-///               floats with lower indices. Must be larger than zero. The
-///               following screen elements have hard-coded z-indices:
-///       - 100: insert completion popupmenu
-///       - 200: message scrollback
-///       - 250: cmdline completion popupmenu (when wildoptions+=pum)
-///     The default value for floats are 50.  In general, values below 100 are
-///     recommended, unless there is a good reason to overshadow builtin
-///     elements.
-///   - `style`: Configure the appearance of the window. Currently only takes
-///       one non-empty value:
-///       - "minimal"  Nvim will display the window with many UI options
-///                    disabled. This is useful when displaying a temporary
-///                    float where the text should not be edited. Disables
-///                    'number', 'relativenumber', 'cursorline', 'cursorcolumn',
-///                    'foldcolumn', 'spell' and 'list' options. 'signcolumn'
-///                    is changed to `auto` and 'colorcolumn' is cleared. The
-///                    end-of-buffer region is hidden by setting `eob` flag of
-///                    'fillchars' to a space char, and clearing the
-///                    |EndOfBuffer| region in 'winhighlight'.
-///   - `border`: Style of (optional) window border. This can either be a string
-///      or an array. The string values are
-///     - "none": No border (default).
-///     - "single": A single line box.
-///     - "double": A double line box.
-///     - "rounded": Like "single", but with rounded corners ("╭" etc.).
-///     - "solid": Adds padding by a single whitespace cell.
-///     - "shadow": A drop shadow effect by blending with the background.
-///     - If it is an array, it should have a length of eight or any divisor of
-///     eight. The array will specifify the eight chars building up the border
-///     in a clockwise fashion starting with the top-left corner. As an
-///     example, the double box style could be specified as
-///       [ "╔", "═" ,"╗", "║", "╝", "═", "╚", "║" ].
-///     If the number of chars are less than eight, they will be repeated. Thus
-///     an ASCII border could be specified as
-///       [ "/", "-", "\\", "|" ],
-///     or all chars the same as
-///       [ "x" ].
-///     An empty string can be used to turn off a specific border, for instance,
-///       [ "", "", "", ">", "", "", "", "<" ]
-///     will only make vertical borders but not horizontal ones.
-///     By default, `FloatBorder` highlight is used, which links to `VertSplit`
-///     when not defined.  It could also be specified by character:
-///       [ {"+", "MyCorner"}, {"x", "MyBorder"} ].
-///   - `noautocmd`: If true then no buffer-related autocommand events such as
-///                  |BufEnter|, |BufLeave| or |BufWinEnter| may fire from
-///                  calling this function.
-///
-/// @param[out] err Error details, if any
-///
-/// @return Window handle, or 0 on error
-Window nvim_open_win(Buffer buffer, Boolean enter, Dictionary config, Error *err)
-  FUNC_API_SINCE(6)
-  FUNC_API_CHECK_TEXTLOCK
-{
-  FloatConfig fconfig = FLOAT_CONFIG_INIT;
-  if (!parse_float_config(config, &fconfig, false, true, err)) {
-    return 0;
-  }
-  win_T *wp = win_new_float(NULL, fconfig, err);
-  if (!wp) {
-    return 0;
-  }
-  if (enter) {
-    win_enter(wp, false);
-  }
-  if (!win_valid(wp)) {
-    api_set_error(err, kErrorTypeException, "Window was closed immediately");
-    return 0;
-  }
-  if (buffer > 0) {
-    win_set_buf(wp->handle, buffer, fconfig.noautocmd, err);
-  }
-
-  if (fconfig.style == kWinStyleMinimal) {
-    win_set_minimal_style(wp);
-    didset_window_options(wp);
-  }
-  return wp->handle;
 }
 
 /// Gets the current list of tabpage handles.
@@ -1760,24 +1609,15 @@ Dictionary nvim_get_color_map(void)
 /// @param[out]  err  Error details, if any
 ///
 /// @return map of global |context|.
-Dictionary nvim_get_context(Dictionary opts, Error *err)
+Dictionary nvim_get_context(Dict(context) *opts, Error *err)
   FUNC_API_SINCE(6)
 {
   Array types = ARRAY_DICT_INIT;
-  for (size_t i = 0; i < opts.size; i++) {
-    String k = opts.items[i].key;
-    Object v = opts.items[i].value;
-    if (strequal("types", k.data)) {
-      if (v.type != kObjectTypeArray) {
-        api_set_error(err, kErrorTypeValidation, "invalid value for key: %s",
-                      k.data);
-        return (Dictionary)ARRAY_DICT_INIT;
-      }
-      types = v.data.array;
-    } else {
-      api_set_error(err, kErrorTypeValidation, "unexpected key: %s", k.data);
-      return (Dictionary)ARRAY_DICT_INIT;
-    }
+  if (opts->types.type == kObjectTypeArray) {
+    types = opts->types.data.array;
+  } else if (opts->types.type != kObjectTypeNil) {
+    api_set_error(err, kErrorTypeValidation, "invalid value for key: types");
+    return (Dictionary)ARRAY_DICT_INIT;
   }
 
   int int_types = types.size > 0 ? 0 : kCtxAll;
@@ -1887,7 +1727,7 @@ ArrayOf(Dictionary) nvim_get_keymap(String mode)
 ///               as keys excluding |<buffer>| but including |noremap|.
 ///               Values are Booleans. Unknown key is an error.
 /// @param[out]   err   Error details, if any.
-void nvim_set_keymap(String mode, String lhs, String rhs, Dictionary opts, Error *err)
+void nvim_set_keymap(String mode, String lhs, String rhs, Dict(keymap) *opts, Error *err)
   FUNC_API_SINCE(6)
 {
   modify_keymap(-1, false, mode, lhs, rhs, opts, err);
@@ -1913,7 +1753,7 @@ void nvim_del_keymap(String mode, String lhs, Error *err)
 /// @param[out]  err   Error details, if any.
 ///
 /// @returns Map of maps describing commands.
-Dictionary nvim_get_commands(Dictionary opts, Error *err)
+Dictionary nvim_get_commands(Dict(get_commands) *opts, Error *err)
   FUNC_API_SINCE(4)
 {
   return nvim_buf_get_commands(-1, opts, err);
