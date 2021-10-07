@@ -25,6 +25,7 @@
 #include "nvim/lua/executor.h"
 #include "nvim/map.h"
 #include "nvim/map_defs.h"
+#include "nvim/mark.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/msgpack_rpc/helpers.h"
@@ -817,13 +818,6 @@ Array string_to_array(const String input, bool crlf)
 void modify_keymap(Buffer buffer, bool is_unmap, String mode, String lhs, String rhs,
                    Dict(keymap) *opts, Error *err)
 {
-  char *err_msg = NULL;  // the error message to report, if any
-  char *err_arg = NULL;  // argument for the error message format string
-  ErrorType err_type = kErrorTypeNone;
-
-  char_u *lhs_buf = NULL;
-  char_u *rhs_buf = NULL;
-
   bool global = (buffer == -1);
   if (global) {
     buffer = 0;
@@ -857,17 +851,13 @@ void modify_keymap(Buffer buffer, bool is_unmap, String mode, String lhs, String
                      CPO_TO_CPO_FLAGS, &parsed_args);
 
   if (parsed_args.lhs_len > MAXMAPLEN) {
-    err_msg = "LHS exceeds maximum map length: %s";
-    err_arg = lhs.data;
-    err_type = kErrorTypeValidation;
-    goto fail_with_message;
+    api_set_error(err, kErrorTypeValidation,  "LHS exceeds maximum map length: %s", lhs.data);
+    goto fail_and_free;
   }
 
   if (mode.size > 1) {
-    err_msg = "Shortname is too long: %s";
-    err_arg = mode.data;
-    err_type = kErrorTypeValidation;
-    goto fail_with_message;
+    api_set_error(err, kErrorTypeValidation, "Shortname is too long: %s", mode.data);
+    goto fail_and_free;
   }
   int mode_val;  // integer value of the mapping mode, to be passed to do_map()
   char_u *p = (char_u *)((mode.size) ? mode.data : "m");
@@ -879,18 +869,14 @@ void modify_keymap(Buffer buffer, bool is_unmap, String mode, String lhs, String
         && mode.size > 0) {
       // get_map_mode() treats unrecognized mode shortnames as ":map".
       // This is an error unless the given shortname was empty string "".
-      err_msg = "Invalid mode shortname: \"%s\"";
-      err_arg = (char *)p;
-      err_type = kErrorTypeValidation;
-      goto fail_with_message;
+      api_set_error(err, kErrorTypeValidation, "Invalid mode shortname: \"%s\"", (char *)p);
+      goto fail_and_free;
     }
   }
 
   if (parsed_args.lhs_len == 0) {
-    err_msg = "Invalid (empty) LHS";
-    err_arg = "";
-    err_type = kErrorTypeValidation;
-    goto fail_with_message;
+    api_set_error(err, kErrorTypeValidation, "Invalid (empty) LHS");
+    goto fail_and_free;
   }
 
   bool is_noremap = parsed_args.noremap;
@@ -903,16 +889,13 @@ void modify_keymap(Buffer buffer, bool is_unmap, String mode, String lhs, String
       // the given RHS was nonempty and not a <Nop>, but was parsed as if it
       // were empty?
       assert(false && "Failed to parse nonempty RHS!");
-      err_msg = "Parsing of nonempty RHS failed: %s";
-      err_arg = rhs.data;
-      err_type = kErrorTypeException;
-      goto fail_with_message;
+      api_set_error(err, kErrorTypeValidation, "Parsing of nonempty RHS failed: %s", rhs.data);
+      goto fail_and_free;
     }
   } else if (is_unmap && parsed_args.rhs_len) {
-    err_msg = "Gave nonempty RHS in unmap command: %s";
-    err_arg = (char *)parsed_args.rhs;
-    err_type = kErrorTypeValidation;
-    goto fail_with_message;
+    api_set_error(err, kErrorTypeValidation,
+                  "Gave nonempty RHS in unmap command: %s", parsed_args.rhs);
+    goto fail_and_free;
   }
 
   // buf_do_map() reads noremap/unmap as its own argument.
@@ -941,19 +924,7 @@ void modify_keymap(Buffer buffer, bool is_unmap, String mode, String lhs, String
     goto fail_and_free;
   }  // switch
 
-  xfree(lhs_buf);
-  xfree(rhs_buf);
-  xfree(parsed_args.rhs);
-  xfree(parsed_args.orig_rhs);
-
-  return;
-
-fail_with_message:
-  api_set_error(err, err_type, err_msg, err_arg);
-
 fail_and_free:
-  xfree(lhs_buf);
-  xfree(rhs_buf);
   xfree(parsed_args.rhs);
   xfree(parsed_args.orig_rhs);
   return;
@@ -1671,3 +1642,42 @@ void api_free_keydict(void *dict, KeySetLink *table)
   }
 }
 
+/// Set a named mark
+/// buffer and mark name must be validated already
+/// @param buffer     Buffer to set the mark on
+/// @param name       Mark name
+/// @param line       Line number
+/// @param col        Column/row number
+/// @return true if the mark was set, else false
+bool set_mark(buf_T *buf, String name, Integer line, Integer col, Error *err)
+{
+  buf = buf == NULL ? curbuf : buf;
+  // If line == 0 the marks is being deleted
+  bool res = false;
+  bool deleting = false;
+  if (line == 0) {
+    col = 0;
+    deleting = true;
+  } else {
+    if (col > MAXCOL) {
+      api_set_error(err, kErrorTypeValidation, "Column value outside range");
+      return res;
+    }
+    if (line < 1 || line > buf->b_ml.ml_line_count) {
+      api_set_error(err, kErrorTypeValidation, "Line value outside range");
+      return res;
+    }
+  }
+  pos_T pos = { line, (int)col, (int)col };
+  res = setmark_pos(*name.data, &pos, buf->handle);
+  if (!res) {
+    if (deleting) {
+      api_set_error(err, kErrorTypeException,
+                    "Failed to delete named mark: %c", *name.data);
+    } else {
+      api_set_error(err, kErrorTypeException,
+                    "Failed to set named mark: %c", *name.data);
+    }
+  }
+  return res;
+}
