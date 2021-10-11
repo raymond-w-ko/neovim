@@ -3088,10 +3088,16 @@ f_getbufvar_end:
 static void f_getchangelist(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 {
   tv_list_alloc_ret(rettv, 2);
-  vim_ignored = tv_get_number(&argvars[0]);  // issue errmsg if type error
-  emsg_off++;
-  const buf_T *const buf = tv_get_buf(&argvars[0], false);
-  emsg_off--;
+
+  const buf_T *buf;
+  if (argvars[0].v_type == VAR_UNKNOWN) {
+    buf = curbuf;
+  } else {
+    vim_ignored = tv_get_number(&argvars[0]);  // issue errmsg if type error
+    emsg_off++;
+    buf = tv_get_buf(&argvars[0], false);
+    emsg_off--;
+  }
   if (buf == NULL) {
     return;
   }
@@ -7296,7 +7302,7 @@ static void f_getreginfo(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   if (list == NULL) {
     return;
   }
-  tv_dict_add_list(dict, S_LEN("regcontents"), list);
+  (void)tv_dict_add_list(dict, S_LEN("regcontents"), list);
 
   char buf[NUMBUFLEN + 2];
   buf[0] = NUL;
@@ -7315,14 +7321,15 @@ static void f_getreginfo(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   case kMTUnknown:
     abort();
   }
-  tv_dict_add_str(dict, S_LEN("regtype"), buf);
+  (void)tv_dict_add_str(dict, S_LEN("regtype"), buf);
 
   buf[0] = get_register_name(get_unname_register());
   buf[1] = NUL;
   if (regname == '"') {
-    tv_dict_add_str(dict, S_LEN("points_to"), buf);
+    (void)tv_dict_add_str(dict, S_LEN("points_to"), buf);
   } else {
-    tv_dict_add_bool(dict, S_LEN("isunnamed"), regname == buf[0] ? kBoolVarTrue : kBoolVarFalse);
+    (void)tv_dict_add_bool(dict, S_LEN("isunnamed"),
+                           regname == buf[0] ? kBoolVarTrue : kBoolVarFalse);
   }
 }
 

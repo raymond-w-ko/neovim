@@ -27,7 +27,10 @@ local global_diagnostic_options = {
 
 ---@private
 local function to_severity(severity)
-  return type(severity) == 'string' and M.severity[string.upper(severity)] or severity
+  if type(severity) == 'string' then
+    return assert(M.severity[string.upper(severity)], string.format("Invalid severity: %s", severity))
+  end
+  return severity
 end
 
 ---@private
@@ -125,9 +128,7 @@ local function get_namespace(ns)
       end
     end
 
-    if not name then
-      return vim.notify("namespace does not exist or is anonymous", vim.log.levels.ERROR)
-    end
+    assert(name, "namespace does not exist or is anonymous")
 
     all_namespaces[ns] = {
       name = name,
@@ -396,6 +397,17 @@ local function show_diagnostics(opts, diagnostics)
 
   if opts.source then
     diagnostics = prefix_source(opts.source, diagnostics)
+  end
+
+  -- Use global setting for severity_sort since 'show_diagnostics' is namespace
+  -- independent
+  local severity_sort = global_diagnostic_options.severity_sort
+  if severity_sort then
+    if type(severity_sort) == "table" and severity_sort.reverse then
+      table.sort(diagnostics, function(a, b) return a.severity > b.severity end)
+    else
+      table.sort(diagnostics, function(a, b) return a.severity < b.severity end)
+    end
   end
 
   for i, diagnostic in ipairs(diagnostics) do
@@ -1143,7 +1155,6 @@ function M.show_position_diagnostics(opts, bufnr, position)
   local diagnostics = M.get(bufnr, opts)
   clamp_line_numbers(bufnr, diagnostics)
   local position_diagnostics = vim.tbl_filter(match_position_predicate, diagnostics)
-  table.sort(position_diagnostics, function(a, b) return a.severity < b.severity end)
   return show_diagnostics(opts, position_diagnostics)
 end
 

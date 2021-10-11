@@ -41,6 +41,7 @@ lsp._request_name_to_capability = {
   ['textDocument/documentSymbol'] = 'document_symbol';
   ['textDocument/prepareCallHierarchy'] = 'call_hierarchy';
   ['textDocument/rename'] = 'rename';
+  ['textDocument/prepareRename'] = 'rename';
   ['textDocument/codeAction'] = 'code_action';
   ['textDocument/codeLens'] = 'code_lens';
   ['codeLens/resolve'] = 'code_lens_resolve';
@@ -85,7 +86,7 @@ end
 function lsp._unsupported_method(method)
   local msg = string.format("method %s is not supported by any of the servers registered for the current buffer", method)
   log.warn(msg)
-  return lsp.rpc_response_error(protocol.ErrorCodes.MethodNotFound, msg)
+  return msg
 end
 
 ---@private
@@ -130,15 +131,24 @@ local all_client_active_buffers = {}
 ---@param bufnr (Number) of buffer
 ---@param fn (function({client}, {client_id}, {bufnr}) Function to run on
 ---each client attached to that buffer.
-local function for_each_buffer_client(bufnr, fn)
+---@param restrict_client_ids table list of client ids on which to restrict function application.
+local function for_each_buffer_client(bufnr, fn, restrict_client_ids)
   validate {
     fn = { fn, 'f' };
+    restrict_client_ids = { restrict_client_ids, 't' , true};
   }
   bufnr = resolve_bufnr(bufnr)
   local client_ids = all_buffer_active_clients[bufnr]
   if not client_ids or tbl_isempty(client_ids) then
     return
   end
+
+  if restrict_client_ids and #restrict_client_ids > 0 then
+    client_ids = vim.tbl_filter(function(item)
+        return vim.tbl_contains(restrict_client_ids, item)
+      end, vim.tbl_keys(client_ids))
+  end
+
   for client_id in pairs(client_ids) do
     local client = active_clients[client_id]
     if client then
@@ -1254,32 +1264,32 @@ function lsp.buf_request(bufnr, method, params, handler)
     method   = { method, 's' };
     handler  = { handler, 'f', true };
   }
-  local client_request_ids = {}
 
+  local supported_clients = {}
   local method_supported = false
-  for_each_buffer_client(bufnr, function(client, client_id, resolved_bufnr)
+  for_each_buffer_client(bufnr, function(client, client_id)
     if client.supports_method(method) then
       method_supported = true
-      local request_success, request_id = client.request(method, params, handler, resolved_bufnr)
+      table.insert(supported_clients, client_id)
+    end
+  end)
 
+  -- if has client but no clients support the given method, notify the user
+  if not tbl_isempty(all_buffer_active_clients[resolve_bufnr(bufnr)] or {}) and not method_supported then
+    vim.notify(lsp._unsupported_method(method), vim.log.levels.ERROR)
+    vim.api.nvim_command("redraw")
+    return
+  end
+
+  local client_request_ids = {}
+  for_each_buffer_client(bufnr, function(client, client_id, resolved_bufnr)
+      local request_success, request_id = client.request(method, params, handler, resolved_bufnr)
       -- This could only fail if the client shut down in the time since we looked
       -- it up and we did the request, which should be rare.
       if request_success then
         client_request_ids[client_id] = request_id
       end
-    end
-  end)
-
-  -- if has client but no clients support the given method, call the callback with the proper
-  -- error message.
-  if not tbl_isempty(all_buffer_active_clients[resolve_bufnr(bufnr)] or {}) and not method_supported then
-    local unsupported_err = lsp._unsupported_method(method)
-    handler = handler or lsp.handlers[method]
-    if handler then
-      handler(unsupported_err, nil, {method=method, bufnr=bufnr})
-    end
-    return
-  end
+  end, supported_clients)
 
   local function _cancel_all_requests()
     for client_id, request_id in pairs(client_request_ids) do
@@ -1308,12 +1318,13 @@ function lsp.buf_request_all(bufnr, method, params, callback)
   local request_results = {}
   local result_count = 0
   local expected_result_count = 0
-  local cancel, client_request_ids
 
-  local set_expected_result_count = once(function()
-    for _ in pairs(client_request_ids) do
-      expected_result_count = expected_result_count + 1
-    end
+  local set_expected_result_count = once(function ()
+    for_each_buffer_client(bufnr, function(client)
+      if client.supports_method(method) then
+        expected_result_count = expected_result_count + 1
+      end
+    end)
   end)
 
   local function _sync_handler(err, result, ctx)
@@ -1326,7 +1337,7 @@ function lsp.buf_request_all(bufnr, method, params, callback)
     end
   end
 
-  client_request_ids, cancel = lsp.buf_request(bufnr, method, params, _sync_handler)
+  local _, cancel = lsp.buf_request(bufnr, method, params, _sync_handler)
 
   return cancel
 end
@@ -1383,6 +1394,29 @@ function lsp.buf_notify(bufnr, method, params)
   return resp
 end
 
+
+---@private
+local function adjust_start_col(lnum, line, items, encoding)
+  local min_start_char = nil
+  for _, item in pairs(items) do
+    if item.textEdit and item.textEdit.range.start.line == lnum - 1 then
+      if min_start_char and min_start_char ~= item.textEdit.range.start.character then
+        return nil
+      end
+      min_start_char = item.textEdit.range.start.character
+    end
+  end
+  if min_start_char then
+    if encoding == 'utf-8' then
+      return min_start_char
+    else
+      return vim.str_byteindex(line, min_start_char, encoding == 'utf-16')
+    end
+  else
+    return nil
+  end
+end
+
 --- Implements 'omnifunc' compatible LSP completion.
 ---
 ---@see |complete-functions|
@@ -1418,17 +1452,37 @@ function lsp.omnifunc(findstart, base)
 
   -- Get the start position of the current keyword
   local textMatch = vim.fn.match(line_to_cursor, '\\k*$')
-  local prefix = line_to_cursor:sub(textMatch+1)
 
   local params = util.make_position_params()
 
   local items = {}
-  lsp.buf_request(bufnr, 'textDocument/completion', params, function(err, result)
+  lsp.buf_request(bufnr, 'textDocument/completion', params, function(err, result, ctx)
     if err or not result or vim.fn.mode() ~= "i" then return end
+
+    -- Completion response items may be relative to a position different than `textMatch`.
+    -- Concrete example, with sumneko/lua-language-server:
+    --
+    -- require('plenary.asy|
+    --         ▲       ▲   ▲
+    --         │       │   └── cursor_pos: 20
+    --         │       └────── textMatch: 17
+    --         └────────────── textEdit.range.start.character: 9
+    --                                 .newText = 'plenary.async'
+    --                  ^^^
+    --                  prefix (We'd remove everything not starting with `asy`,
+    --                  so we'd eliminate the `plenary.async` result
+    --
+    -- `adjust_start_col` is used to prefer the language server boundary.
+    --
+    local client = lsp.get_client_by_id(ctx.client_id)
+    local encoding = client and client.offset_encoding or 'utf-16'
+    local candidates = util.extract_completion_items(result)
+    local startbyte = adjust_start_col(pos[1], line, candidates, encoding) or textMatch
+    local prefix = line:sub(startbyte + 1, pos[2])
     local matches = util.text_document_completion_list_to_complete_items(result, prefix)
     -- TODO(ashkan): is this the best way to do this?
     vim.list_extend(items, matches)
-    vim.fn.complete(textMatch+1, items)
+    vim.fn.complete(startbyte + 1, items)
   end)
 
   -- Return -2 to signal that we should continue completion so that we can
