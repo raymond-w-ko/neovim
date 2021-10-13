@@ -545,6 +545,7 @@ static void update_attrs(UI *ui, int attr_id)
     undercurl = false;
   }
 
+  italic = false;
   strikethrough = false;
   underline = false;
   undercurl = false;
