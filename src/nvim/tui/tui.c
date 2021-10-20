@@ -545,11 +545,6 @@ static void update_attrs(UI *ui, int attr_id)
     undercurl = false;
   }
 
-  italic = false;
-  strikethrough = false;
-  underline = false;
-  undercurl = false;
-
   if (unibi_get_str(data->ut, unibi_set_attributes)) {
     if (bold || reverse || underline || standout) {
       UNIBI_SET_NUM_VAR(data->params[0], standout);
