@@ -1536,7 +1536,7 @@ static void diff_read(int idx_orig, int idx_new, diffout_T *dout)
   enum {
     DIFF_ED,
     DIFF_UNIFIED,
-    DIFF_NONE
+    DIFF_NONE,
   } diffstyle = DIFF_NONE;
 
   if (dout->dout_fname == NULL) {
@@ -1600,7 +1600,7 @@ static void diff_read(int idx_orig, int idx_new, diffout_T *dout)
       }
     } else {
       assert(diffstyle == DIFF_UNIFIED);
-      if (STRNCMP(line, "@@ ", 3)  != 0) {
+      if (STRNCMP(line, "@@ ", 3) != 0) {
         continue;   // not the start of a diff block
       }
       if (parse_diff_unified(line, &lnum_orig, &count_orig,
@@ -1708,7 +1708,7 @@ static void diff_read(int idx_orig, int idx_new, diffout_T *dout)
     notset = false;  // "*dp" has been set
   }
 
-  // for remaining diff blocks orig and new are equal
+// for remaining diff blocks orig and new are equal
   while (dp != NULL) {
     if (notset) {
       diff_copy_entry(dprev, dp, idx_orig, idx_new);
@@ -3147,7 +3147,7 @@ static int xdiff_out(void *priv, mmbuffer_t *mb, int nbuf)
   }
 
   // sanity check
-  if (STRNCMP(mb[0].ptr, "@@ ", 3)  != 0) {
+  if (STRNCMP(mb[0].ptr, "@@ ", 3) != 0) {
     return 0;
   }
 

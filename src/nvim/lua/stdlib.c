@@ -216,6 +216,45 @@ static int nlua_str_utf_pos(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   return 1;
 }
 
+/// Return the offset from the 1-indexed byte position to the first byte of the
+/// current character.
+///
+/// Expects a string and an int.
+///
+/// Returns the byte offset to the first byte of the current character
+/// pointed into by the offset.
+static int nlua_str_utf_start(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
+{
+  size_t s1_len;
+  const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
+  long offset = luaL_checkinteger(lstate, 2);
+  if (offset < 0 || offset > (intptr_t)s1_len) {
+    return luaL_error(lstate, "index out of range");
+  }
+  int tail_offset = mb_head_off((char_u *)s1, (char_u *)s1 + (char_u)offset - 1);
+  lua_pushinteger(lstate, tail_offset);
+  return 1;
+}
+
+/// Return the offset from the 1-indexed byte position to the last
+/// byte of the current character.
+///
+/// Expects a string and an int.
+///
+/// Returns the byte offset to the last byte of the current character
+/// pointed into by the offset.
+static int nlua_str_utf_end(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
+{
+  size_t s1_len;
+  const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
+  long offset = luaL_checkinteger(lstate, 2);
+  if (offset < 0 || offset > (intptr_t)s1_len) {
+    return luaL_error(lstate, "index out of range");
+  }
+  int tail_offset = mb_tail_off((char_u *)s1, (char_u *)s1 + (char_u)offset - 1);
+  lua_pushinteger(lstate, tail_offset);
+  return 1;
+}
 
 /// convert UTF-32 or UTF-16 indices to byte index.
 ///
@@ -272,7 +311,8 @@ int nlua_regex(lua_State *lstate)
   return 1;
 }
 
-static dict_T *nlua_get_var_scope(lua_State *lstate) {
+static dict_T *nlua_get_var_scope(lua_State *lstate)
+{
   const char *scope = luaL_checkstring(lstate, 1);
   handle_T handle = (handle_T)luaL_checkinteger(lstate, 2);
   dict_T *dict = NULL;
@@ -424,7 +464,6 @@ static int nlua_stricmp(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
 }
 
 
-
 void nlua_state_add_stdlib(lua_State *const lstate)
 {
   // stricmp
@@ -439,6 +478,12 @@ void nlua_state_add_stdlib(lua_State *const lstate)
   // str_utf_pos
   lua_pushcfunction(lstate, &nlua_str_utf_pos);
   lua_setfield(lstate, -2, "str_utf_pos");
+  // str_utf_start
+  lua_pushcfunction(lstate, &nlua_str_utf_start);
+  lua_setfield(lstate, -2, "str_utf_start");
+  // str_utf_end
+  lua_pushcfunction(lstate, &nlua_str_utf_end);
+  lua_setfield(lstate, -2, "str_utf_end");
   // regex
   lua_pushcfunction(lstate, &nlua_regex);
   lua_setfield(lstate, -2, "regex");
