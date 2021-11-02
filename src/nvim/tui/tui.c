@@ -544,6 +544,8 @@ static void update_attrs(UI *ui, int attr_id)
     underline = (attr & HL_UNDERLINE) || (attr & HL_UNDERCURL);
     undercurl = false;
   }
+  underline = false;
+  undercurl = false;
 
   if (unibi_get_str(data->ut, unibi_set_attributes)) {
     if (bold || reverse || underline || standout) {
