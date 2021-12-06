@@ -3926,7 +3926,8 @@ static buf_T *ins_compl_next_buf(buf_T *buf, int flag)
 
 
 /// Get the user-defined completion function name for completion 'type'
-static char_u *get_complete_funcname(int type) {
+static char_u *get_complete_funcname(int type)
+{
   switch (type) {
   case CTRL_X_FUNCTION:
     return curbuf->b_p_cfu;
@@ -5240,7 +5241,7 @@ static int ins_complete(int c, bool enable_pum)
       funcname = get_complete_funcname(ctrl_x_mode);
       if (*funcname == NUL) {
         semsg(_(e_notset), ctrl_x_mode == CTRL_X_FUNCTION
-            ? "completefunc" : "omnifunc");
+              ? "completefunc" : "omnifunc");
         // restore did_ai, so that adding comment leader works
         did_ai = save_did_ai;
         return FAIL;
@@ -6573,7 +6574,7 @@ static void spell_back_to_badword(void)
 int stop_arrow(void)
 {
   if (arrow_used) {
-    Insstart = curwin->w_cursor;  //new insertion starts here
+    Insstart = curwin->w_cursor;  // new insertion starts here
     if (Insstart.col > Insstart_orig.col && !ins_need_undo) {
       // Don't update the original insert position when moved to the
       // right, except when nothing was inserted yet.
@@ -7639,16 +7640,34 @@ int hkmap(int c)
       KAFsofit, hKAF, LAMED, MEMsofit, MEM, NUNsofit, NUN, SAMEH, AIN,
       PEIsofit, PEI, ZADIsofit, ZADI, KOF, RESH, hSHIN, TAV,
     };
-    static char_u map[26] =
-    { (char_u)hALEF  /*a*/, (char_u)BET  /*b*/, (char_u)hKAF  /*c*/,
-      (char_u)DALET  /*d*/, (char_u)-1  /*e*/, (char_u)PEIsofit  /*f*/,
-      (char_u)GIMEL  /*g*/, (char_u)HEI  /*h*/, (char_u)IUD  /*i*/,
-      (char_u)HET  /*j*/, (char_u)KOF  /*k*/, (char_u)LAMED  /*l*/,
-      (char_u)MEM  /*m*/, (char_u)NUN  /*n*/, (char_u)SAMEH  /*o*/,
-      (char_u)PEI  /*p*/, (char_u)-1  /*q*/, (char_u)RESH  /*r*/,
-      (char_u)ZAIN  /*s*/, (char_u)TAV  /*t*/, (char_u)TET  /*u*/,
-      (char_u)VAV  /*v*/, (char_u)hSHIN  /*w*/, (char_u)-1  /*x*/,
-      (char_u)AIN  /*y*/, (char_u)ZADI  /*z*/ };
+    static char_u map[26] = {
+      (char_u)hALEF,  // a
+      (char_u)BET,  // b
+      (char_u)hKAF,  // c
+      (char_u)DALET,  // d
+      (char_u)-1,  // e
+      (char_u)PEIsofit,  // f
+      (char_u)GIMEL,  // g
+      (char_u)HEI,  // h
+      (char_u)IUD,  // i
+      (char_u)HET,  // j
+      (char_u)KOF,  // k
+      (char_u)LAMED,  // l
+      (char_u)MEM,  // m
+      (char_u)NUN,  // n
+      (char_u)SAMEH,  // o
+      (char_u)PEI,  // p
+      (char_u)-1,  // q
+      (char_u)RESH,  // r
+      (char_u)ZAIN,  // s
+      (char_u)TAV,  // t
+      (char_u)TET,  // u
+      (char_u)VAV,  // v
+      (char_u)hSHIN,  // w
+      (char_u)-1,  // x
+      (char_u)AIN,  // y
+      (char_u)ZADI,  // z
+    };
 
     if (c == 'N' || c == 'M' || c == 'P' || c == 'C' || c == 'Z') {
       return (int)(map[CharOrd(c)] - 1 + p_aleph);
