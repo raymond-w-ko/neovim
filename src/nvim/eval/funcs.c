@@ -1082,15 +1082,13 @@ static void f_chdir(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 
   // Return the current directory
   cwd = xmalloc(MAXPATHL);
-  if (cwd != NULL) {
-    if (os_dirname(cwd, MAXPATHL) != FAIL) {
+  if (os_dirname(cwd, MAXPATHL) != FAIL) {
 #ifdef BACKSLASH_IN_FILENAME
-      slash_adjust(cwd);
+    slash_adjust(cwd);
 #endif
-      rettv->vval.v_string = vim_strsave(cwd);
-    }
-    xfree(cwd);
+    rettv->vval.v_string = vim_strsave(cwd);
   }
+  xfree(cwd);
 
   if (curwin->w_localdir != NULL) {
     scope = kCdScopeWindow;
@@ -7396,6 +7394,11 @@ static void f_reg_executing(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 static void f_reg_recording(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 {
   return_register(reg_recording, rettv);
+}
+
+static void f_reg_recorded(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+{
+  return_register(reg_recorded, rettv);
 }
 
 /// list2proftime - convert a List to proftime_T

@@ -777,6 +777,10 @@ function lsp.start_client(config)
   ---@param code (number) exit code of the process
   ---@param signal (number) the signal used to terminate (if any)
   function dispatch.on_exit(code, signal)
+    if config.on_exit then
+      pcall(config.on_exit, code, signal, client_id)
+    end
+
     active_clients[client_id] = nil
     uninitialized_clients[client_id] = nil
 
@@ -791,10 +795,6 @@ function lsp.start_client(config)
       vim.schedule(function()
         vim.notify(msg, vim.log.levels.WARN)
       end)
-    end
-
-    if config.on_exit then
-      pcall(config.on_exit, code, signal, client_id)
     end
   end
 
@@ -1112,9 +1112,9 @@ local text_document_did_change_handler
 do
   text_document_did_change_handler = function(_, bufnr, changedtick, firstline, lastline, new_lastline)
 
-    -- Don't do anything if there are no clients attached.
+    -- Detach (nvim_buf_attach) via returning True to on_lines if no clients are attached
     if tbl_isempty(all_buffer_active_clients[bufnr] or {}) then
-      return
+      return true
     end
     util.buf_versions[bufnr] = changedtick
     local compute_change_and_notify = changetracking.prepare(bufnr, firstline, lastline, new_lastline)
@@ -1156,6 +1156,12 @@ function lsp.buf_attach_client(bufnr, client_id)
     client_id = {client_id, 'n'};
   }
   bufnr = resolve_bufnr(bufnr)
+  if not vim.api.nvim_buf_is_loaded(bufnr) then
+    local _ = log.warn() and log.warn(
+      string.format("buf_attach_client called on unloaded buffer (id: %d): ", bufnr)
+    )
+    return false
+  end
   local buffer_client_ids = all_buffer_active_clients[bufnr]
   -- This is our first time attaching to this buffer.
   if not buffer_client_ids then
@@ -1212,6 +1218,50 @@ function lsp.buf_attach_client(bufnr, client_id)
     client._on_attach(bufnr)
   end
   return true
+end
+
+--- Detaches client from the specified buffer.
+--- Note: While the server is notified that the text document (buffer)
+--- was closed, it is still able to send notifications should it ignore this notification.
+---
+---@param bufnr number Buffer handle, or 0 for current
+---@param client_id number Client id
+function lsp.buf_detach_client(bufnr, client_id)
+  validate {
+    bufnr     = {bufnr, 'n', true};
+    client_id = {client_id, 'n'};
+  }
+  bufnr = resolve_bufnr(bufnr)
+
+  local client = lsp.get_client_by_id(client_id)
+  if not client or not client.attached_buffers[bufnr] then
+    vim.notify(
+      string.format('Buffer (id: %d) is not attached to client (id: %d). Cannot detach.', client_id, bufnr)
+    )
+    return
+  end
+
+  changetracking.reset_buf(client, bufnr)
+
+  if client.resolved_capabilities.text_document_open_close then
+    local uri = vim.uri_from_bufnr(bufnr)
+    local params = { textDocument = { uri = uri; } }
+    client.notify('textDocument/didClose', params)
+  end
+
+  client.attached_buffers[bufnr] = nil
+  util.buf_versions[bufnr] = nil
+
+  all_buffer_active_clients[bufnr][client_id] = nil
+  if #vim.tbl_keys(all_buffer_active_clients[bufnr]) == 0 then
+    all_buffer_active_clients[bufnr] = nil
+  end
+
+  local namespace = vim.lsp.diagnostic.get_namespace(client_id)
+  vim.diagnostic.reset(namespace, bufnr)
+
+  vim.notify(string.format('Detached buffer (id: %d) from client (id: %d)', bufnr, client_id))
+
 end
 
 --- Checks if a buffer is attached for a particular client.

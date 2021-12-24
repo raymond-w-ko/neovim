@@ -117,7 +117,7 @@ let s:filename_checks = {
     \ 'cpp': ['file.cxx', 'file.c++', 'file.hh', 'file.hxx', 'file.hpp', 'file.ipp', 'file.moc', 'file.tcc', 'file.inl', 'file.tlh'],
     \ 'crm': ['file.crm'],
     \ 'crontab': ['crontab', 'crontab.file', '/etc/cron.d/file', 'any/etc/cron.d/file'],
-    \ 'cs': ['file.cs'],
+    \ 'cs': ['file.cs', 'file.csx'],
     \ 'csc': ['file.csc'],
     \ 'csdl': ['file.csdl'],
     \ 'csp': ['file.csp', 'file.fdr'],
@@ -456,6 +456,7 @@ let s:filename_checks = {
     \ 'skill': ['file.il', 'file.ils', 'file.cdf'],
     \ 'slang': ['file.sl'],
     \ 'slice': ['file.ice'],
+    \ 'solution': ['file.sln'],
     \ 'slpconf': ['/etc/slp.conf', 'any/etc/slp.conf'],
     \ 'slpreg': ['/etc/slp.reg', 'any/etc/slp.reg'],
     \ 'slpspi': ['/etc/slp.spi', 'any/etc/slp.spi'],
@@ -1001,6 +1002,46 @@ func Test_fs_file()
 
   call delete('Xfile.fs')
   filetype off
+endfunc
+
+func Test_dep3patch_file()
+  filetype on
+
+  call assert_true(mkdir('debian/patches', 'p'))
+
+  " series files are not patches
+  call writefile(['Description: some awesome patch'], 'debian/patches/series')
+  split debian/patches/series
+  call assert_notequal('dep3patch', &filetype)
+  bwipe!
+
+  " diff/patch files without the right headers should still show up as ft=diff
+  call writefile([], 'debian/patches/foo.diff')
+  split debian/patches/foo.diff
+  call assert_equal('diff', &filetype)
+  bwipe!
+
+  " Files with the right headers are detected as dep3patch, even if they don't
+  " have a diff/patch extension
+  call writefile(['Subject: dep3patches'], 'debian/patches/bar')
+  split debian/patches/bar
+  call assert_equal('dep3patch', &filetype)
+  bwipe!
+
+  " Files in sub-directories are detected
+  call assert_true(mkdir('debian/patches/s390x', 'p'))
+  call writefile(['Subject: dep3patches'], 'debian/patches/s390x/bar')
+  split debian/patches/s390x/bar
+  call assert_equal('dep3patch', &filetype)
+  bwipe!
+
+  " The detection stops when seeing the "header end" marker
+  call writefile(['---', 'Origin: the cloud'], 'debian/patches/baz')
+  split debian/patches/baz
+  call assert_notequal('dep3patch', &filetype)
+  bwipe!
+
+  call delete('debian/patches', 'rf')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab
