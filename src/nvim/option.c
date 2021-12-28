@@ -2991,7 +2991,7 @@ ambw_end:
     }
   } else if (varp == &curwin->w_p_fdc || varp == &curwin->w_allbuf_opt.wo_fdc) {
     // 'foldcolumn'
-    if (check_opt_strings(*varp, p_fdc_values, false) != OK) {
+    if (**varp == NUL || check_opt_strings(*varp, p_fdc_values, false) != OK) {
       errmsg = e_invarg;
     }
   } else if (varp == &p_pt) {
@@ -3370,6 +3370,9 @@ static int int_cmp(const void *a, const void *b)
 /// @return OK when the value is valid, FAIL otherwise
 int check_signcolumn(char_u *val)
 {
+  if (*val == NUL) {
+    return FAIL;
+  }
   // check for basic match
   if (check_opt_strings(val, p_scl_values, false) == OK) {
     return OK;
@@ -3610,7 +3613,7 @@ static char *set_chars_option(win_T *wp, char_u **varp, bool set)
           c2 = c3 = 0;
           s = p + len + 1;
           c1 = get_encoded_char_adv(&s);
-          if (c1 == 0 || utf_char2cells(c1) > 1) {
+          if (c1 == 0 || char2cells(c1) > 1) {
             return e_invarg;
           }
           if (tab[i].cp == &wp->w_p_lcs_chars.tab2) {
@@ -3618,12 +3621,12 @@ static char *set_chars_option(win_T *wp, char_u **varp, bool set)
               return e_invarg;
             }
             c2 = get_encoded_char_adv(&s);
-            if (c2 == 0 || utf_char2cells(c2) > 1) {
+            if (c2 == 0 || char2cells(c2) > 1) {
               return e_invarg;
             }
             if (!(*s == ',' || *s == NUL)) {
               c3 = get_encoded_char_adv(&s);
-              if (c3 == 0 || utf_char2cells(c3) > 1) {
+              if (c3 == 0 || char2cells(c3) > 1) {
                 return e_invarg;
               }
             }
@@ -3657,7 +3660,7 @@ static char *set_chars_option(win_T *wp, char_u **varp, bool set)
             multispace_len = 0;
             while (*s != NUL && *s != ',') {
               c1 = get_encoded_char_adv(&s);
-              if (c1 == 0 || utf_char2cells(c1) > 1) {
+              if (c1 == 0 || char2cells(c1) > 1) {
                 return e_invarg;
               }
               multispace_len++;

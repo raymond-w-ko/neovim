@@ -1,7 +1,7 @@
 " Vim support file to detect file types
 "
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2021 Dec 14
+" Last Change:	2021 Dec 22
 
 " Listen very carefully, I will say this only once
 if exists("did_load_filetypes")
@@ -392,7 +392,8 @@ au BufNewFile,BufRead configure.in,configure.ac setf config
 " CUDA Compute Unified Device Architecture
 au BufNewFile,BufRead *.cu,*.cuh		setf cuda
 
-" Dockerfilb; Podman uses the same syntax with name Containerfile
+" Dockerfile; Podman uses the same syntax with name Containerfile
+" Also see Dockerfile.* below.
 au BufNewFile,BufRead Containerfile,Dockerfile,*.Dockerfile	setf dockerfile
 
 " WildPackets EtherPeek Decoder
@@ -1087,7 +1088,9 @@ au BufNewFile,BufRead *.mmp			setf mmp
 
 " Modsim III (or LambdaProlog)
 au BufNewFile,BufRead *.mod
-	\ if getline(1) =~ '\<module\>' |
+	\ if expand("<afile>") =~ '\<go.mod$' |
+	\   setf gomod |
+	\ elseif getline(1) =~ '\<module\>' |
 	\   setf lprolog |
 	\ else |
 	\   setf modsim3 |
@@ -1744,6 +1747,7 @@ au BufNewFile,BufRead *.ice			setf slice
 
 " Microsoft Visual Studio Solution
 au BufNewFile,BufRead *.sln			setf solution
+au BufNewFile,BufRead *.slnf			setf json
 
 " Spice
 au BufNewFile,BufRead *.sp,*.spice		setf spice
@@ -2233,6 +2237,9 @@ au BufNewFile,BufRead crontab,crontab.*,*/etc/cron.d/*		call s:StarSetf('crontab
 
 " dnsmasq(8) configuration
 au BufNewFile,BufRead */etc/dnsmasq.d/*		call s:StarSetf('dnsmasq')
+
+" Dockerfile
+au BufNewFile,BufRead Dockerfile.*,Containerfile.*	call s:StarSetf('dockerfile')
 
 " Dracula
 au BufNewFile,BufRead drac.*			call s:StarSetf('dracula')
