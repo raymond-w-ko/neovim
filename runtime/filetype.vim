@@ -1774,8 +1774,8 @@ au BufNewFile,BufRead *.sqr,*.sqi		setf sqr
 au BufNewFile,BufRead *.nut			setf squirrel
 
 " OpenSSH configuration
-au BufNewFile,BufRead ssh_config,*/.ssh/config		setf sshconfig
-au BufNewFile,BufRead */etc/ssh/ssh_config.d/*.conf	setf sshconfig
+au BufNewFile,BufRead ssh_config,*/.ssh/config,*/.ssh/*.conf	setf sshconfig
+au BufNewFile,BufRead */etc/ssh/ssh_config.d/*.conf		setf sshconfig
 
 " OpenSSH server configuration
 au BufNewFile,BufRead sshd_config			setf sshdconfig
@@ -2407,10 +2407,12 @@ au BufNewFile,BufRead *.txt
         \|   setf text
         \| endif       
 
-" Use the filetype detect plugins.  They may overrule any of the previously
-" detected filetypes.
-runtime! ftdetect/*.vim
-runtime! ftdetect/*.lua
+if !exists('g:did_load_ftdetect')
+  " Use the filetype detect plugins.  They may overrule any of the previously
+  " detected filetypes.
+  runtime! ftdetect/*.vim
+  runtime! ftdetect/*.lua
+endif
 
 " NOTE: The above command could have ended the filetypedetect autocmd group
 " and started another one. Let's make sure it has ended to get to a consistent
