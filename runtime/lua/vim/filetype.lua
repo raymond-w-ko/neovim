@@ -19,7 +19,13 @@ local function starsetf(ft)
   }}
 end
 
+---@private
+local function getline(bufnr, lnum)
+  return api.nvim_buf_get_lines(bufnr, lnum-1, lnum, false)[1]
+end
+
 -- Filetypes based on file extension
+-- luacheck: push no unused args
 local extension = {
   -- BEGIN EXTENSION
   ["8th"] = "8th",
@@ -635,6 +641,13 @@ local extension = {
   tssop = "tssop",
   tutor = "tutor",
   twig = "twig",
+  ts = function(path, bufnr)
+    if getline(bufnr, 1):find("<%?xml") then
+      return "xml"
+    else
+      return "typescript"
+    end
+  end,
   tsx = "typescriptreact",
   uc = "uc",
   uit = "uil",
@@ -774,6 +787,12 @@ local extension = {
   xml = function() vim.fn["dist#ft#FTxml"]() end,
   y = function() vim.fn["dist#ft#FTy"]() end,
   zsql = function() vim.fn["dist#ft#SQL"]() end,
+  txt = function(path, bufnr)
+    --helpfiles match *.txt, but should have a modeline as last line
+    if not getline(bufnr, -1):match("vim:.*ft=help") then
+      return "text"
+    end
+  end,
   -- END EXTENSION
 }
 
@@ -1312,8 +1331,10 @@ local pattern = {
   ["tmac%..*"] = starsetf('nroff'),
   ["zlog.*"] = starsetf('zsh'),
   ["zsh.*"] = starsetf('zsh'),
+  ["ae%d+%.txt"] = 'mail',
   -- END PATTERN
 }
+-- luacheck: pop
 
 ---@private
 local function sort_by_priority(t)
