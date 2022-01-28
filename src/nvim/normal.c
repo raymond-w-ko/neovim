@@ -164,7 +164,7 @@ static const struct nv_cmd {
   { Ctrl_O,    nv_ctrlo,       0,                      0 },
   { Ctrl_P,    nv_up,          NV_STS,                 false },
   { Ctrl_Q,    nv_visual,      0,                      false },
-  { Ctrl_R,    nv_redo,        0,                      0 },
+  { Ctrl_R,    nv_redo_or_register, 0,                      0 },
   { Ctrl_S,    nv_ignore,      0,                      0 },
   { Ctrl_T,    nv_tagpop,      NV_NCW,                 0 },
   { Ctrl_U,    nv_halfpage,    0,                      0 },
@@ -961,6 +961,7 @@ normal_end:
       && s->oa.regname == 0) {
     if (restart_VIsual_select == 1) {
       VIsual_select = true;
+      VIsual_select_reg = 0;
       trigger_modechanged();
       showmode();
       restart_VIsual_select = 0;
@@ -1010,7 +1011,12 @@ static int normal_execute(VimState *state, int key)
     // restart automatically.
     // Insert the typed character in the typeahead buffer, so that it can
     // be mapped in Insert mode.  Required for ":lmap" to work.
-    ins_char_typebuf(s->c, mod_mask);
+    int len = ins_char_typebuf(s->c, mod_mask);
+
+    // When recording the character will be recorded again, remove the
+    // previously recording.
+    ungetchars(len);
+
     if (restart_edit != 0) {
       s->c = 'd';
     } else {
@@ -3281,7 +3287,7 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
   int col_off1;                 // margin offset for first screen line
   int col_off2;                 // margin offset for wrapped screen line
   int width1;                   // text width for first screen line
-  int width2;                   // test width for wrapped screen line
+  int width2;                   // text width for wrapped screen line
 
   oap->motion_type = kMTCharWise;
   oap->inclusive = (curwin->w_curswant == MAXCOL);
@@ -3403,6 +3409,13 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
     colnr_T virtcol = curwin->w_virtcol;
     if (virtcol > (colnr_T)width1 && *get_showbreak_value(curwin) != NUL) {
       virtcol -= vim_strsize(get_showbreak_value(curwin));
+    }
+
+    int c = utf_ptr2char(get_cursor_pos_ptr());
+    if (dir == FORWARD && virtcol < curwin->w_curswant
+        && (curwin->w_curswant <= (colnr_T)width1)
+        && !vim_isprintc(c) && c > 255) {
+      oneright();
     }
 
     if (virtcol > curwin->w_curswant
@@ -6048,7 +6061,7 @@ static void n_start_visual_mode(int c)
   // Corner case: the 0 position in a tab may change when going into
   // virtualedit.  Recalculate curwin->w_cursor to avoid bad highlighting.
   //
-  if (c == Ctrl_V && (ve_flags & VE_BLOCK) && gchar_cursor() == TAB) {
+  if (c == Ctrl_V && (get_ve_flags() & VE_BLOCK) && gchar_cursor() == TAB) {
     validate_virtcol();
     coladvance(curwin->w_virtcol);
   }
@@ -6188,6 +6201,7 @@ static void nv_g_cmd(cmdarg_T *cap)
       // start Select mode.
       if (cap->arg) {
         VIsual_select = true;
+        VIsual_select_reg = 0;
       } else {
         may_start_select('c');
       }
@@ -6315,11 +6329,9 @@ static void nv_g_cmd(cmdarg_T *cap)
     break;
 
   case 'M': {
-    const char_u *const ptr = get_cursor_line_ptr();
-
     oap->motion_type = kMTCharWise;
     oap->inclusive = false;
-    i = (int)mb_string2cells_len(ptr, STRLEN(ptr));
+    i = linetabsize(get_cursor_line_ptr());
     if (cap->count0 > 0 && cap->count0 <= 100) {
       coladvance((colnr_T)(i * cap->count0 / 100));
     } else {
@@ -6700,11 +6712,26 @@ static void nv_dot(cmdarg_T *cap)
   }
 }
 
-/*
- * CTRL-R: undo undo
- */
-static void nv_redo(cmdarg_T *cap)
+// CTRL-R: undo undo or specify register in select mode
+static void nv_redo_or_register(cmdarg_T *cap)
 {
+  if (VIsual_select && VIsual_active) {
+    int reg;
+    // Get register name
+    no_mapping++;
+    reg = plain_vgetc();
+    LANGMAP_ADJUST(reg, true);
+    no_mapping--;
+
+    if (reg == '"') {
+      // the unnamed register is 0
+      reg = 0;
+    }
+
+    VIsual_select_reg = valid_yank_reg(reg, true) ? reg : 0;
+    return;
+  }
+
   if (!checkclearopq(cap->oap)) {
     u_redo((int)cap->count1);
     curwin->w_set_curswant = true;
@@ -6953,7 +6980,7 @@ static void adjust_cursor(oparg_T *oap)
   if (curwin->w_cursor.col > 0 && gchar_cursor() == NUL
       && (!VIsual_active || *p_sel == 'o')
       && !virtual_active()
-      && (ve_flags & VE_ONEMORE) == 0) {
+      && (get_ve_flags() & VE_ONEMORE) == 0) {
     curwin->w_cursor.col--;
     // prevent cursor from moving on the trail byte
     mb_adjust_cursor();
@@ -7025,6 +7052,7 @@ static void nv_select(cmdarg_T *cap)
 {
   if (VIsual_active) {
     VIsual_select = true;
+    VIsual_select_reg = 0;
   } else if (VIsual_reselect) {
     cap->nchar = 'v';               // fake "gv" command
     cap->arg = true;
@@ -7159,7 +7187,7 @@ static void nv_esc(cmdarg_T *cap)
 void set_cursor_for_append_to_line(void)
 {
   curwin->w_set_curswant = true;
-  if (ve_flags == VE_ALL) {
+  if (get_ve_flags() == VE_ALL) {
     const int save_State = State;
 
     // Pretend Insert mode here to allow the cursor on the
