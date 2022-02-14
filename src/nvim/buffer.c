@@ -1497,6 +1497,11 @@ void set_curbuf(buf_T *buf, int action)
  */
 void enter_buffer(buf_T *buf)
 {
+  // Get the buffer in the current window.
+  curwin->w_buffer = buf;
+  curbuf = buf;
+  curbuf->b_nwindows++;
+
   // Copy buffer and window local option values.  Not for a help buffer.
   buf_copy_options(buf, BCO_ENTER | BCO_NOHELP);
   if (!buf->b_help) {
@@ -1506,11 +1511,6 @@ void enter_buffer(buf_T *buf)
     clearFolding(curwin);
   }
   foldUpdateAll(curwin);        // update folds (later).
-
-  // Get the buffer in the current window.
-  curwin->w_buffer = buf;
-  curbuf = buf;
-  curbuf->b_nwindows++;
 
   if (curwin->w_p_diff) {
     diff_buf_add(curbuf);
@@ -5455,30 +5455,43 @@ bool find_win_for_buf(buf_T *buf, win_T **wp, tabpage_T **tp)
   return false;
 }
 
-int buf_signcols(buf_T *buf)
+static int buf_signcols_inner(buf_T *buf, int maximum)
+{
+  sign_entry_T *sign;  // a sign in the sign list
+  int signcols = 0;
+  int linesum = 0;
+  linenr_T curline = 0;
+
+  FOR_ALL_SIGNS_IN_BUF(buf, sign) {
+    if (sign->se_lnum > curline) {
+      if (linesum > signcols) {
+        signcols = linesum;
+        if (signcols >= maximum) {
+          return maximum;
+        }
+      }
+      curline = sign->se_lnum;
+      linesum = 0;
+    }
+    if (sign->se_has_text_or_icon) {
+      linesum++;
+    }
+  }
+
+  if (linesum > signcols) {
+    signcols = linesum;
+    if (signcols >= maximum) {
+      return maximum;
+    }
+  }
+
+  return signcols;
+}
+
+int buf_signcols(buf_T *buf, int maximum)
 {
   if (!buf->b_signcols_valid) {
-    sign_entry_T *sign;  // a sign in the sign list
-    int signcols = 0;
-    int linesum = 0;
-    linenr_T curline = 0;
-
-    FOR_ALL_SIGNS_IN_BUF(buf, sign) {
-      if (sign->se_lnum > curline) {
-        if (linesum > signcols) {
-          signcols = linesum;
-        }
-        curline = sign->se_lnum;
-        linesum = 0;
-      }
-      if (sign->se_has_text_or_icon) {
-        linesum++;
-      }
-    }
-    if (linesum > signcols) {
-      signcols = linesum;
-    }
-
+    int signcols = buf_signcols_inner(buf, maximum);
     // Check if we need to redraw
     if (signcols != buf->b_signcols) {
       buf->b_signcols = signcols;
