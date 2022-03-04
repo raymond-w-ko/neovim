@@ -239,8 +239,7 @@ void aupat_del_for_event_and_group(event_T event, int group)
     }
   }
 
-  au_need_clean = true;
-  au_cleanup();  // may really delete removed patterns/commands now
+  au_cleanup();
 }
 
 // Mark all commands for a pattern for deletion.
@@ -552,7 +551,7 @@ void free_all_autocmds(void)
   }
 
   au_need_clean = true;
-  au_cleanup();  // may really delete removed patterns/commands now
+  au_cleanup();
 
   // Delete the augroup_map, including free the data
   String name;
@@ -941,7 +940,7 @@ int do_autocmd_event(event_T event, char_u *pat, bool once, int nested, char_u *
     patlen = (int)aucmd_pattern_length(pat);
   }
 
-  au_cleanup();
+  au_cleanup();  // may really delete removed patterns/commands now
   return OK;
 }
 
@@ -2473,7 +2472,7 @@ bool aucmd_exec_is_deleted(AucmdExecutable acc)
   case CALLABLE_EX:
     return acc.callable.cmd == NULL;
   case CALLABLE_CB:
-    return callback_is_freed(acc.callable.cb);
+    return acc.callable.cb.type == kCallbackNone;
   case CALLABLE_NONE:
     return true;
   }
