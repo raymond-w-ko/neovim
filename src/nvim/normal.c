@@ -2105,10 +2105,9 @@ bool do_mouse(oparg_T *oap, int c, int dir, long count, bool fixindent)
     } else {  // MOUSE_RIGHT
       stuffcharReadbuff('#');
     }
-  }
-  // Handle double clicks, unless on status line
-  else if (in_status_line) {
-  } else if (in_sep_line) {
+  } else if (in_status_line || in_sep_line) {
+    // Do nothing if on status line or vertical separator
+    // Handle double clicks otherwise
   } else if ((mod_mask & MOD_MASK_MULTI_CLICK) && (State & (NORMAL | INSERT))) {
     if (is_click || !VIsual_active) {
       if (VIsual_active) {
@@ -3569,7 +3568,6 @@ static void nv_zet(cmdarg_T *cap)
   bool undo = false;
 
   int l_p_siso = (int)get_sidescrolloff_value(curwin);
-  assert(l_p_siso <= INT_MAX);
 
   if (ascii_isdigit(nchar)) {
     /*
@@ -5871,7 +5869,7 @@ static void nv_gomark(cmdarg_T *cap)
   }
 }
 
-// Handle CTRL-O, CTRL-I, "g;", "g,", and "CTRL-Tab" commands.
+/// Handle CTRL-O, CTRL-I, "g;", "g,", and "CTRL-Tab" commands.
 static void nv_pcmark(cmdarg_T *cap)
 {
   pos_T *pos;
@@ -5880,7 +5878,9 @@ static void nv_pcmark(cmdarg_T *cap)
 
   if (!checkclearopq(cap->oap)) {
     if (cap->cmdchar == TAB && mod_mask == MOD_MASK_CTRL) {
-      goto_tabpage_lastused();
+      if (!goto_tabpage_lastused()) {
+        clearopbeep(cap->oap);
+      }
       return;
     }
     if (cap->cmdchar == 'g') {
@@ -6644,9 +6644,10 @@ static void nv_g_cmd(cmdarg_T *cap)
       goto_tabpage(-(int)cap->count1);
     }
     break;
+
   case TAB:
-    if (!checkclearop(oap)) {
-      goto_tabpage_lastused();
+    if (!checkclearop(oap) && !goto_tabpage_lastused()) {
+      clearopbeep(oap);
     }
     break;
 

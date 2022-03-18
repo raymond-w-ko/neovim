@@ -38,6 +38,7 @@
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/hardcopy.h"
+#include "nvim/highlight_group.h"
 #include "nvim/if_cscope.h"
 #include "nvim/input.h"
 #include "nvim/keymap.h"
@@ -2036,6 +2037,18 @@ doend:
   return ea.nextcmd;
 }
 
+static char ex_error_buf[MSG_BUF_LEN];
+
+/// @return an error message with argument included.
+/// Uses a static buffer, only the last error will be kept.
+/// "msg" will be translated, caller should use N_().
+char *ex_errmsg(const char *const msg, const char_u *const arg)
+  FUNC_ATTR_NONNULL_ALL
+{
+  vim_snprintf(ex_error_buf, MSG_BUF_LEN, _(msg), arg);
+  return ex_error_buf;
+}
+
 // Parse and skip over command modifiers:
 // - update eap->cmd
 // - store flags in "cmdmod".
@@ -2704,7 +2717,7 @@ static char_u *find_ucmd(exarg_T *eap, char_u *p, int *full, expand_T *xp, int *
                                      // only full match global is accepted.
 
   // Look for buffer-local user commands first, then global ones.
-  gap = is_in_cmdwin() ? &prevwin->w_buffer->b_ucmds : &curbuf->b_ucmds;
+  gap = &prevwin_curwin()->w_buffer->b_ucmds;
   for (;;) {
     for (j = 0; j < gap->ga_len; j++) {
       uc = USER_CMD_GA(gap, j);
@@ -4861,7 +4874,13 @@ static int get_tabpage_arg(exarg_T *eap)
       if (STRCMP(p, "$") == 0) {
         tab_number = LAST_TAB_NR;
       } else if (STRCMP(p, "#") == 0) {
-        tab_number = tabpage_index(lastused_tabpage);
+        if (valid_tabpage(lastused_tabpage)) {
+          tab_number = tabpage_index(lastused_tabpage);
+        } else {
+          eap->errmsg = ex_errmsg(e_invargval, eap->arg);
+          tab_number = 0;
+          goto theend;
+        }
       } else if (p == p_save || *p_save == '-' || *p != NUL
                  || tab_number > LAST_TAB_NR) {
         // No numbers as argument.
@@ -5378,7 +5397,7 @@ static void uc_list(char_u *name, size_t name_len)
   uint32_t a;
 
   // In cmdwin, the alternative buffer should be used.
-  garray_T *gap = is_in_cmdwin() ? &prevwin->w_buffer->b_ucmds : &curbuf->b_ucmds;
+  const garray_T *gap = &prevwin_curwin()->w_buffer->b_ucmds;
   for (;;) {
     for (i = 0; i < gap->ga_len; i++) {
       cmd = USER_CMD_GA(gap, i);
@@ -6230,7 +6249,6 @@ static void do_ucmd(exarg_T *eap)
   size_t split_len = 0;
   char_u *split_buf = NULL;
   ucmd_T *cmd;
-  const sctx_T save_current_sctx = current_sctx;
 
   if (eap->cmdidx == CMD_USER) {
     cmd = USER_CMD(eap->useridx);
@@ -6320,12 +6338,19 @@ static void do_ucmd(exarg_T *eap)
     buf = xmalloc(totlen + 1);
   }
 
+  sctx_T save_current_sctx;
+  bool restore_current_sctx = false;
   if ((cmd->uc_argt & EX_KEEPSCRIPT) == 0) {
+    restore_current_sctx = true;
+    save_current_sctx = current_sctx;
     current_sctx.sc_sid = cmd->uc_script_ctx.sc_sid;
   }
   (void)do_cmdline(buf, eap->getline, eap->cookie,
                    DOCMD_VERBOSE|DOCMD_NOWAIT|DOCMD_KEYTYPED);
-  if ((cmd->uc_argt & EX_KEEPSCRIPT) == 0) {
+
+  // Careful: Do not use "cmd" here, it may have become invalid if a user
+  // command was added.
+  if (restore_current_sctx) {
     current_sctx = save_current_sctx;
   }
   xfree(buf);
@@ -6351,7 +6376,7 @@ char_u *get_user_commands(expand_T *xp FUNC_ATTR_UNUSED, int idx)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   // In cmdwin, the alternative buffer should be used.
-  const buf_T *const buf = is_in_cmdwin() ? prevwin->w_buffer : curbuf;
+  const buf_T *const buf = prevwin_curwin()->w_buffer;
 
   if (idx < buf->b_ucmds.ga_len) {
     return USER_CMD_GA(&buf->b_ucmds, idx)->uc_name;
@@ -6373,7 +6398,8 @@ static char_u *get_user_command_name(int idx, int cmdidx)
   }
   if (cmdidx == CMD_USER_BUF) {
     // In cmdwin, the alternative buffer should be used.
-    buf_T *buf = is_in_cmdwin() ? prevwin->w_buffer : curbuf;
+    const buf_T *const buf = prevwin_curwin()->w_buffer;
+
     if (idx < buf->b_ucmds.ga_len) {
       return USER_CMD_GA(&buf->b_ucmds, idx)->uc_name;
     }
@@ -9630,7 +9656,7 @@ static void ex_filetype(exarg_T *eap)
 
 /// Source ftplugin.vim and indent.vim to create the necessary FileType
 /// autocommands. We do this separately from filetype.vim so that these
-/// autocommands will always fire first (and thus can be overriden) while still
+/// autocommands will always fire first (and thus can be overridden) while still
 /// allowing general filetype detection to be disabled in the user's init file.
 void filetype_plugin_enable(void)
 {

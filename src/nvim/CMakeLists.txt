@@ -39,6 +39,7 @@ set(GENERATED_UI_EVENTS ${GENERATED_DIR}/ui_events.generated.h)
 set(GENERATED_UI_EVENTS_CALL ${GENERATED_DIR}/ui_events_call.generated.h)
 set(GENERATED_UI_EVENTS_REMOTE ${GENERATED_DIR}/ui_events_remote.generated.h)
 set(GENERATED_UI_EVENTS_BRIDGE ${GENERATED_DIR}/ui_events_bridge.generated.h)
+set(GENERATED_UI_EVENTS_CLIENT ${GENERATED_DIR}/ui_events_client.generated.h)
 set(GENERATED_UI_EVENTS_METADATA ${GENERATED_DIR}/api/private/ui_events_metadata.generated.h)
 set(GENERATED_EX_CMDS_ENUM ${GENERATED_INCLUDES_DIR}/ex_cmds_enum.generated.h)
 set(GENERATED_EX_CMDS_DEFS ${GENERATED_DIR}/ex_cmds_defs.generated.h)
@@ -133,6 +134,9 @@ list(APPEND LINT_NVIM_SOURCES ${NVIM_SOURCES} ${NVIM_HEADERS})
 foreach(sfile ${NVIM_SOURCES})
   get_filename_component(f ${sfile} NAME)
   if(${f} MATCHES "^(regexp_nfa.c)$")
+    list(APPEND to_remove ${sfile})
+  endif()
+  if(${f} MATCHES "^(regexp_bt.c)$")
     list(APPEND to_remove ${sfile})
   endif()
   if(WIN32 AND ${f} MATCHES "^(pty_process_unix.c)$")
@@ -261,12 +265,14 @@ endif()
 # NVIM_GENERATED_SOURCES: generated source files
 # These lists must be mutually exclusive.
 foreach(sfile ${NVIM_SOURCES}
+              "${CMAKE_CURRENT_LIST_DIR}/regexp_bt.c"
               "${CMAKE_CURRENT_LIST_DIR}/regexp_nfa.c"
               ${GENERATED_API_DISPATCH}
               "${GENERATED_UI_EVENTS_CALL}"
               "${GENERATED_UI_EVENTS_REMOTE}"
               "${GENERATED_UI_EVENTS_BRIDGE}"
               "${GENERATED_KEYSETS}"
+              "${GENERATED_UI_EVENTS_CLIENT}"
               )
   get_filename_component(full_d ${sfile} PATH)
   file(RELATIVE_PATH d "${CMAKE_CURRENT_LIST_DIR}" "${full_d}")
@@ -364,6 +370,7 @@ add_custom_command(
          ${GENERATED_UI_EVENTS_REMOTE}
          ${GENERATED_UI_EVENTS_BRIDGE}
          ${GENERATED_UI_EVENTS_METADATA}
+         ${GENERATED_UI_EVENTS_CLIENT}
   COMMAND ${LUA_PRG} ${API_UI_EVENTS_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}
                      ${CMAKE_CURRENT_LIST_DIR}/api/ui_events.in.h
                      ${GENERATED_UI_EVENTS}
@@ -371,6 +378,7 @@ add_custom_command(
                      ${GENERATED_UI_EVENTS_REMOTE}
                      ${GENERATED_UI_EVENTS_BRIDGE}
                      ${GENERATED_UI_EVENTS_METADATA}
+                     ${GENERATED_UI_EVENTS_CLIENT}
   DEPENDS
     ${API_UI_EVENTS_GENERATOR}
     ${GENERATOR_C_GRAMMAR}
