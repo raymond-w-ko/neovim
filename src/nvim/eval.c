@@ -68,7 +68,6 @@ static char *e_illvar = N_("E461: Illegal variable name: %s");
 static char *e_cannot_mod = N_("E995: Cannot modify existing variable");
 static char *e_nowhitespace
   = N_("E274: No white space allowed before parenthesis");
-static char *e_invalwindow = N_("E957: Invalid window number");
 static char *e_lock_unlock = N_("E940: Cannot lock or unlock variable %s");
 static char *e_write2 = N_("E80: Error while writing: %s");
 static char *e_string_list_or_blob_required = N_("E1098: String, List or Blob required");
@@ -7323,30 +7322,6 @@ void mapblock_fill_dict(dict_T *const dict, const mapblock_T *const mp, long buf
   tv_dict_add_allocated_str(dict, S_LEN("mode"), mapmode);
 }
 
-int matchadd_dict_arg(typval_T *tv, const char **conceal_char, win_T **win)
-{
-  dictitem_T *di;
-
-  if (tv->v_type != VAR_DICT) {
-    emsg(_(e_dictreq));
-    return FAIL;
-  }
-
-  if ((di = tv_dict_find(tv->vval.v_dict, S_LEN("conceal"))) != NULL) {
-    *conceal_char = tv_get_string(&di->di_tv);
-  }
-
-  if ((di = tv_dict_find(tv->vval.v_dict, S_LEN("window"))) != NULL) {
-    *win = find_win_by_nr_or_id(&di->di_tv);
-    if (*win == NULL) {
-      emsg(_(e_invalwindow));
-      return FAIL;
-    }
-  }
-
-  return OK;
-}
-
 void return_register(int regname, typval_T *rettv)
 {
   char_u buf[2] = { regname, 0 };
@@ -7730,6 +7705,7 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
   partial_T *partial;
   char_u *name;
   Array args = ARRAY_DICT_INIT;
+  Object rv;
   switch (callback->type) {
   case kCallbackFuncref:
     name = callback->data.funcref;
@@ -7742,10 +7718,13 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
     break;
 
   case kCallbackLua:
-    nlua_call_ref(callback->data.luaref, NULL, args, false, NULL);
-
-    return false;
-    break;
+    rv = nlua_call_ref(callback->data.luaref, NULL, args, true, NULL);
+    switch (rv.type) {
+    case kObjectTypeBoolean:
+      return rv.data.boolean;
+    default:
+      return false;
+    }
 
   case kCallbackNone:
     return false;
