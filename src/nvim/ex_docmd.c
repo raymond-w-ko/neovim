@@ -44,6 +44,7 @@
 #include "nvim/keymap.h"
 #include "nvim/lua/executor.h"
 #include "nvim/main.h"
+#include "nvim/match.h"
 #include "nvim/mark.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
@@ -7154,7 +7155,6 @@ void alist_slash_adjust(void)
 /// ":preserve".
 static void ex_preserve(exarg_T *eap)
 {
-  curbuf->b_flags |= BF_PRESERVED;
   ml_preserve(curbuf, true, true);
 }
 

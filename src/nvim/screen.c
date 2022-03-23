@@ -95,6 +95,7 @@
 #include "nvim/lua/executor.h"
 #include "nvim/main.h"
 #include "nvim/mark.h"
+#include "nvim/match.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
@@ -1544,17 +1545,17 @@ static void win_update(win_T *wp, DecorProviders *providers)
                        foldinfo.fi_lines ? srow : wp->w_grid.Rows,
                        mod_top == 0, false, foldinfo, &line_providers);
 
-        wp->w_lines[idx].wl_folded = foldinfo.fi_lines != 0;
-        wp->w_lines[idx].wl_lastlnum = lnum;
-        did_update = DID_LINE;
-
-        if (foldinfo.fi_lines > 0) {
-          did_update = DID_FOLD;
+        if (foldinfo.fi_lines == 0) {
+          wp->w_lines[idx].wl_folded = false;
+          wp->w_lines[idx].wl_lastlnum = lnum;
+          did_update = DID_LINE;
+          syntax_last_parsed = lnum;
+        } else {
           foldinfo.fi_lines--;
+          wp->w_lines[idx].wl_folded = true;
           wp->w_lines[idx].wl_lastlnum = lnum + foldinfo.fi_lines;
+          did_update = DID_FOLD;
         }
-
-        syntax_last_parsed = lnum;
       }
 
       wp->w_lines[idx].wl_lnum = lnum;
@@ -2159,7 +2160,8 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
     // To speed up the loop below, set extra_check when there is linebreak,
     // trailing white space and/or syntax processing to be done.
     extra_check = wp->w_p_lbr;
-    if (syntax_present(wp) && !wp->w_s->b_syn_error && !wp->w_s->b_syn_slow) {
+    if (syntax_present(wp) && !wp->w_s->b_syn_error && !wp->w_s->b_syn_slow
+        && !has_fold && !end_fill) {
       // Prepare for syntax highlighting in this line.  When there is an
       // error, stop syntax highlighting.
       save_did_emsg = did_emsg;
