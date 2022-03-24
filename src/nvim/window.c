@@ -836,7 +836,7 @@ void ui_ext_win_position(win_T *wp)
   FloatConfig c = wp->w_float_config;
   if (!c.external) {
     ScreenGrid *grid = &default_grid;
-    float row = c.row, col = c.col;
+    Float row = c.row, col = c.col;
     if (c.relative == kFloatRelativeWindow) {
       Error dummy = ERROR_INIT;
       win_T *win = find_window_by_handle(c.window, &dummy);
@@ -2350,17 +2350,15 @@ void entering_window(win_T *const win)
   }
 }
 
-/// Closes all windows for buffer `buf` until there is only one non-floating window.
+/// Closes all windows for buffer `buf` unless there is only one non-floating window.
 ///
-/// @param keep_curwin  don't close `curwin`, but caller must ensure `curwin` is non-floating.
+/// @param keep_curwin  don't close `curwin`
 void close_windows(buf_T *buf, bool keep_curwin)
 {
   tabpage_T *tp, *nexttp;
   int h = tabline_height();
 
   ++RedrawingDisabled;
-
-  assert(!keep_curwin || !curwin->w_floating);
 
   // Start from lastwin to close floating windows with the same buffer first.
   // When the autocommand window is involved win_close() may need to print an error message.
