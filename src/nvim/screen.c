@@ -667,15 +667,11 @@ void conceal_check_cursor_line(void)
 
 /// Whether cursorline is drawn in a special way
 ///
-/// If true, both old and new cursorline will need
-/// to be redrawn when moving cursor within windows.
-/// TODO(bfredl): VIsual_active shouldn't be needed, but is used to fix a glitch
-///               caused by scrolling.
+/// If true, both old and new cursorline will need to be redrawn when moving cursor within windows.
 bool win_cursorline_standout(const win_T *wp)
   FUNC_ATTR_NONNULL_ALL
 {
-  return wp->w_p_cul
-         || (wp->w_p_cole > 0 && (VIsual_active || !conceal_cursor_line(wp)));
+  return wp->w_p_cul || (wp->w_p_cole > 0 && !conceal_cursor_line(wp));
 }
 
 /*
@@ -938,7 +934,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
     if (mod_top != 0
         && wp->w_topline == mod_top
         && (!wp->w_lines[0].wl_valid
-            || wp->w_topline <= wp->w_lines[0].wl_lnum)) {
+            || wp->w_topline == wp->w_lines[0].wl_lnum)) {
       // w_topline is the first changed line and window is not scrolled,
       // the scrolling from changed lines will be done further down.
     } else if (wp->w_lines[0].wl_valid
@@ -1577,9 +1573,9 @@ static void win_update(win_T *wp, DecorProviders *providers)
       idx++;
       lnum += foldinfo.fi_lines + 1;
     } else {
-      if (wp->w_p_rnu) {
-        // 'relativenumber' set: The text doesn't need to be drawn, but
-        // the number column nearly always does.
+      if (wp->w_p_rnu && wp->w_last_cursor_lnum_rnu != wp->w_cursor.lnum) {
+        // 'relativenumber' set and cursor moved vertically: The
+        // text doesn't need to be drawn, but the number column does.
         foldinfo_T info = fold_info(wp, lnum);
         (void)win_line(wp, lnum, srow, wp->w_grid.Rows, true, true,
                        info, &line_providers);
@@ -1606,6 +1602,8 @@ static void win_update(win_T *wp, DecorProviders *providers)
   // Now that the window has been redrawn with the old and new cursor line,
   // update w_last_cursorline.
   wp->w_last_cursorline = cursorline_standout ? wp->w_cursor.lnum : 0;
+
+  wp->w_last_cursor_lnum_rnu = wp->w_p_rnu ? wp->w_cursor.lnum : 0;
 
   if (idx > wp->w_lines_valid) {
     wp->w_lines_valid = idx;
@@ -4332,6 +4330,9 @@ static int draw_virt_text_item(buf_T *buf, int col, VirtText vt, HlMode hl_mode,
       if (!s.p) {
         break;
       }
+    }
+    if (!*s.p) {
+      continue;
     }
     int attr;
     bool through = false;
@@ -7616,17 +7617,4 @@ win_T *get_win_by_grid_handle(handle_T handle)
     }
   }
   return NULL;
-}
-
-/// Check if the cursor moved and 'cursorline' is set.  Mark for a VALID redraw
-/// if needed.
-void check_redraw_cursorline(void)
-{
-  // When 'cursorlineopt' is "screenline" need to redraw always.
-  if (curwin->w_p_cul
-      && (curwin->w_last_cursorline != curwin->w_cursor.lnum
-          || (curwin->w_p_culopt_flags & CULOPT_SCRLINE))
-      && !char_avail()) {
-    redraw_later(curwin, VALID);
-  }
 }

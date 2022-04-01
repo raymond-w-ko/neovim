@@ -4027,8 +4027,9 @@ static linenr_T get_address(exarg_T *eap, char_u **ptr, cmd_addr_T addr_type, in
 
         // When '/' or '?' follows another address, start from
         // there.
-        if (lnum != MAXLNUM) {
-          curwin->w_cursor.lnum = lnum;
+        if (lnum > 0 && lnum != MAXLNUM) {
+          curwin->w_cursor.lnum
+            = lnum > curbuf->b_ml.ml_line_count ? curbuf->b_ml.ml_line_count : lnum;
         }
 
         // Start a forward search at the end of the line (unless
@@ -6839,7 +6840,7 @@ void tabpage_close_other(tabpage_T *tp, int forceit)
 
     // Autocommands may delete the tab page under our fingers and we may
     // fail to close a window with a modified buffer.
-    if (!valid_tabpage(tp) || tp->tp_firstwin == wp) {
+    if (!valid_tabpage(tp) || tp->tp_lastwin == wp) {
       break;
     }
   }
