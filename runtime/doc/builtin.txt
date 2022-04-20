@@ -966,8 +966,6 @@ byteidxcomp({expr}, {nr})					*byteidxcomp()*
 <		The first and third echo result in 3 ('e' plus composing
 		character is 3 bytes), the second echo results in 1 ('e' is
 		one byte).
-		Only works differently from byteidx() when 'encoding' is set
-		to a Unicode encoding.
 
 		Can also be used as a |method|: >
 			GetName()->byteidxcomp(idx)
@@ -1811,7 +1809,7 @@ execute({command} [, {silent}])				*execute()*
 		`:redir`, error messages are dropped.
 
 		To get a list of lines use |split()| on the result: >
-			split(execute('args'), "\n")
+			execute('args')->split("\n")
 
 <		This function is not available in the |sandbox|.
 		Note: If nested, an outer execute() will not observe output of
