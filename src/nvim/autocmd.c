@@ -4,7 +4,6 @@
 // autocmd.c: Autocommand related functions
 #include <signal.h>
 
-#include "lauxlib.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
@@ -27,6 +26,9 @@
 #include "nvim/state.h"
 #include "nvim/ui_compositor.h"
 #include "nvim/vim.h"
+#include "nvim/window.h"
+
+#include "lauxlib.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "auevents_name_map.generated.h"
@@ -2359,7 +2361,7 @@ bool au_exists(const char *const arg) FUNC_ATTR_WARN_UNUSED_RESULT
   }
 
   // if pattern is "<buffer>", special handling is needed which uses curbuf
-  // for pattern "<buffer=N>, fnamecmp() will work fine
+  // for pattern "<buffer=N>, FNAMECMP() will work fine
   if (pattern != NULL && STRICMP(pattern, "<buffer>") == 0) {
     buflocal_buf = curbuf;
   }
@@ -2367,12 +2369,12 @@ bool au_exists(const char *const arg) FUNC_ATTR_WARN_UNUSED_RESULT
   // Check if there is an autocommand with the given pattern.
   for (; ap != NULL; ap = ap->next) {
     // only use a pattern when it has not been removed and has commands.
-    // For buffer-local autocommands, fnamecmp() works fine.
+    // For buffer-local autocommands, FNAMECMP() works fine.
     if (ap->pat != NULL && ap->cmds != NULL
         && (group == AUGROUP_ALL || ap->group == group)
         && (pattern == NULL
             || (buflocal_buf == NULL
-                ? fnamecmp(ap->pat, (char_u *)pattern) == 0
+                ? FNAMECMP(ap->pat, (char_u *)pattern) == 0
                 : ap->buflocal_nr == buflocal_buf->b_fnum))) {
       retval = true;
       break;
@@ -2449,7 +2451,7 @@ bool autocmd_delete_id(int64_t id)
 
   // Note that since multiple AutoCmd objects can have the same ID, we need to do a full scan.
   FOR_ALL_AUEVENTS(event) {
-    FOR_ALL_AUPATS_IN_EVENT(event, ap) {
+    FOR_ALL_AUPATS_IN_EVENT(event, ap) {  // -V756
       for (AutoCmd *ac = ap->cmds; ac != NULL; ac = ac->next) {
         if (ac->id == id) {
           aucmd_del(ac);

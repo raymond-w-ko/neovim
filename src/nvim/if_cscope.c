@@ -32,6 +32,7 @@
 #include "nvim/quickfix.h"
 #include "nvim/strings.h"
 #include "nvim/tag.h"
+#include "nvim/window.h"
 #if defined(UNIX)
 # include <sys/wait.h>
 #endif
@@ -433,7 +434,7 @@ static int cs_add_common(char *arg1, char *arg2, char *flags)
   if (fname == NULL) {
     goto add_err;
   }
-  fname = (char *)vim_strnsave((char_u *)fname, len);
+  fname = xstrnsave(fname, len);
   xfree(fbuf);
   FileInfo file_info;
   bool file_info_ok  = os_fileinfo(fname, &file_info);
@@ -1039,8 +1040,8 @@ static bool cs_find_common(char *opt, char *pat, int forceit, int verbose, bool 
         wp = curwin;
       }
       // '-' starts a new error list
-      if (qf_init(wp, tmp, (char_u *)"%f%*\\t%l%*\\t%m",
-                  *qfpos == '-', cmdline, NULL) > 0) {
+      if (qf_init(wp, (char *)tmp, "%f%*\\t%l%*\\t%m",
+                  *qfpos == '-', (char *)cmdline, NULL) > 0) {
         if (postponed_split != 0) {
           (void)win_split(postponed_split > 0 ? postponed_split : 0,
                           postponed_split_flags);

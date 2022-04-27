@@ -526,8 +526,7 @@ String nvim__get_lib_dir(void)
 ///
 /// @param pat pattern of files to search for
 /// @param all whether to return all matches or only the first
-/// @param options
-///          is_lua: only search lua subdirs
+/// @param opts is_lua: only search lua subdirs
 /// @return list of absolute paths to the found files
 ArrayOf(String) nvim__get_runtime(Array pat, Boolean all, Dict(runtime) *opts, Error *err)
   FUNC_API_SINCE(8)
@@ -1741,7 +1740,7 @@ void nvim_set_client_info(uint64_t channel_id, String name, Dictionary version, 
 ///    -  "pty"     (optional) Name of pseudoterminal. On a POSIX system this
 ///                 is a device path like "/dev/pts/1". If the name is unknown,
 ///                 the key will still be present if a pty is used (e.g. for
-///                 winpty on Windows).
+///                 conpty on Windows).
 ///    -  "buffer"  (optional) Buffer with connected |terminal| instance.
 ///    -  "client"  (optional) Info about the peer (client on the other end of
 ///                 the RPC channel), if provided by it via
