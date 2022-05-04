@@ -948,7 +948,7 @@ void ex_set(exarg_T *eap)
   if (eap->forceit) {
     flags |= OPT_ONECOLUMN;
   }
-  (void)do_set(eap->arg, flags);
+  (void)do_set((char_u *)eap->arg, flags);
 }
 
 /// Parse 'arg' for option settings.
@@ -3015,7 +3015,7 @@ ambw_end:
   } else if (varp == &p_pt) {
     // 'pastetoggle': translate key codes like in a mapping
     if (*p_pt) {
-      (void)replace_termcodes(p_pt, STRLEN(p_pt), &p, true, true, true,
+      (void)replace_termcodes(p_pt, STRLEN(p_pt), &p, REPTERM_FROM_PART | REPTERM_DO_LT, NULL,
                               CPO_TO_CPO_FLAGS);
       if (p != NULL) {
         if (new_value_alloced) {
@@ -3858,10 +3858,10 @@ static bool parse_winhl_opt(win_T *wp)
     if (!colon) {
       return false;
     }
-    size_t nlen = (size_t)(colon-p);
-    char *hi = colon+1;
+    size_t nlen = (size_t)(colon - p);
+    char *hi = colon + 1;
     char *commap = xstrchrnul(hi, ',');
-    size_t len = (size_t)(commap-hi);
+    size_t len = (size_t)(commap - hi);
     int hl_id = len ? syn_check_group(hi, len) : -1;
 
     if (strncmp("Normal", p, nlen) == 0) {
@@ -3879,7 +3879,7 @@ static bool parse_winhl_opt(win_T *wp)
       }
     }
 
-    p = *commap ? commap+1 : "";
+    p = *commap ? commap + 1 : "";
   }
 
   wp->w_hl_id_normal = w_hl_id_normal;
@@ -5222,7 +5222,8 @@ int find_key_option_len(const char_u *arg_arg, size_t len, bool has_lt)
   } else if (has_lt) {
     arg--;  // put arg at the '<'
     modifiers = 0;
-    key = find_special_key(&arg, len + 1, &modifiers, true, true, false);
+    key = find_special_key(&arg, len + 1, &modifiers,
+                           FSK_KEYCODE | FSK_KEEP_X_KEY | FSK_SIMPLIFY, NULL);
     if (modifiers) {  // can't handle modifiers here
       key = 0;
     }
@@ -6697,12 +6698,12 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
 
   xp->xp_context = EXPAND_SETTINGS;
   if (*arg == NUL) {
-    xp->xp_pattern = arg;
+    xp->xp_pattern = (char *)arg;
     return;
   }
   p = arg + STRLEN(arg) - 1;
   if (*p == ' ' && *(p - 1) != '\\') {
-    xp->xp_pattern = p + 1;
+    xp->xp_pattern = (char *)p + 1;
     return;
   }
   while (p > arg) {
@@ -6728,7 +6729,8 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
     xp->xp_context = EXPAND_BOOL_SETTINGS;
     p += 3;
   }
-  xp->xp_pattern = arg = p;
+  xp->xp_pattern = (char *)p;
+  arg = p;
   if (*arg == '<') {
     while (*p != '>') {
       if (*p++ == NUL) {            // expand terminal option name
@@ -6795,7 +6797,7 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
     } else {
       expand_option_idx = opt_idx;
     }
-    xp->xp_pattern = p + 1;
+    xp->xp_pattern = (char *)p + 1;
     return;
   }
   xp->xp_context = EXPAND_NOTHING;
@@ -6803,7 +6805,7 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
     return;
   }
 
-  xp->xp_pattern = p + 1;
+  xp->xp_pattern = (char *)p + 1;
 
   if (flags & P_EXPAND) {
     p = options[opt_idx].var;
@@ -6836,16 +6838,16 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
 
   // For an option that is a list of file names, find the start of the
   // last file name.
-  for (p = arg + STRLEN(arg) - 1; p > xp->xp_pattern; p--) {
+  for (p = arg + STRLEN(arg) - 1; p > (char_u *)xp->xp_pattern; p--) {
     // count number of backslashes before ' ' or ','
     if (*p == ' ' || *p == ',') {
       s = p;
-      while (s > xp->xp_pattern && *(s - 1) == '\\') {
+      while (s > (char_u *)xp->xp_pattern && *(s - 1) == '\\') {
         s--;
       }
       if ((*p == ' ' && (xp->xp_backslash == XP_BS_THREE && (p - s) < 3))
           || (*p == ',' && (flags & P_COMMA) && ((p - s) & 1) == 0)) {
-        xp->xp_pattern = p + 1;
+        xp->xp_pattern = (char *)p + 1;
         break;
       }
     }
@@ -6853,7 +6855,7 @@ void set_context_in_set_cmd(expand_T *xp, char_u *arg, int opt_flags)
     // for 'spellsuggest' start at "file:"
     if (options[opt_idx].var == (char_u *)&p_sps
         && STRNCMP(p, "file:", 5) == 0) {
-      xp->xp_pattern = p + 5;
+      xp->xp_pattern = (char *)p + 5;
       break;
     }
   }

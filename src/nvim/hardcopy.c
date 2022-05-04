@@ -374,8 +374,8 @@ static char *parse_list_options(char_u *option_str, option_table_T *table, size_
 static uint32_t darken_rgb(uint32_t rgb)
 {
   return ((rgb >> 17) << 16)
-         +   (((rgb & 0xff00) >> 9) << 8)
-         +   ((rgb & 0xff) >> 1);
+         + (((rgb & 0xff00) >> 9) << 8)
+         + ((rgb & 0xff) >> 1);
 }
 
 static uint32_t prt_get_term_color(int colorindex)
@@ -641,15 +641,15 @@ void ex_hardcopy(exarg_T *eap)
     char *errormsg = NULL;
 
     // Expand things like "%.ps".
-    if (expand_filename(eap, eap->cmdlinep, &errormsg) == FAIL) {
+    if (expand_filename(eap, (char_u **)eap->cmdlinep, &errormsg) == FAIL) {
       if (errormsg != NULL) {
         emsg(errormsg);
       }
       return;
     }
-    settings.outfile = skipwhite(eap->arg + 1);
+    settings.outfile = skipwhite((char_u *)eap->arg + 1);
   } else if (*eap->arg != NUL) {
-    settings.arguments = eap->arg;
+    settings.arguments = (char_u *)eap->arg;
   }
 
   /*
@@ -3195,4 +3195,3 @@ void mch_print_set_fg(uint32_t fgcol)
     prt_need_fgcol = true;
   }
 }
-

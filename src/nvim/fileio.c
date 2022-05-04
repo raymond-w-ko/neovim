@@ -3,8 +3,6 @@
 
 // fileio.c: read from and write to a file
 
-// uncrustify:off
-
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,8 +19,8 @@
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
 #include "nvim/edit.h"
-#include "nvim/eval/userfunc.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/userfunc.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
@@ -178,7 +176,7 @@ void filemess(buf_T *buf, char_u *name, char_u *s, int attr)
 int readfile(char_u *fname, char_u *sfname, linenr_T from, linenr_T lines_to_skip,
              linenr_T lines_to_read, exarg_T *eap, int flags, bool silent)
 {
-  int fd = 0;
+  int fd = stdin_fd >= 0 ? stdin_fd : 0;
   int newfile = (flags & READ_NEW);
   int check_readonly;
   int filtering = (flags & READ_FILTER);
@@ -359,7 +357,9 @@ int readfile(char_u *fname, char_u *sfname, linenr_T from, linenr_T lines_to_ski
     // because reading the file may actually work, but then creating the
     // swap file may destroy it!  Reported on MS-DOS and Win 95.
     if (after_pathsep((const char *)fname, (const char *)(fname + namelen))) {
-      filemess(curbuf, fname, (char_u *)_(msg_is_a_directory), 0);
+      if (!silent) {
+        filemess(curbuf, fname, (char_u *)_(msg_is_a_directory), 0);
+      }
       msg_end();
       msg_scroll = msg_save;
       return NOTDONE;
@@ -379,7 +379,9 @@ int readfile(char_u *fname, char_u *sfname, linenr_T from, linenr_T lines_to_ski
 #endif
         ) {
       if (S_ISDIR(perm)) {
-        filemess(curbuf, fname, (char_u *)_(msg_is_a_directory), 0);
+        if (!silent) {
+          filemess(curbuf, fname, (char_u *)_(msg_is_a_directory), 0);
+        }
       } else {
         filemess(curbuf, fname, (char_u *)_("is not a file"), 0);
       }
@@ -688,7 +690,7 @@ int readfile(char_u *fname, char_u *sfname, linenr_T from, linenr_T lines_to_ski
    * Decide which 'encoding' to use or use first.
    */
   if (eap != NULL && eap->force_enc != 0) {
-    fenc = enc_canonize(eap->cmd + eap->force_enc);
+    fenc = enc_canonize((char_u *)eap->cmd + eap->force_enc);
     fenc_alloced = true;
     keep_dest_enc = true;
   } else if (curbuf->b_p_bin) {
@@ -1526,8 +1528,7 @@ rewind_retry:
             // Need to reset the counters when retrying fenc.
             try_mac = 1;
             try_unix = 1;
-            for (; p >= ptr && *p != CAR; p--) {
-            }
+            for (; p >= ptr && *p != CAR; p--) {}
             if (p >= ptr) {
               for (p = ptr; p < ptr + size; ++p) {
                 if (*p == NL) {
@@ -1721,17 +1722,19 @@ failed:
   xfree(buffer);
 
   if (read_stdin) {
-    close(0);
+    close(fd);
+    if (stdin_fd < 0) {
 #ifndef WIN32
-    // On Unix, use stderr for stdin, makes shell commands work.
-    vim_ignored = dup(2);
+      // On Unix, use stderr for stdin, makes shell commands work.
+      vim_ignored = dup(2);
 #else
-    // On Windows, use the console input handle for stdin.
-    HANDLE conin = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE,
-                              FILE_SHARE_READ, (LPSECURITY_ATTRIBUTES)NULL,
-                              OPEN_EXISTING, 0, (HANDLE)NULL);
-    vim_ignored = _open_osfhandle(conin, _O_RDONLY);
+      // On Windows, use the console input handle for stdin.
+      HANDLE conin = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ, (LPSECURITY_ATTRIBUTES)NULL,
+                                OPEN_EXISTING, 0, (HANDLE)NULL);
+      vim_ignored = _open_osfhandle(conin, _O_RDONLY);
 #endif
+    }
   }
 
   if (tmpname != NULL) {
@@ -2026,7 +2029,7 @@ void prep_exarg(exarg_T *eap, const buf_T *buf)
   const size_t cmd_len = 15 + STRLEN(buf->b_p_fenc);
   eap->cmd = xmalloc(cmd_len);
 
-  snprintf((char *)eap->cmd, cmd_len, "e ++enc=%s", buf->b_p_fenc);
+  snprintf(eap->cmd, cmd_len, "e ++enc=%s", buf->b_p_fenc);
   eap->force_enc = 8;
   eap->bad_char = buf->b_bad_char;
   eap->force_ff = *buf->b_p_ff;
@@ -2061,7 +2064,7 @@ void set_file_options(int set_options, exarg_T *eap)
 void set_forced_fenc(exarg_T *eap)
 {
   if (eap->force_enc != 0) {
-    char_u *fenc = enc_canonize(eap->cmd + eap->force_enc);
+    char_u *fenc = enc_canonize((char_u *)eap->cmd + eap->force_enc);
     set_string_option_direct("fenc", -1, fenc, OPT_FREE|OPT_LOCAL, 0);
     xfree(fenc);
   }
@@ -3065,7 +3068,7 @@ nobackup:
 
   // Check for forced 'fileencoding' from "++opt=val" argument.
   if (eap != NULL && eap->force_enc != 0) {
-    fenc = eap->cmd + eap->force_enc;
+    fenc = (char_u *)eap->cmd + eap->force_enc;
     fenc = enc_canonize(fenc);
     fenc_tofree = fenc;
   } else {
@@ -3794,7 +3797,7 @@ static int set_rw_fname(char_u *fname, char_u *sfname)
   // Do filetype detection now if 'filetype' is empty.
   if (*curbuf->b_p_ft == NUL) {
     if (augroup_exists("filetypedetect")) {
-      (void)do_doautocmd((char_u *)"filetypedetect BufRead", false, NULL);
+      (void)do_doautocmd("filetypedetect BufRead", false, NULL);
     }
     do_modelines(0);
   }
@@ -4908,11 +4911,15 @@ int buf_check_timestamp(buf_T *buf)
   char *mesg = NULL;
   char *mesg2 = "";
   bool helpmesg = false;
+
+  // uncrustify:off
   enum {
     RELOAD_NONE,
     RELOAD_NORMAL,
     RELOAD_DETECT
   } reload = RELOAD_NONE;
+  // uncrustify:on
+
   bool can_reload = false;
   uint64_t orig_size = buf->b_orig_size;
   int orig_mode = buf->b_orig_mode;
@@ -5064,12 +5071,12 @@ int buf_check_timestamp(buf_T *buf)
       switch (do_dialog(VIM_WARNING, (char_u *)_("Warning"), (char_u *)tbuf,
                         (char_u *)_("&OK\n&Load File\nLoad File &and Options"),
                         1, NULL, true)) {
-        case 2:
-          reload = RELOAD_NORMAL;
-          break;
-        case 3:
-          reload = RELOAD_DETECT;
-          break;
+      case 2:
+        reload = RELOAD_NORMAL;
+        break;
+      case 3:
+        reload = RELOAD_DETECT;
+        break;
       }
     } else if (State > NORMAL_BUSY || (State & CMDLINE) || already_warned) {
       if (*mesg2 != NUL) {

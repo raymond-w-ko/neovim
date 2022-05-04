@@ -263,8 +263,7 @@ void do_debug(char_u *cmd)
       // don't debug this command
       n = debug_break_level;
       debug_break_level = -1;
-      (void)do_cmdline(cmdline, getexline, NULL,
-                       DOCMD_VERBOSE|DOCMD_EXCRESET);
+      (void)do_cmdline((char *)cmdline, getexline, NULL, DOCMD_VERBOSE|DOCMD_EXCRESET);
       debug_break_level = n;
     }
     lines_left = Rows - 1;
@@ -367,7 +366,7 @@ void ex_debug(exarg_T *eap)
   int debug_break_level_save = debug_break_level;
 
   debug_break_level = 9999;
-  do_cmdline_cmd((char *)eap->arg);
+  do_cmdline_cmd(eap->arg);
   debug_break_level = debug_break_level_save;
 }
 
@@ -406,7 +405,7 @@ void dbg_check_breakpoint(exarg_T *eap)
            debug_breakpoint_name + (*p == NUL ? 0 : 3),
            (int64_t)debug_breakpoint_lnum);
       debug_breakpoint_name = NULL;
-      do_debug(eap->cmd);
+      do_debug((char_u *)eap->cmd);
     } else {
       debug_skipped = true;
       debug_skipped_name = debug_breakpoint_name;
@@ -414,7 +413,7 @@ void dbg_check_breakpoint(exarg_T *eap)
     }
   } else if (ex_nesting_level <= debug_break_level) {
     if (!eap->skip) {
-      do_debug(eap->cmd);
+      do_debug((char_u *)eap->cmd);
     } else {
       debug_skipped = true;
       debug_skipped_name = NULL;
@@ -462,7 +461,7 @@ static typval_T *eval_expr_no_emsg(struct debuggy *const bp)
 {
   // Disable error messages, a bad expression would make Vim unusable.
   emsg_off++;
-  typval_T *const tv = eval_expr(bp->dbg_name);
+  typval_T *const tv = eval_expr((char *)bp->dbg_name);
   emsg_off--;
   return tv;
 }
@@ -564,7 +563,7 @@ void ex_breakadd(exarg_T *eap)
     gap = &prof_ga;
   }
 
-  if (dbg_parsearg(eap->arg, gap) == OK) {
+  if (dbg_parsearg((char_u *)eap->arg, gap) == OK) {
     struct debuggy *bp = &DEBUGGY(gap, gap->ga_len);
     bp->dbg_forceit = eap->forceit;
 
@@ -619,7 +618,7 @@ void ex_breakdel(exarg_T *eap)
 
   if (ascii_isdigit(*eap->arg)) {
     // ":breakdel {nr}"
-    int nr = atoi((char *)eap->arg);
+    int nr = atoi(eap->arg);
     for (int i = 0; i < gap->ga_len; i++) {
       if (DEBUGGY(gap, i).dbg_nr == nr) {
         todel = i;
@@ -631,7 +630,7 @@ void ex_breakdel(exarg_T *eap)
     del_all = true;
   } else {
     // ":breakdel {func|file|expr} [lnum] {name}"
-    if (dbg_parsearg(eap->arg, gap) == FAIL) {
+    if (dbg_parsearg((char_u *)eap->arg, gap) == FAIL) {
       return;
     }
     bp = &DEBUGGY(gap, gap->ga_len);

@@ -5,8 +5,6 @@
 // sign.c: functions for managing with signs
 //
 
-#include "nvim/sign.h"
-
 #include "nvim/ascii.h"
 #include "nvim/buffer.h"
 #include "nvim/charset.h"
@@ -18,6 +16,7 @@
 #include "nvim/move.h"
 #include "nvim/option.h"
 #include "nvim/screen.h"
+#include "nvim/sign.h"
 #include "nvim/syntax.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
@@ -1420,7 +1419,7 @@ static int parse_sign_cmd_args(int cmd, char_u *arg, char_u **sign_name, int *si
 /// ":sign" command
 void ex_sign(exarg_T *eap)
 {
-  char_u *arg = eap->arg;
+  char_u *arg = (char_u *)eap->arg;
   char_u *p;
   int idx;
   sign_T *sp;
@@ -1699,8 +1698,7 @@ void free_signs(void)
   }
 }
 
-static enum
-{
+static enum {
   EXP_SUBCMD,   // expand :sign sub-commands
   EXP_DEFINE,   // expand :sign define {name} args
   EXP_PLACE,    // expand :sign place {id} args
@@ -1787,7 +1785,7 @@ void set_context_in_sign_cmd(expand_T *xp, char_u *arg)
   // Default: expand subcommands.
   xp->xp_context = EXPAND_SIGN;
   expand_what = EXP_SUBCMD;
-  xp->xp_pattern = arg;
+  xp->xp_pattern = (char *)arg;
 
   end_subcmd = skiptowhite(arg);
   if (*end_subcmd == NUL) {
@@ -1824,7 +1822,7 @@ void set_context_in_sign_cmd(expand_T *xp, char_u *arg)
   //                            last     p
   if (p == NULL) {
     // Expand last argument name (before equal sign).
-    xp->xp_pattern = last;
+    xp->xp_pattern = (char *)last;
     switch (cmd_idx) {
     case SIGNCMD_DEFINE:
       expand_what = EXP_DEFINE;
@@ -1854,7 +1852,7 @@ void set_context_in_sign_cmd(expand_T *xp, char_u *arg)
     }
   } else {
     // Expand last argument value (after equal sign).
-    xp->xp_pattern = p + 1;
+    xp->xp_pattern = (char *)p + 1;
     switch (cmd_idx) {
     case SIGNCMD_DEFINE:
       if (STRNCMP(last, "texthl", 6) == 0

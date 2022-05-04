@@ -456,7 +456,7 @@ function M.apply_text_edits(text_edits, bufnr, offset_encoding)
 
   -- Remove final line if needed
   local fix_eol = has_eol_text_edit
-  fix_eol = fix_eol and (api.nvim_buf_get_option(bufnr, 'eol') or (api.nvim_buf_get_option(bufnr, 'fixeol') and not api.nvim_buf_get_option('binary')))
+  fix_eol = fix_eol and (api.nvim_buf_get_option(bufnr, 'eol') or (api.nvim_buf_get_option(bufnr, 'fixeol') and not api.nvim_buf_get_option(bufnr, 'binary')))
   fix_eol = fix_eol and get_line(bufnr, max - 1) == ''
   if fix_eol then
     vim.api.nvim_buf_set_lines(bufnr, -2, -1, false, {})
@@ -1873,7 +1873,7 @@ end
 --- Returns indentation size.
 ---
 ---@see |shiftwidth|
----@param bufnr (optional, number): Buffer handle, defaults to current
+---@param bufnr (number|nil): Buffer handle, defaults to current
 ---@returns (number) indentation size
 function M.get_effective_tabstop(bufnr)
   validate { bufnr = {bufnr, 'n', true} }
@@ -1884,7 +1884,7 @@ end
 
 --- Creates a `DocumentFormattingParams` object for the current buffer and cursor position.
 ---
----@param options Table with valid `FormattingOptions` entries
+---@param options table|nil with valid `FormattingOptions` entries
 ---@returns `DocumentFormattingParams` object
 ---@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_formatting
 function M.make_formatting_params(options)

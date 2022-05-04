@@ -356,7 +356,7 @@ int set_indent(int size, int flags)
     ml_replace(curwin->w_cursor.lnum, newline, false);
     if (!(flags & SIN_NOMARK)) {
       extmark_splice_cols(curbuf,
-                          (int)curwin->w_cursor.lnum-1,
+                          (int)curwin->w_cursor.lnum - 1,
                           skipcols,
                           old_offset - skipcols,
                           new_offset - skipcols,
@@ -548,7 +548,7 @@ int get_expr_indent(void)
   // Need to make a copy, the 'indentexpr' option could be changed while
   // evaluating it.
   char_u *inde_copy = vim_strsave(curbuf->b_p_inde);
-  indent = (int)eval_to_number(inde_copy);
+  indent = (int)eval_to_number((char *)inde_copy);
   xfree(inde_copy);
 
   if (use_sandbox) {

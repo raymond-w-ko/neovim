@@ -100,8 +100,8 @@ void ex_profile(exarg_T *eap)
   char_u *e;
   int len;
 
-  e = skiptowhite(eap->arg);
-  len = (int)(e - eap->arg);
+  e = skiptowhite((char_u *)eap->arg);
+  len = (int)(e - (char_u *)eap->arg);
   e = skipwhite(e);
 
   if (len == 5 && STRNCMP(eap->arg, "start", 5) == 0 && *e != NUL) {
@@ -218,7 +218,7 @@ void set_context_in_profile_cmd(expand_T *xp, const char *arg)
   // Default: expand subcommands.
   xp->xp_context = EXPAND_PROFILE;
   pexpand_what = PEXP_SUBCMD;
-  xp->xp_pattern = (char_u *)arg;
+  xp->xp_pattern = (char *)arg;
 
   char_u *const end_subcmd = skiptowhite((const char_u *)arg);
   if (*end_subcmd == NUL) {
@@ -227,7 +227,7 @@ void set_context_in_profile_cmd(expand_T *xp, const char *arg)
 
   if ((const char *)end_subcmd - arg == 5 && strncmp(arg, "start", 5) == 0) {
     xp->xp_context = EXPAND_FILES;
-    xp->xp_pattern = skipwhite((const char_u *)end_subcmd);
+    xp->xp_pattern = (char *)skipwhite((const char_u *)end_subcmd);
     return;
   }
 
@@ -554,7 +554,7 @@ void dialog_changed(buf_T *buf, bool checkall)
     .forceit = false,
   };
 
-  dialog_msg(buff, _("Save changes to \"%s\"?"), buf->b_fname);
+  dialog_msg((char *)buff, _("Save changes to \"%s\"?"), (char *)buf->b_fname);
   if (checkall) {
     ret = vim_dialog_yesnoallcancel(VIM_QUESTION, NULL, buff, 1);
   } else {
@@ -565,8 +565,8 @@ void dialog_changed(buf_T *buf, bool checkall)
     if (buf->b_fname != NULL
         && check_overwrite(&ea,
                            buf,
-                           buf->b_fname,
-                           buf->b_ffname,
+                           (char *)buf->b_fname,
+                           (char *)buf->b_ffname,
                            false) == OK) {
       // didn't hit Cancel
       (void)buf_write_all(buf, false);
@@ -583,8 +583,8 @@ void dialog_changed(buf_T *buf, bool checkall)
         set_bufref(&bufref, buf2);
 
         if (buf2->b_fname != NULL
-            && check_overwrite(&ea, buf2, buf2->b_fname,
-                               buf2->b_ffname, false) == OK) {
+            && check_overwrite(&ea, buf2, (char *)buf2->b_fname,
+                               (char *)buf2->b_ffname, false) == OK) {
           // didn't hit Cancel
           (void)buf_write_all(buf2, false);
         }
@@ -610,8 +610,8 @@ bool dialog_close_terminal(buf_T *buf)
 {
   char_u buff[DIALOG_MSG_SIZE];
 
-  dialog_msg(buff, _("Close \"%s\"?"),
-             (buf->b_fname != NULL) ? buf->b_fname : (char_u *)"?");
+  dialog_msg((char *)buff, _("Close \"%s\"?"),
+             (buf->b_fname != NULL) ? (char *)buf->b_fname : "?");
 
   int ret = vim_dialog_yesnocancel(VIM_QUESTION, NULL, buff, 1);
 
@@ -972,7 +972,7 @@ static int do_arglist(char_u *str, int what, int after, bool will_edit)
       xfree(exp_files);
     } else {
       assert(what == AL_SET);
-      alist_set(ALIST(curwin), exp_count, exp_files, will_edit, NULL, 0);
+      alist_set(ALIST(curwin), exp_count, (char **)exp_files, will_edit, NULL, 0);
     }
   }
 
@@ -1166,7 +1166,7 @@ void do_argfile(exarg_T *eap, int argn)
     // Edit the file; always use the last known line number.
     // When it fails (e.g. Abort for already edited file) restore the
     // argument index.
-    if (do_ecmd(0, alist_name(&ARGLIST[curwin->w_arg_idx]), NULL,
+    if (do_ecmd(0, (char *)alist_name(&ARGLIST[curwin->w_arg_idx]), NULL,
                 eap, ECMD_LAST,
                 (buf_hide(curwin->w_buffer) ? ECMD_HIDE : 0)
                 + (eap->forceit ? ECMD_FORCEIT : 0), curwin) == FAIL) {
@@ -1191,7 +1191,7 @@ void ex_next(exarg_T *eap)
                         | (eap->forceit ? CCGD_FORCEIT : 0)
                         | CCGD_EXCMD)) {
     if (*eap->arg != NUL) {                 // redefine file list
-      if (do_arglist(eap->arg, AL_SET, 0, true) == FAIL) {
+      if (do_arglist((char_u *)eap->arg, AL_SET, 0, true) == FAIL) {
         return;
       }
       i = 0;
@@ -1209,7 +1209,7 @@ void ex_argedit(exarg_T *eap)
   // Whether curbuf will be reused, curbuf->b_ffname will be set.
   bool curbuf_is_reusable = curbuf_reusable();
 
-  if (do_arglist(eap->arg, AL_ADD, i, true) == FAIL) {
+  if (do_arglist((char_u *)eap->arg, AL_ADD, i, true) == FAIL) {
     return;
   }
   maketitle();
@@ -1228,7 +1228,7 @@ void ex_argedit(exarg_T *eap)
 /// ":argadd"
 void ex_argadd(exarg_T *eap)
 {
-  do_arglist(eap->arg, AL_ADD,
+  do_arglist((char_u *)eap->arg, AL_ADD,
              eap->addr_count > 0 ? (int)eap->line2 : curwin->w_arg_idx + 1,
              false);
   maketitle();
@@ -1277,7 +1277,7 @@ void ex_argdelete(exarg_T *eap)
       }
     }
   } else {
-    do_arglist(eap->arg, AL_DEL, 0, false);
+    do_arglist((char_u *)eap->arg, AL_DEL, 0, false);
   }
   maketitle();
 }
@@ -1295,7 +1295,7 @@ void ex_listdo(exarg_T *eap)
   if (eap->cmdidx != CMD_windo && eap->cmdidx != CMD_tabdo) {
     // Don't do syntax HL autocommands.  Skipping the syntax file is a
     // great speed improvement.
-    save_ei = au_event_disable(",Syntax");
+    save_ei = (char_u *)au_event_disable(",Syntax");
 
     FOR_ALL_BUFFERS(buf) {
       buf->b_flags &= ~BF_SYN_SET;
@@ -1427,8 +1427,7 @@ void ex_listdo(exarg_T *eap)
       i++;
       // execute the command
       if (execute) {
-        do_cmdline(eap->arg, eap->getline, eap->cookie,
-                   DOCMD_VERBOSE + DOCMD_NOWAIT);
+        do_cmdline(eap->arg, eap->getline, eap->cookie, DOCMD_VERBOSE + DOCMD_NOWAIT);
       }
 
       if (eap->cmdidx == CMD_bufdo) {
@@ -1509,7 +1508,7 @@ void ex_listdo(exarg_T *eap)
     buf_T *bnext;
     aco_save_T aco;
 
-    au_event_restore(save_ei);
+    au_event_restore((char *)save_ei);
 
     for (buf_T *buf = firstbuf; buf != NULL; buf = bnext) {
       bnext = buf->b_next;
@@ -1628,14 +1627,14 @@ void ex_compiler(exarg_T *eap)
     // Set "b:current_compiler" from "current_compiler".
     p = get_var_value("g:current_compiler");
     if (p != NULL) {
-      set_internal_string_var("b:current_compiler", p);
+      set_internal_string_var("b:current_compiler", (char *)p);
     }
 
     // Restore "current_compiler" for ":compiler {name}".
     if (!eap->forceit) {
       if (old_cur_comp != NULL) {
         set_internal_string_var("g:current_compiler",
-                                old_cur_comp);
+                                (char *)old_cur_comp);
         xfree(old_cur_comp);
       } else {
         do_unlet(S_LEN("g:current_compiler"), true);
@@ -1658,7 +1657,7 @@ void ex_options(exarg_T *eap)
 /// ":source [{fname}]"
 void ex_source(exarg_T *eap)
 {
-  cmd_source(eap->arg, eap);
+  cmd_source((char_u *)eap->arg, eap);
 }
 
 static void cmd_source(char_u *fname, exarg_T *eap)
@@ -2086,7 +2085,7 @@ int do_source(char *fname, int check_other, int is_vimrc)
     sourcing_lnum = sourcing_lnum_backup;
   } else {
     // Call do_cmdline, which will call getsourceline() to get the lines.
-    do_cmdline(firstline, getsourceline, (void *)&cookie,
+    do_cmdline((char *)firstline, getsourceline, (void *)&cookie,
                DOCMD_VERBOSE|DOCMD_NOWAIT|DOCMD_REPEAT);
   }
   retval = OK;
@@ -2208,7 +2207,7 @@ void ex_scriptnames(exarg_T *eap)
     if (eap->line2 < 1 || eap->line2 > script_items.ga_len) {
       emsg(_(e_invarg));
     } else {
-      eap->arg = SCRIPT_ITEM(eap->line2).sn_name;
+      eap->arg = (char *)SCRIPT_ITEM(eap->line2).sn_name;
       do_exedit(eap, NULL);
     }
     return;
@@ -2576,16 +2575,16 @@ void ex_scriptencoding(exarg_T *eap)
   }
 
   if (*eap->arg != NUL) {
-    name = enc_canonize(eap->arg);
+    name = enc_canonize((char_u *)eap->arg);
   } else {
-    name = eap->arg;
+    name = (char_u *)eap->arg;
   }
 
   // Setup for conversion from the specified encoding to 'encoding'.
   sp = (struct source_cookie *)getline_cookie(eap->getline, eap->cookie);
   convert_setup(&sp->conv, name, p_enc);
 
-  if (name != eap->arg) {
+  if (name != (char_u *)eap->arg) {
     xfree(name);
   }
 }
@@ -2787,26 +2786,26 @@ void ex_language(exarg_T *eap)
 #  define VIM_LC_MESSAGES 6789
 # endif
 
-  name = eap->arg;
+  name = (char_u *)eap->arg;
 
   // Check for "messages {name}", "ctype {name}" or "time {name}" argument.
   // Allow abbreviation, but require at least 3 characters to avoid
   // confusion with a two letter language name "me" or "ct".
-  p = skiptowhite(eap->arg);
-  if ((*p == NUL || ascii_iswhite(*p)) && p - eap->arg >= 3) {
-    if (STRNICMP(eap->arg, "messages", p - eap->arg) == 0) {
+  p = skiptowhite((char_u *)eap->arg);
+  if ((*p == NUL || ascii_iswhite(*p)) && p - (char_u *)eap->arg >= 3) {
+    if (STRNICMP(eap->arg, "messages", p - (char_u *)eap->arg) == 0) {
       what = VIM_LC_MESSAGES;
       name = skipwhite(p);
       whatstr = "messages ";
-    } else if (STRNICMP(eap->arg, "ctype", p - eap->arg) == 0) {
+    } else if (STRNICMP(eap->arg, "ctype", p - (char_u *)eap->arg) == 0) {
       what = LC_CTYPE;
       name = skipwhite(p);
       whatstr = "ctype ";
-    } else if (STRNICMP(eap->arg, "time", p - eap->arg) == 0) {
+    } else if (STRNICMP(eap->arg, "time", p - (char_u *)eap->arg) == 0) {
       what = LC_TIME;
       name = skipwhite(p);
       whatstr = "time ";
-    } else if (STRNICMP(eap->arg, "collate", p - eap->arg) == 0) {
+    } else if (STRNICMP(eap->arg, "collate", p - (char_u *)eap->arg) == 0) {
       what = LC_COLLATE;
       name = skipwhite(p);
       whatstr = "collate ";
@@ -3000,7 +2999,7 @@ static void script_host_execute_file(char *name, exarg_T *eap)
 {
   if (!eap->skip) {
     uint8_t buffer[MAXPATHL];
-    vim_FullName((char *)eap->arg, (char *)buffer, sizeof(buffer), false);
+    vim_FullName(eap->arg, (char *)buffer, sizeof(buffer), false);
 
     list_T *args = tv_list_alloc(3);
     // filename
@@ -3037,7 +3036,7 @@ void ex_drop(exarg_T *eap)
   // and mostly only one file is dropped.
   // This also ignores wildcards, since it is very unlikely the user is
   // editing a file name with a wildcard character.
-  do_arglist(eap->arg, AL_SET, 0, false);
+  do_arglist((char_u *)eap->arg, AL_SET, 0, false);
 
   // Expanding wildcards may result in an empty argument list.  E.g. when
   // editing "foo.pyc" and ".pyc" is in 'wildignore'.  Assume that we

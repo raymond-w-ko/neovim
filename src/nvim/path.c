@@ -503,7 +503,7 @@ char *save_abs_path(const char *name)
   if (!path_is_absolute((char_u *)name)) {
     return FullName_save(name, true);
   }
-  return (char *)vim_strsave((char_u *)name);
+  return xstrdup(name);
 }
 
 /// Checks if a path has a wildcard character including '~', unless at the end.
@@ -1383,7 +1383,7 @@ static int expand_backtick(garray_T *gap, char_u *pat, int flags)
   char_u *cmd = vim_strnsave(pat + 1, STRLEN(pat) - 2);
 
   if (*cmd == '=') {          // `={expr}`: Expand expression
-    buffer = eval_to_string(cmd + 1, &p, true);
+    buffer = (char_u *)eval_to_string((char *)cmd + 1, (char **)&p, true);
   } else {
     buffer = get_cmd_output(cmd, NULL, (flags & EW_SILENT) ? kShellOptSilent : 0, NULL);
   }
@@ -1528,9 +1528,8 @@ void simplify_filename(char_u *filename)
   if (vim_ispathsep(*p)) {
     relative = false;
     do {
-      ++p;
-    }
-    while (vim_ispathsep(*p));
+      p++;
+    } while (vim_ispathsep(*p));
   }
   start = p;        // remember start after "c:/" or "/" or "///"
 
@@ -1679,8 +1678,8 @@ void simplify_filename(char_u *filename)
 static char *eval_includeexpr(const char *const ptr, const size_t len)
 {
   set_vim_var_string(VV_FNAME, ptr, (ptrdiff_t)len);
-  char *res = (char *)eval_to_string_safe(curbuf->b_p_inex, NULL,
-                                          was_set_insecurely(curwin, "includeexpr", OPT_LOCAL));
+  char *res = eval_to_string_safe((char *)curbuf->b_p_inex, NULL,
+                                  was_set_insecurely(curwin, "includeexpr", OPT_LOCAL));
   set_vim_var_string(VV_FNAME, NULL, 0);
   return res;
 }
@@ -2325,7 +2324,7 @@ int append_path(char *path, const char *to_append, size_t max_len)
   }
 
   // Combine the path segments, separated by a slash.
-  if (current_length > 0 && !vim_ispathsep_nocolon(path[current_length-1])) {
+  if (current_length > 0 && !vim_ispathsep_nocolon(path[current_length - 1])) {
     current_length += 1;  // Count the trailing slash.
 
     // +1 for the NUL at the end.
@@ -2378,7 +2377,7 @@ static int path_to_absolute(const char_u *fname, char_u *buf, size_t len, int fo
       } else {
         assert(p >= fname);
         memcpy(relative_directory, fname, (size_t)(p - fname));
-        relative_directory[p-fname] = NUL;
+        relative_directory[p - fname] = NUL;
       }
       end_of_path = (char *)(p + 1);
     } else {

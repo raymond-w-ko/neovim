@@ -47,8 +47,7 @@ struct msglist {
 };
 
 // The exception types.
-typedef enum
-{
+typedef enum {
   ET_USER,       // exception caused by ":throw" command
   ET_ERROR,      // error exception
   ET_INTERRUPT,  // interrupt exception triggered by Ctrl-C
@@ -63,7 +62,7 @@ struct vim_exception {
   except_type_T type;                   // exception type
   char *value;           // exception value
   struct msglist *messages;        // message(s) causing error exception
-  char_u *throw_name;      // name of the throw point
+  char *throw_name;      // name of the throw point
   linenr_T throw_lnum;                  // line number of the throw point
   except_T *caught;          // next exception on the caught stack
 };

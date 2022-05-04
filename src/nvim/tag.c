@@ -813,8 +813,7 @@ static void print_tag_list(int new_tag, int use_tagstack, int num_matches, char_
     } else {
       for (p = tagp.command;
            *p && *p != '\r' && *p != '\n';
-           p++) {
-      }
+           p++) {}
       command_end = p;
     }
 
@@ -933,8 +932,7 @@ static int add_llist_tags(char_u *tag, int num_matches, char_u **matches)
       cmd_end = tagp.command_end;
       if (cmd_end == NULL) {
         for (p = tagp.command;
-             *p && *p != '\r' && *p != '\n'; p++) {
-        }
+             *p && *p != '\r' && *p != '\n'; p++) {}
         cmd_end = p;
       }
 
@@ -1184,7 +1182,7 @@ static int find_tagfunc_tags(char_u *pat, garray_T *ga, int *match_count, int fl
                flags & TAG_REGEXP   ? "r": "");
 
   save_pos = curwin->w_cursor;
-  result = call_vim_function(curbuf->b_p_tfu, 3, args, &rettv);
+  result = call_vim_function((char *)curbuf->b_p_tfu, 3, args, &rettv);
   curwin->w_cursor = save_pos;  // restore the cursor position
   d->dv_refcount--;
 
@@ -1780,8 +1778,7 @@ line_read_in:
             if (STRNCMP(lbuf, "!_TAG_FILE_ENCODING\t", 20) == 0) {
               // Prepare to convert every line from the specified
               // encoding to 'encoding'.
-              for (p = lbuf + 20; *p > ' ' && *p < 127; p++) {
-              }
+              for (p = lbuf + 20; *p > ' ' && *p < 127; p++) {}
               *p = NUL;
               convert_setup(&vimconv, lbuf + 20, p_enc);
             }
@@ -2100,8 +2097,8 @@ parse_line:
             STRCPY(p, tagp.tagname);
             p[len] = '@';
             STRCPY(p + len + 1, help_lang);
-            snprintf((char *)p + len + 1 + ML_EXTRA, 10, "%06d",
-                     help_heuristic(tagp.tagname,
+            snprintf((char *)p + len + 1 + ML_EXTRA, STRLEN(p) + len + 1 + ML_EXTRA, "%06d",
+                     help_heuristic((char *)tagp.tagname,
                                     match_re ? matchoff : 0, !match_no_ic)
                      + help_pri);
 
@@ -2614,15 +2611,13 @@ static int parse_match(char_u *lbuf, tagptrs_T *tagp)
     if (tagp->tagkind != NULL) {
       for (p = tagp->tagkind;
            *p && *p != '\t' && *p != '\r' && *p != '\n';
-           MB_PTR_ADV(p)) {
-      }
+           MB_PTR_ADV(p)) {}
       tagp->tagkind_end = p;
     }
     if (tagp->user_data != NULL) {
       for (p = tagp->user_data;
            *p && *p != '\t' && *p != '\r' && *p != '\n';
-           MB_PTR_ADV(p)) {
-      }
+           MB_PTR_ADV(p)) {}
       tagp->user_data_end = p;
     }
   }
@@ -2800,7 +2795,7 @@ static int jumpto_tag(const char_u *lbuf_arg, int forceit, int keep_help)
   if (getfile_result == GETFILE_UNUSED) {
     // Careful: getfile() may trigger autocommands and call jumpto_tag()
     // recursively.
-    getfile_result = getfile(0, fname, NULL, true, (linenr_T)0, forceit);
+    getfile_result = getfile(0, (char *)fname, NULL, true, (linenr_T)0, forceit);
   }
   keep_help_flag = false;
 

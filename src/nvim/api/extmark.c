@@ -146,6 +146,10 @@ static Array extmark_to_array(ExtmarkInfo extmark, bool id, bool add_dict)
           STRING_OBJ(cstr_to_string(virt_text_pos_str[decor->virt_text_pos])));
     }
 
+    if (decor->ui_watched) {
+      PUT(dict, "ui_watched", BOOLEAN_OBJ(true));
+    }
+
     if (kv_size(decor->virt_lines)) {
       Array all_chunks = ARRAY_DICT_INIT;
       bool virt_lines_leftcol = false;
@@ -170,7 +174,7 @@ static Array extmark_to_array(ExtmarkInfo extmark, bool id, bool add_dict)
       PUT(dict, "virt_lines_leftcol", BOOLEAN_OBJ(virt_lines_leftcol));
     }
 
-    if (decor->hl_id || kv_size(decor->virt_text)) {
+    if (decor->hl_id || kv_size(decor->virt_text) || decor->ui_watched) {
       PUT(dict, "priority", INTEGER_OBJ(decor->priority));
     }
 
@@ -472,6 +476,10 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 ///                   When a character is supplied it is used as |:syn-cchar|.
 ///                   "hl_group" is used as highlight for the cchar if provided,
 ///                   otherwise it defaults to |hl-Conceal|.
+///               - ui_watched: boolean that indicates the mark should be drawn
+///                   by a UI. When set, the UI will receive win_extmark events.
+///                   Note: the mark is positioned by virt_text attributes. Can be
+///                   used together with virt_text.
 ///
 /// @param[out]  err   Error details, if any
 /// @return Id of the created/updated extmark
@@ -546,6 +554,8 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
     goto error;
   }
 
+  // uncrustify:off
+
   struct {
     const char *name;
     Object *opt;
@@ -558,6 +568,8 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
     { "cursorline_hl_group", &opts->cursorline_hl_group, &decor.cursorline_hl_id },
     { NULL, NULL, NULL },
   };
+
+  // uncrustify:on
 
   for (int j = 0; hls[j].name && hls[j].dest; j++) {
     if (HAS_KEY(*hls[j].opt)) {
@@ -705,6 +717,8 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
   bool ephemeral = false;
   OPTION_TO_BOOL(ephemeral, ephemeral, false);
 
+  OPTION_TO_BOOL(decor.ui_watched, ui_watched, false);
+
   if (line < 0) {
     api_set_error(err, kErrorTypeValidation, "line value outside range");
     goto error;
@@ -716,7 +730,7 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
       line = buf->b_ml.ml_line_count;
     }
   } else if (line < buf->b_ml.ml_line_count) {
-    len = ephemeral ? MAXCOL : STRLEN(ml_get_buf(buf, (linenr_T)line+1, false));
+    len = ephemeral ? MAXCOL : STRLEN(ml_get_buf(buf, (linenr_T)line + 1, false));
   }
 
   if (col == -1) {
@@ -758,7 +772,7 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
 
   // TODO(bfredl): synergize these two branches even more
   if (ephemeral && decor_state.buf == buf) {
-    decor_add_ephemeral((int)line, (int)col, line2, col2, &decor);
+    decor_add_ephemeral((int)line, (int)col, line2, col2, &decor, (uint64_t)ns_id, id);
   } else {
     if (ephemeral) {
       api_set_error(err, kErrorTypeException, "not yet implemented");
@@ -923,7 +937,7 @@ void nvim_buf_clear_namespace(Buffer buffer, Integer ns_id, Integer line_start, 
   }
   extmark_clear(buf, (ns_id < 0 ? 0 : (uint32_t)ns_id),
                 (int)line_start, 0,
-                (int)line_end-1, MAXCOL);
+                (int)line_end - 1, MAXCOL);
 }
 
 /// Set or change decoration provider for a namespace

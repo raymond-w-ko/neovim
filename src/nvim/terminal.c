@@ -179,6 +179,13 @@ static void term_output_callback(const char *s, size_t len, void *user_data)
 
 // public API {{{
 
+/// Initializes terminal properties, and triggers TermOpen.
+///
+/// The PTY process (TerminalOptions.data) was already started by termopen(),
+/// via ex_terminal() or the term:// BufReadCmd.
+///
+/// @param buf Buffer used for presentation of the terminal.
+/// @param opts PTY process channel, various terminal properties and callbacks.
 Terminal *terminal_open(buf_T *buf, TerminalOptions opts)
 {
   // Create a new terminal instance and configure it
@@ -374,6 +381,7 @@ void terminal_check_size(Terminal *term)
   invalidate_terminal(term, -1, -1);
 }
 
+/// Implements TERM_FOCUS mode. :help Terminal-mode
 void terminal_enter(void)
 {
   buf_T *buf = curbuf;
@@ -502,6 +510,7 @@ static int terminal_check(VimState *state)
   return 1;
 }
 
+/// Processes one char of terminal-mode input.
 static int terminal_execute(VimState *state, int key)
 {
   TerminalState *s = (TerminalState *)state;
@@ -744,8 +753,8 @@ void terminal_get_line_attributes(Terminal *term, win_T *wp, int linenr, int *te
     int vt_fg_idx = ((!fg_default && fg_indexed) ? cell.fg.indexed.idx + 1 : 0);
     int vt_bg_idx = ((!bg_default && bg_indexed) ? cell.bg.indexed.idx + 1 : 0);
 
-    bool fg_set = vt_fg_idx && vt_fg_idx <= 16 && term->color_set[vt_fg_idx-1];
-    bool bg_set = vt_bg_idx && vt_bg_idx <= 16 && term->color_set[vt_bg_idx-1];
+    bool fg_set = vt_fg_idx && vt_fg_idx <= 16 && term->color_set[vt_fg_idx - 1];
+    bool bg_set = vt_bg_idx && vt_bg_idx <= 16 && term->color_set[vt_bg_idx - 1];
 
     int hl_attrs = (cell.attrs.bold ? HL_BOLD : 0)
                    | (cell.attrs.italic ? HL_ITALIC : 0)
@@ -1348,7 +1357,7 @@ static bool send_mouse_event(Terminal *term, int c)
   }
 
 end:
-  ins_char_typebuf(c, mod_mask);
+  ins_char_typebuf(vgetc_char, vgetc_mod_mask);
   return true;
 }
 
@@ -1448,7 +1457,8 @@ static void refresh_terminal(Terminal *term)
   long ml_added = buf->b_ml.ml_line_count - ml_before;
   adjust_topline(term, buf, ml_added);
 }
-// Calls refresh_terminal() on all invalidated_terminals.
+
+/// Calls refresh_terminal() on all invalidated_terminals.
 static void refresh_timer_cb(TimeWatcher *watcher, void *data)
 {
   refresh_pending = false;

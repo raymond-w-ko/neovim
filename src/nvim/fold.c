@@ -1640,11 +1640,11 @@ static void foldAddMarker(buf_T *buf, pos_T pos, const char_u *marker, size_t ma
       STRCPY(newline + line_len, cms);
       memcpy(newline + line_len + (p - cms), marker, markerlen);
       STRCPY(newline + line_len + (p - cms) + markerlen, p + 2);
-      added = markerlen + STRLEN(cms)-2;
+      added = markerlen + STRLEN(cms) - 2;
     }
     ml_replace_buf(buf, lnum, newline, false);
     if (added) {
-      extmark_splice_cols(buf, (int)lnum-1, (int)line_len,
+      extmark_splice_cols(buf, (int)lnum - 1, (int)line_len,
                           0, (int)added, kExtmarkUndo);
     }
   }
@@ -1662,7 +1662,7 @@ static void deleteFoldMarkers(win_T *wp, fold_T *fp, int recursive, linenr_T lnu
                         lnum_off + fp->fd_top);
     }
   }
-  foldDelMarker(wp->w_buffer, fp->fd_top+lnum_off, wp->w_p_fmr,
+  foldDelMarker(wp->w_buffer, fp->fd_top + lnum_off, wp->w_p_fmr,
                 foldstartmarkerlen);
   foldDelMarker(wp->w_buffer, fp->fd_top + lnum_off + fp->fd_len - 1,
                 foldendmarker, foldendmarkerlen);
@@ -1710,7 +1710,7 @@ static void foldDelMarker(buf_T *buf, linenr_T lnum, char_u *marker, size_t mark
       memcpy(newline, line, (size_t)(p - line));
       STRCPY(newline + (p - line), p + len);
       ml_replace_buf(buf, lnum, newline, false);
-      extmark_splice_cols(buf, (int)lnum-1, (int)(p - line),
+      extmark_splice_cols(buf, (int)lnum - 1, (int)(p - line),
                           (int)len, 0, kExtmarkUndo);
     }
     break;
@@ -1774,7 +1774,9 @@ char_u *get_foldtext(win_T *wp, linenr_T lnum, linenr_T lnume, foldinfo_T foldin
       curbuf = wp->w_buffer;
 
       emsg_silent++;       // handle exceptions, but don't display errors
-      text = eval_to_string_safe(wp->w_p_fdt, NULL, was_set_insecurely(wp, "foldtext", OPT_LOCAL));
+      text =
+        (char_u *)eval_to_string_safe((char *)wp->w_p_fdt, NULL,
+                                      was_set_insecurely(wp, "foldtext", OPT_LOCAL));
       emsg_silent--;
 
       if (text == NULL || did_emsg) {
@@ -1877,8 +1879,7 @@ void foldtext_cleanup(char_u *str)
 
       // May remove 'commentstring' start.  Useful when it's a double
       // quote and we already removed a double quote.
-      for (p = s; p > str && ascii_iswhite(p[-1]); p--) {
-      }
+      for (p = s; p > str && ascii_iswhite(p[-1]); p--) {}
       if (p >= str + cms_slen
           && STRNCMP(p - cms_slen, cms_start, cms_slen) == 0) {
         len += (size_t)(s - p) + cms_slen;
@@ -2547,7 +2548,7 @@ static linenr_T foldUpdateIEMSRecurse(garray_T *const gap, const int level,
         // Make fold that includes lnum start at lnum.
         foldMarkAdjustRecurse(flp->wp, &fp2->fd_nested,
                               (linenr_T)0, (flp->lnum - fp2->fd_top - 1),
-                              (linenr_T)MAXLNUM, (fp2->fd_top-flp->lnum));
+                              (linenr_T)MAXLNUM, (fp2->fd_top - flp->lnum));
         fp2->fd_len -= flp->lnum - fp2->fd_top;
         fp2->fd_top = flp->lnum;
         fold_changed = true;
@@ -2963,7 +2964,7 @@ static void foldlevelExpr(fline_T *flp)
   // KeyTyped may be reset to 0 when calling a function which invokes
   // do_cmdline().  To make 'foldopen' work correctly restore KeyTyped.
   const bool save_keytyped = KeyTyped;
-  const int n = eval_foldexpr(flp->wp->w_p_fde, &c);
+  const int n = eval_foldexpr((char *)flp->wp->w_p_fde, &c);
   KeyTyped = save_keytyped;
 
   switch (c) {

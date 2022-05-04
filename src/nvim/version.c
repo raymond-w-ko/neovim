@@ -1998,6 +1998,7 @@ Dictionary version_dict(void)
   PUT(d, "major", INTEGER_OBJ(NVIM_VERSION_MAJOR));
   PUT(d, "minor", INTEGER_OBJ(NVIM_VERSION_MINOR));
   PUT(d, "patch", INTEGER_OBJ(NVIM_VERSION_PATCH));
+  PUT(d, "prerelease", BOOLEAN_OBJ(NVIM_VERSION_PRERELEASE[0] != '\0'));
   PUT(d, "api_level", INTEGER_OBJ(NVIM_API_LEVEL));
   PUT(d, "api_compatible", INTEGER_OBJ(NVIM_API_LEVEL_COMPAT));
   PUT(d, "api_prerelease", BOOLEAN_OBJ(NVIM_API_PRERELEASE));
@@ -2053,7 +2054,7 @@ static void list_features(void)
   version_msg(_("\n\nFeatures: "));
   for (int i = 0; features[i] != NULL; i++) {
     version_msg(features[i]);
-    if (features[i+1] != NULL) {
+    if (features[i + 1] != NULL) {
       version_msg(" ");
     }
   }
@@ -2329,4 +2330,3 @@ void ex_intro(exarg_T *eap)
   intro_message(TRUE);
   wait_return(TRUE);
 }
-

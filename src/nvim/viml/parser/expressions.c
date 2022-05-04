@@ -541,8 +541,7 @@ LexExprToken viml_pexpr_next_token(ParserState *const pstate, const int flags)
       ret.data.opt.len = 4;
       ret.len += 4;
     } else {
-      for (; p < e && ASCII_ISALPHA(*p); p++) {
-      }
+      for (; p < e && ASCII_ISALPHA(*p); p++) {}
       ret.data.opt.len = (size_t)(p - ret.data.opt.name);
       if (ret.data.opt.len == 0) {
         OPTNAMEMISS(ret);
@@ -1652,10 +1651,11 @@ static void parse_quoted_string(ParserState *const pstate, ExprASTNode *const no
         }
         switch (*p) {
         // A "\<x>" form occupies at least 4 characters, and produces up to
-        // 6 characters: reserve space for 2 extra, but do not compute actual
-        // length just now, it would be costy.
+        // to 9 characters (6 for the char and 3 for a modifier):
+        // reserve space for 5 extra, but do not compute actual length
+        // just now, it would be costly.
         case '<':
-          size += 2;
+          size += 5;
           break;
         // Hexadecimal, always single byte, but at least three bytes each.
         case 'x':
@@ -1817,9 +1817,13 @@ static void parse_quoted_string(ParserState *const pstate, ExprASTNode *const no
         }
         // Special key, e.g.: "\<C-W>"
         case '<': {
-          const size_t special_len = (
-                                      trans_special((const char_u **)&p, (size_t)(e - p),
-                                                    (char_u *)v_p, true, true));
+          int flags = FSK_KEYCODE | FSK_IN_STRING;
+
+          if (p[1] != '*') {
+            flags |= FSK_SIMPLIFY;
+          }
+          const size_t special_len = trans_special((const char_u **)&p, (size_t)(e - p),
+                                                   (char_u *)v_p, flags, false, NULL);
           if (special_len != 0) {
             v_p += special_len;
           } else {

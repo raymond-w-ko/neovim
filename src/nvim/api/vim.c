@@ -28,6 +28,7 @@
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/ex_cmds2.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/file_search.h"
 #include "nvim/fileio.h"
@@ -403,9 +404,19 @@ String nvim_replace_termcodes(String str, Boolean from_part, Boolean do_lt, Bool
     return (String) { .data = NULL, .size = 0 };
   }
 
+  int flags = 0;
+  if (from_part) {
+    flags |= REPTERM_FROM_PART;
+  }
+  if (do_lt) {
+    flags |= REPTERM_DO_LT;
+  }
+  if (!special) {
+    flags |= REPTERM_NO_SPECIAL;
+  }
+
   char *ptr = NULL;
-  replace_termcodes((char_u *)str.data, str.size, (char_u **)&ptr,
-                    from_part, do_lt, special, CPO_TO_CPO_FLAGS);
+  replace_termcodes((char_u *)str.data, str.size, (char_u **)&ptr, flags, NULL, CPO_TO_CPO_FLAGS);
   return cstr_as_string(ptr);
 }
 
@@ -558,7 +569,7 @@ void nvim_set_current_dir(String dir, Error *err)
 
   try_start();
 
-  if (!changedir_func(string, kCdScopeGlobal)) {
+  if (!changedir_func((char *)string, kCdScopeGlobal)) {
     if (!try_end(err)) {
       api_set_error(err, kErrorTypeException, "Failed to change directory");
     }
@@ -2199,7 +2210,7 @@ Array nvim_get_mark(String name, Dictionary opts, Error *err)
     allocated = true;
     // Marks comes from shada
   } else {
-    filename = (char *)mark.fname;
+    filename = mark.fname;
     bufnr = 0;
   }
 

@@ -488,6 +488,16 @@ String cstr_to_string(const char *str)
   };
 }
 
+/// Copies a String to an allocated, NUL-terminated C string.
+///
+/// @param str the String to copy
+/// @return the resulting C string
+char *string_to_cstr(String str)
+  FUNC_ATTR_NONNULL_RET FUNC_ATTR_WARN_UNUSED_RESULT
+{
+  return xstrndup(str.data, str.size);
+}
+
 /// Copies buffer to an allocated String.
 /// The resulting string is also NUL-terminated, to facilitate interoperating
 /// with code using C strings.
@@ -628,11 +638,11 @@ void modify_keymap(uint64_t channel_id, Buffer buffer, bool is_unmap, String mod
                      (char_u *)rhs.data, rhs.size, lua_funcref,
                      CPO_TO_CPO_FLAGS, &parsed_args);
   if (opts != NULL && opts->desc.type == kObjectTypeString) {
-    parsed_args.desc = xstrdup(opts->desc.data.string.data);
+    parsed_args.desc = string_to_cstr(opts->desc.data.string);
   } else {
     parsed_args.desc = NULL;
   }
-  if (parsed_args.lhs_len > MAXMAPLEN) {
+  if (parsed_args.lhs_len > MAXMAPLEN || parsed_args.alt_lhs_len > MAXMAPLEN) {
     api_set_error(err, kErrorTypeValidation,  "LHS exceeds maximum map length: %s", lhs.data);
     goto fail_and_free;
   }
@@ -1128,6 +1138,9 @@ ArrayOf(Dictionary) keymap_array(String mode, buf_T *buf, bool from_lua)
     for (const mapblock_T *current_maphash = get_maphash(i, buf);
          current_maphash;
          current_maphash = current_maphash->m_next) {
+      if (current_maphash->m_simplified) {
+        continue;
+      }
       // Check for correct mode
       if (int_mode & current_maphash->m_mode) {
         mapblock_fill_dict(dict, current_maphash, buffer_value, false);
@@ -1242,7 +1255,7 @@ VirtText parse_virt_text(Array chunks, Error *err, int *width)
           if (ERROR_SET(err)) {
             goto free_exit;
           }
-          if (j < arr.size-1) {
+          if (j < arr.size - 1) {
             kv_push(virt_text, ((VirtTextChunk){ .text = NULL,
                                                  .hl_id = hl_id }));
           }
@@ -1523,7 +1536,7 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
   }
 
   if (opts->addr.type == kObjectTypeString) {
-    if (parse_addr_type_arg((char_u *)opts->addr.data.string.data, (int)opts->addr.data.string.size,
+    if (parse_addr_type_arg(opts->addr.data.string.data, (int)opts->addr.data.string.size,
                             &addr_type_arg) != OK) {
       api_set_error(err, kErrorTypeValidation, "Invalid value for 'addr'");
       goto err;
@@ -1571,9 +1584,9 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
     compl = EXPAND_USER_LUA;
     compl_luaref = api_new_luaref(opts->complete.data.luaref);
   } else if (opts->complete.type == kObjectTypeString) {
-    if (parse_compl_arg((char_u *)opts->complete.data.string.data,
+    if (parse_compl_arg(opts->complete.data.string.data,
                         (int)opts->complete.data.string.size, &compl, &argt,
-                        (char_u **)&compl_arg) != OK) {
+                        &compl_arg) != OK) {
       api_set_error(err, kErrorTypeValidation, "Invalid value for 'complete'");
       goto err;
     }
@@ -1600,9 +1613,8 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
     goto err;
   }
 
-  if (uc_add_command((char_u *)name.data, name.size, (char_u *)rep, argt, def, flags,
-                     compl, (char_u *)compl_arg, compl_luaref, addr_type_arg, luaref,
-                     force) != OK) {
+  if (uc_add_command(name.data, name.size, rep, argt, def, flags, compl, compl_arg, compl_luaref,
+                     addr_type_arg, luaref, force) != OK) {
     api_set_error(err, kErrorTypeException, "Failed to create user command");
     goto err;
   }
