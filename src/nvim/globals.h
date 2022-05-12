@@ -605,7 +605,7 @@ EXTERN pos_T Insstart;                  // This is where the latest
 // op_insert(), to detect correctly where inserting by the user started.
 EXTERN pos_T Insstart_orig;
 
-// Stuff for VREPLACE mode.
+// Stuff for MODE_VREPLACE state.
 EXTERN linenr_T orig_line_count INIT(= 0);       // Line count when "gR" started
 EXTERN int vr_lines_changed INIT(= 0);      // #Lines changed by "gR" so far
 
@@ -631,13 +631,13 @@ EXTERN char_u *fenc_default INIT(= NULL);
 
 /// "State" is the main state of Vim.
 /// There are other variables that modify the state:
-///    Visual_mode:    When State is NORMAL or INSERT.
-///    finish_op  :    When State is NORMAL, after typing the operator and
+///    Visual_mode:    When State is MODE_NORMAL or MODE_INSERT.
+///    finish_op  :    When State is MODE_NORMAL, after typing the operator and
 ///                    before typing the motion command.
 ///    motion_force:   Last motion_force from do_pending_operator()
 ///    debug_mode:     Debug mode
-EXTERN int State INIT(= NORMAL);        // This is the current state of the
-                                        // command interpreter.
+EXTERN int State INIT(= MODE_NORMAL);
+
 EXTERN bool debug_mode INIT(= false);
 EXTERN bool finish_op INIT(= false);    // true while an operator is pending
 EXTERN long opcount INIT(= 0);          // count for pending operator
@@ -748,8 +748,8 @@ EXTERN int global_busy INIT(= 0);           ///< set when :global is executing
 EXTERN bool listcmd_busy INIT(= false);     ///< set when :argdo, :windo or :bufdo is executing
 EXTERN bool need_start_insertmode INIT(= false);  ///< start insert mode soon
 
-#define MODE_MAX_LENGTH 4       // max mode length returned in get_mode()
-                                // including the final NUL character
+#define MODE_MAX_LENGTH 4       // max mode length returned in get_mode(),
+                                // including the terminating NUL
 
 EXTERN char last_mode[MODE_MAX_LENGTH] INIT(= "n");
 EXTERN char_u *last_cmdline INIT(= NULL);      // last command line (for ":)
@@ -997,6 +997,7 @@ EXTERN char e_listarg[] INIT(= N_("E686: Argument of %s must be a List"));
 EXTERN char e_unsupportedoption[] INIT(= N_("E519: Option not supported"));
 EXTERN char e_fnametoolong[] INIT(= N_("E856: Filename too long"));
 EXTERN char e_float_as_string[] INIT(= N_("E806: using Float as a String"));
+EXTERN char e_cannot_edit_other_buf[] INIT(= N_("E788: Not allowed to edit another buffer now"));
 
 EXTERN char e_autocmd_err[] INIT(= N_("E5500: autocmd has thrown an exception: %s"));
 EXTERN char e_cmdmap_err[] INIT(= N_("E5520: <Cmd> mapping must end with <CR>"));
