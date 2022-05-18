@@ -302,6 +302,7 @@
 #define CF_UPPER        0x02
 
 static char *e_spell_trunc = N_("E758: Truncated spell file");
+static char *e_illegal_character_in_word = N_("E1280: Illegal character in word");
 static char *e_afftrailing = N_("Trailing text in %s line %d: %s");
 static char *e_affname = N_("Affix name too long in %s line %d: %s");
 static char *msg_compressing = N_("Compressing word tree...");
@@ -575,7 +576,7 @@ slang_T *spell_load_file(char_u *fname, char_u *lang, slang_T *old_lp, bool sile
   char_u *p;
   int n;
   int len;
-  char_u *save_sourcing_name = sourcing_name;
+  char_u *save_sourcing_name = (char_u *)sourcing_name;
   linenr_T save_sourcing_lnum = sourcing_lnum;
   slang_T *lp = NULL;
   int c = 0;
@@ -605,13 +606,13 @@ slang_T *spell_load_file(char_u *fname, char_u *lang, slang_T *old_lp, bool sile
     lp->sl_fname = vim_strsave(fname);
 
     // Check for .add.spl.
-    lp->sl_add = strstr((char *)path_tail(fname), SPL_FNAME_ADD) != NULL;
+    lp->sl_add = strstr(path_tail((char *)fname), SPL_FNAME_ADD) != NULL;
   } else {
     lp = old_lp;
   }
 
   // Set sourcing_name, so that error messages mention the file name.
-  sourcing_name = fname;
+  sourcing_name = (char *)fname;
   sourcing_lnum = 0;
 
   // <HEADER>: <fileID>
@@ -809,7 +810,7 @@ endOK:
   if (fd != NULL) {
     fclose(fd);
   }
-  sourcing_name = save_sourcing_name;
+  sourcing_name = (char *)save_sourcing_name;
   sourcing_lnum = save_sourcing_lnum;
 
   return lp;
@@ -1099,7 +1100,7 @@ static int read_prefcond_section(FILE *fd, slang_T *lp)
       buf[0] = '^';  // always match at one position only
       SPELL_READ_NONNUL_BYTES(buf + 1, (size_t)n, fd,; );
       buf[n + 1] = NUL;
-      lp->sl_prefprog[i] = vim_regcomp((char_u *)buf, RE_MAGIC | RE_STRING);
+      lp->sl_prefprog[i] = vim_regcomp(buf, RE_MAGIC | RE_STRING);
     }
   }
   return 0;
@@ -1201,7 +1202,7 @@ static int read_sal_section(FILE *fd, slang_T *slang)
     int i = 0;
     for (; i < ccnt; ++i) {
       c = getc(fd);                             // <salfrom>
-      if (vim_strchr((char_u *)"0123456789(-<^$", c) != NULL) {
+      if (vim_strchr("0123456789(-<^$", c) != NULL) {
         break;
       }
       *p++ = c;
@@ -1465,7 +1466,7 @@ static int read_compound(FILE *fd, slang_T *slang, int len)
     }
 
     // Add all flags to "sl_compallflags".
-    if (vim_strchr((char_u *)"?*+[]/", c) == NULL
+    if (vim_strchr("?*+[]/", c) == NULL
         && !byte_in_str(slang->sl_compallflags, c)) {
       *ap++ = c;
       *ap = NUL;
@@ -1520,7 +1521,7 @@ static int read_compound(FILE *fd, slang_T *slang, int len)
     *crp = NUL;
   }
 
-  slang->sl_compprog = vim_regcomp(pat, RE_MAGIC + RE_STRING + RE_STRICT);
+  slang->sl_compprog = vim_regcomp((char *)pat, RE_MAGIC + RE_STRING + RE_STRICT);
   xfree(pat);
   if (slang->sl_compprog == NULL) {
     return SP_FORMERROR;
@@ -2251,7 +2252,7 @@ static afffile_T *spell_read_aff(spellinfo_T *spin, char_u *fname)
         }
       } else if (is_aff_rule(items, itemcnt, "COMPOUNDRULE", 2)) {
         // Don't use the first rule if it is a number.
-        if (compflags != NULL || *skipdigits(items[1]) != NUL) {
+        if (compflags != NULL || *skipdigits((char *)items[1]) != NUL) {
           // Concatenate this string to previously defined ones,
           // using a slash to separate them.
           l = (int)STRLEN(items[1]) + 1;
@@ -2460,7 +2461,7 @@ static afffile_T *spell_read_aff(spellinfo_T *spin, char_u *fname)
           aff_entry->ae_add = getroom_save(spin, items[3]);
 
           // Recognize flags on the affix: abcd/XYZ
-          aff_entry->ae_flags = vim_strchr(aff_entry->ae_add, '/');
+          aff_entry->ae_flags = (char_u *)vim_strchr((char *)aff_entry->ae_add, '/');
           if (aff_entry->ae_flags != NULL) {
             *aff_entry->ae_flags++ = NUL;
             aff_process_flags(aff, aff_entry);
@@ -2483,8 +2484,7 @@ static afffile_T *spell_read_aff(spellinfo_T *spin, char_u *fname)
             } else {
               sprintf((char *)buf, "%s$", items[4]);
             }
-            aff_entry->ae_prog = vim_regcomp(buf,
-                                             RE_MAGIC + RE_STRING + RE_STRICT);
+            aff_entry->ae_prog = vim_regcomp((char *)buf, RE_MAGIC + RE_STRING + RE_STRICT);
             if (aff_entry->ae_prog == NULL) {
               smsg(_("Broken condition in %s line %d: %s"),
                    fname, lnum, items[4]);
@@ -2532,7 +2532,7 @@ static afffile_T *spell_read_aff(spellinfo_T *spin, char_u *fname)
                       sprintf((char *)buf, "^%s",
                               aff_entry->ae_cond);
                       vim_regfree(aff_entry->ae_prog);
-                      aff_entry->ae_prog = vim_regcomp(buf, RE_MAGIC + RE_STRING);
+                      aff_entry->ae_prog = vim_regcomp((char *)buf, RE_MAGIC + RE_STRING);
                     }
                   }
                 }
@@ -2651,7 +2651,7 @@ static afffile_T *spell_read_aff(spellinfo_T *spin, char_u *fname)
             if ((!GA_EMPTY(&spin->si_map)
                  && vim_strchr(spin->si_map.ga_data, c)
                  != NULL)
-                || vim_strchr(p, c) != NULL) {
+                || vim_strchr((char *)p, c) != NULL) {
               smsg(_("Duplicate character in MAP in %s line %d"),
                    fname, lnum);
             }
@@ -2923,7 +2923,7 @@ static void process_compflags(spellinfo_T *spin, afffile_T *aff, char_u *compfla
   tp = p + STRLEN(p);
 
   for (p = compflags; *p != NUL;) {
-    if (vim_strchr((char_u *)"/?*+[]", *p) != NULL) {
+    if (vim_strchr("/?*+[]", *p) != NULL) {
       // Copy non-flag characters directly.
       *tp++ = *p++;
     } else {
@@ -2946,7 +2946,7 @@ static void process_compflags(spellinfo_T *spin, afffile_T *aff, char_u *compfla
           do {
             check_renumber(spin);
             id = spin->si_newcompID--;
-          } while (vim_strchr((char_u *)"/?*+[]\\-^", id) != NULL);
+          } while (vim_strchr("/?*+[]\\-^", id) != NULL);
           ci->ci_newID = id;
           hash_add(&aff->af_comp, ci->ci_key);
         }
@@ -2981,7 +2981,7 @@ static bool flag_in_afflist(int flagtype, char_u *afflist, unsigned flag)
 
   switch (flagtype) {
   case AFT_CHAR:
-    return vim_strchr(afflist, flag) != NULL;
+    return vim_strchr((char *)afflist, flag) != NULL;
 
   case AFT_CAPLONG:
   case AFT_LONG:
@@ -3782,7 +3782,7 @@ static int spell_read_wordfile(spellinfo_T *spin, char_u *fname)
     regionmask = spin->si_region;
 
     // Check for flags and region after a slash.
-    p = vim_strchr(line, '/');
+    p = (char_u *)vim_strchr((char *)line, '/');
     if (p != NULL) {
       *p++ = NUL;
       while (*p != NUL) {
@@ -3926,6 +3926,11 @@ static int store_word(spellinfo_T *spin, char_u *word, int flags, int region, co
   int ct = captype(word, word + len);
   char_u foldword[MAXWLEN];
   int res = OK;
+
+  // Avoid adding illegal bytes to the word tree.
+  if (!utf_valid_string(word, NULL)) {
+    return FAIL;
+  }
 
   (void)spell_casefold(curwin, word, len, foldword, MAXWLEN);
   for (const char_u *p = pfxlist; res == OK; p++) {
@@ -4401,7 +4406,7 @@ static int write_vim_spell(spellinfo_T *spin, char_u *fname)
   // Also skip this for an .add.spl file, the main spell file must contain
   // the table (avoids that it conflicts).  File is shorter too.
   if (!spin->si_ascii && !spin->si_add) {
-    char_u folchars[128 * 8];
+    char folchars[128 * 8];
     int flags;
 
     putc(SN_CHARFLAGS, fd);                             // <sectionID>
@@ -5320,19 +5325,19 @@ static void mkspell(int fcount, char_u **fnames, bool ascii, bool over_write, bo
     }
 
     // Check for .ascii.spl.
-    if (strstr((char *)path_tail(wfname), SPL_FNAME_ASCII) != NULL) {
+    if (strstr(path_tail((char *)wfname), SPL_FNAME_ASCII) != NULL) {
       spin.si_ascii = true;
     }
 
     // Check for .add.spl.
-    if (strstr((char *)path_tail(wfname), SPL_FNAME_ADD) != NULL) {
+    if (strstr(path_tail((char *)wfname), SPL_FNAME_ADD) != NULL) {
       spin.si_add = true;
     }
   }
 
   if (incount <= 0) {
     emsg(_(e_invarg));          // need at least output and input names
-  } else if (vim_strchr(path_tail(wfname), '_') != NULL) {
+  } else if (vim_strchr(path_tail((char *)wfname), '_') != NULL) {
     emsg(_("E751: Output file name must not have region name"));
   } else if (incount > MAXREGIONS) {
     semsg(_("E754: Only up to %d regions supported"), MAXREGIONS);
@@ -5357,7 +5362,7 @@ static void mkspell(int fcount, char_u **fnames, bool ascii, bool over_write, bo
 
       if (incount > 1) {
         len = (int)STRLEN(innames[i]);
-        if (STRLEN(path_tail(innames[i])) < 5
+        if (STRLEN(path_tail((char *)innames[i])) < 5
             || innames[i][len - 3] != '_') {
           semsg(_("E755: Invalid region in %s"), innames[i]);
           goto theend;
@@ -5525,6 +5530,11 @@ void spell_add_word(char_u *word, int len, SpellAddType what, int idx, bool undo
   int i;
   char_u *spf;
 
+  if (!utf_valid_string(word, NULL)) {
+    emsg(_(e_illegal_character_in_word));
+    return;
+  }
+
   if (idx == 0) {           // use internal wordlist
     if (int_wordlist == NULL) {
       int_wordlist = vim_tempname();
@@ -5682,7 +5692,7 @@ static void init_spellfile(void)
     // Find the end of the language name.  Exclude the region.  If there
     // is a path separator remember the start of the tail.
     for (lend = curwin->w_s->b_p_spl; *lend != NUL
-         && vim_strchr((char_u *)",._", *lend) == NULL; ++lend) {
+         && vim_strchr(",._", *lend) == NULL; lend++) {
       if (vim_ispathsep(*lend)) {
         aspath = true;
         lstart = lend + 1;
@@ -5725,7 +5735,7 @@ static void init_spellfile(void)
                 ->lp_slang->sl_fname;
         vim_snprintf((char *)buf + l, MAXPATHL - l, ".%s.add",
                      ((fname != NULL
-                       && strstr((char *)path_tail(fname), ".ascii.") != NULL)
+                       && strstr(path_tail((char *)fname), ".ascii.") != NULL)
                       ? "ascii"
                       : (const char *)spell_enc()));
         set_option_value("spellfile", 0L, (const char *)buf, OPT_LOCAL);
@@ -5862,19 +5872,19 @@ static void set_map_str(slang_T *lp, char_u *map)
       if (c >= 256) {
         int cl = utf_char2len(c);
         int headcl = utf_char2len(headc);
-        char_u *b;
+        char *b;
         hash_T hash;
         hashitem_T *hi;
 
         b = xmalloc(cl + headcl + 2);
-        utf_char2bytes(c, (char *)b);
+        utf_char2bytes(c, b);
         b[cl] = NUL;
-        utf_char2bytes(headc, (char *)b + cl + 1);
+        utf_char2bytes(headc, b + cl + 1);
         b[cl + 1 + headcl] = NUL;
-        hash = hash_hash(b);
+        hash = hash_hash((char_u *)b);
         hi = hash_lookup(&lp->sl_map_hash, (const char *)b, STRLEN(b), hash);
         if (HASHITEM_EMPTY(hi)) {
-          hash_add_item(&lp->sl_map_hash, hi, b, hash);
+          hash_add_item(&lp->sl_map_hash, hi, (char_u *)b, hash);
         } else {
           // This should have been checked when generating the .spl
           // file.

@@ -3044,6 +3044,10 @@ describe('API', function()
       eq('fillchar must be a single character',
          pcall_err(meths.eval_statusline, '', { fillchar = 1 }))
     end)
+    it('rejects invalid string', function()
+      eq('E539: Illegal character <}>',
+         pcall_err(meths.eval_statusline, '%{%}', {}))
+    end)
     describe('highlight parsing', function()
       it('works', function()
         eq({
@@ -3097,6 +3101,19 @@ describe('API', function()
           meths.eval_statusline(
             'TextWithNoHighlight%#WarningMsg#TextWithWarningHighlight',
             { use_tabline = true, highlights = true }))
+      end)
+      it('works with winbar', function()
+        eq({
+            str = 'TextWithNoHighlightTextWithWarningHighlight',
+            width = 43,
+            highlights = {
+              { start = 0, group = 'WinBar' },
+              { start = 19, group = 'WarningMsg' }
+            }
+          },
+          meths.eval_statusline(
+            'TextWithNoHighlight%#WarningMsg#TextWithWarningHighlight',
+            { use_winbar = true, highlights = true }))
       end)
     end)
   end)

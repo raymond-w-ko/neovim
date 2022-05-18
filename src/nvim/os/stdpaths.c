@@ -82,7 +82,7 @@ char *stdpaths_get_xdg_var(const XDGVarType idx)
   if (env_val != NULL) {
     ret = xstrdup(env_val);
   } else if (fallback) {
-    ret = (char *)expand_env_save((char_u *)fallback);
+    ret = expand_env_save((char *)fallback);
   }
 
   return ret;
@@ -103,7 +103,8 @@ char *get_xdg_home(const XDGVarType idx)
   if (dir) {
 #if defined(WIN32)
     dir = concat_fnames_realloc(dir,
-                                (idx == kXDGDataHome ? "nvim-data" : "nvim"),
+                                ((idx == kXDGDataHome
+                                  || idx == kXDGStateHome) ? "nvim-data" : "nvim"),
                                 true);
 #else
     dir = concat_fnames_realloc(dir, "nvim", true);

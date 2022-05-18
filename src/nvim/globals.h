@@ -253,7 +253,7 @@ EXTERN int lines_left INIT(= -1);           // lines left for listing
 EXTERN int msg_no_more INIT(= false);       // don't use more prompt, truncate
                                             // messages
 
-EXTERN char_u *sourcing_name INIT(= NULL);  // name of error message source
+EXTERN char *sourcing_name INIT(= NULL);    // name of error message source
 EXTERN linenr_T sourcing_lnum INIT(= 0);    // line number of the source file
 
 EXTERN int ex_nesting_level INIT(= 0);          // nesting level
@@ -354,7 +354,7 @@ EXTERN bool did_source_packages INIT(= false);
 // provider function call
 EXTERN struct caller_scope {
   sctx_T script_ctx;
-  uint8_t *sourcing_name, *autocmd_fname, *autocmd_match;
+  char *sourcing_name, *autocmd_fname, *autocmd_match;
   linenr_T sourcing_lnum;
   int autocmd_bufnr;
   void *funccalp;
@@ -755,9 +755,9 @@ EXTERN char last_mode[MODE_MAX_LENGTH] INIT(= "n");
 EXTERN char_u *last_cmdline INIT(= NULL);      // last command line (for ":)
 EXTERN char_u *repeat_cmdline INIT(= NULL);    // command line for "."
 EXTERN char_u *new_last_cmdline INIT(= NULL);  // new value for last_cmdline
-EXTERN char_u *autocmd_fname INIT(= NULL);     // fname for <afile> on cmdline
+EXTERN char *autocmd_fname INIT(= NULL);       // fname for <afile> on cmdline
 EXTERN int autocmd_bufnr INIT(= 0);            // fnum for <abuf> on cmdline
-EXTERN char_u *autocmd_match INIT(= NULL);     // name for <amatch> on cmdline
+EXTERN char *autocmd_match INIT(= NULL);       // name for <amatch> on cmdline
 EXTERN bool did_cursorhold INIT(= false);      // set when CursorHold t'gerd
 
 EXTERN int postponed_split INIT(= 0);        // for CTRL-W CTRL-] command
@@ -811,7 +811,7 @@ extern char_u *compiled_sys;
 // When a window has a local directory, the absolute path of the global
 // current directory is stored here (in allocated memory).  If the current
 // directory is not a local directory, globaldir is NULL.
-EXTERN char_u *globaldir INIT(= NULL);
+EXTERN char *globaldir INIT(= NULL);
 
 EXTERN char *last_chdir_reason INIT(= NULL);
 
@@ -877,7 +877,8 @@ EXTERN char e_api_spawn_failed[] INIT(= N_("E903: Could not spawn API job"));
 EXTERN char e_argreq[] INIT(= N_("E471: Argument required"));
 EXTERN char e_backslash[] INIT(= N_("E10: \\ should be followed by /, ? or &"));
 EXTERN char e_cmdwin[] INIT(= N_("E11: Invalid in command-line window; <CR> executes, CTRL-C quits"));
-EXTERN char e_curdir[] INIT(= N_( "E12: Command not allowed from exrc/vimrc in current dir or tag search"));
+EXTERN char e_curdir[] INIT(= N_("E12: Command not allowed from exrc/vimrc in current dir or tag search"));
+EXTERN char e_command_too_recursive[] INIT(= N_("E169: Command too recursive"));
 EXTERN char e_endif[] INIT(= N_("E171: Missing :endif"));
 EXTERN char e_endtry[] INIT(= N_("E600: Missing :endtry"));
 EXTERN char e_endwhile[] INIT(= N_("E170: Missing :endwhile"));

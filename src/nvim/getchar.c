@@ -802,7 +802,7 @@ int start_redo_ins(void)
 
   // skip the count and the command character
   while ((c = read_redo(false, false)) != NUL) {
-    if (vim_strchr((char_u *)"AaIiRrOo", c) != NULL) {
+    if (vim_strchr("AaIiRrOo", c) != NULL) {
       if (c == 'O' || c == 'o') {
         add_buff(&readbuf2, NL_STR, -1L);
       }
@@ -848,6 +848,8 @@ void init_default_mappings(void)
           MODE_NORMAL, true);
   add_map((char_u *)"<C-U> <C-G>u<C-U>", MODE_INSERT, true);
   add_map((char_u *)"<C-W> <C-G>u<C-W>", MODE_INSERT, true);
+  add_map((char_u *)"* y/\\\\V<C-R>\"<CR>", MODE_VISUAL, true);
+  add_map((char_u *)"# y?\\\\V<C-R>\"<CR>", MODE_VISUAL, true);
 }
 
 // Insert a string in position 'offset' in the typeahead buffer (for "@r"
@@ -2902,8 +2904,8 @@ void set_maparg_lhs_rhs(const char *const orig_lhs, const size_t orig_lhs_len,
       mapargs->rhs_len = 0;
       mapargs->rhs_is_noop = true;
     } else {
-      replaced = replace_termcodes(orig_rhs, orig_rhs_len, &rhs_buf,
-                                   REPTERM_DO_LT | REPTERM_NO_SIMPLIFY, NULL, cpo_flags);
+      replaced = replace_termcodes(orig_rhs, orig_rhs_len, &rhs_buf, REPTERM_DO_LT, NULL,
+                                   cpo_flags);
       mapargs->rhs_len = STRLEN(replaced);
       // XXX: even when orig_rhs is non-empty, replace_termcodes may produce an empty string.
       mapargs->rhs_is_noop = orig_rhs[0] != NUL && mapargs->rhs_len == 0;
@@ -3009,7 +3011,7 @@ int str_to_mapargs(const char_u *strargs, bool is_unmap, MapArguments *mapargs)
   //
   // With :unmap, literal white space is included in the {lhs}; there is no
   // separate {rhs}.
-  const char_u *lhs_end = to_parse;
+  const char *lhs_end = (char *)to_parse;
   bool do_backslash = (vim_strchr(p_cpo, CPO_BSLASH) == NULL);
   while (*lhs_end && (is_unmap || !ascii_iswhite(*lhs_end))) {
     if ((lhs_end[0] == Ctrl_V || (do_backslash && lhs_end[0] == '\\'))
@@ -3025,7 +3027,7 @@ int str_to_mapargs(const char_u *strargs, bool is_unmap, MapArguments *mapargs)
 
   // Given {lhs} might be larger than MAXMAPLEN before replace_termcodes
   // (e.g. "<Space>" is longer than ' '), so first copy into a buffer.
-  size_t orig_lhs_len = (size_t)(lhs_end - to_parse);
+  size_t orig_lhs_len = (size_t)((char_u *)lhs_end - to_parse);
   char_u *lhs_to_replace = xcalloc(orig_lhs_len + 1, sizeof(char_u));
   STRLCPY(lhs_to_replace, to_parse, orig_lhs_len + 1);
 
@@ -3820,7 +3822,7 @@ bool map_to_exists(const char *const str, const char *const modechars, const boo
   MAPMODE(mode, modechars, 'c', MODE_CMDLINE);
 #undef MAPMODE
 
-  retval = map_to_exists_mode((const char *)rhs, mode, abbr);
+  retval = map_to_exists_mode((char *)rhs, mode, abbr);
   xfree(buf);
 
   return retval;
@@ -4734,9 +4736,9 @@ char_u *check_map(char_u *keys, int mode, int exact, int ign_mod, int abbr, mapb
 void add_map(char_u *map, int mode, bool nore)
 {
   char_u *s;
-  char_u *cpo_save = p_cpo;
+  char *cpo_save = p_cpo;
 
-  p_cpo = (char_u *)"";         // Allow <> notation
+  p_cpo = "";         // Allow <> notation
   // Need to put string in allocated memory, because do_map() will modify it.
   s = vim_strsave(map);
   (void)do_map(nore ? 2 : 0, s, mode, false);
@@ -4828,7 +4830,7 @@ mapblock_T *get_maphash(int index, buf_T *buf)
 }
 
 /// Get command argument for <Cmd> key
-char_u *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
+char *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
 {
   garray_T line_ga;
   int c1 = -1, c2;
@@ -4901,7 +4903,7 @@ char_u *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
     ga_clear(&line_ga);
   }
 
-  return (char_u *)line_ga.ga_data;
+  return line_ga.ga_data;
 }
 
 bool map_execute_lua(void)

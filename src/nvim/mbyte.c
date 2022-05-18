@@ -1332,7 +1332,7 @@ bool mb_isalpha(int a)
 static int utf_strnicmp(const char_u *s1, const char_u *s2, size_t n1, size_t n2)
 {
   int c1, c2, cdiff;
-  char_u buffer[6];
+  char buffer[6];
 
   for (;;) {
     c1 = utf_safe_read_char_adv(&s1, &n1);
@@ -1371,10 +1371,10 @@ static int utf_strnicmp(const char_u *s1, const char_u *s2, size_t n1, size_t n2
 
   if (c1 != -1 && c2 == -1) {
     n1 = utf_char2bytes(utf_fold(c1), (char *)buffer);
-    s1 = buffer;
+    s1 = (char_u *)buffer;
   } else if (c2 != -1 && c1 == -1) {
     n2 = utf_char2bytes(utf_fold(c2), (char *)buffer);
-    s2 = buffer;
+    s2 = (char_u *)buffer;
   }
 
   while (n1 > 0 && n2 > 0 && *s1 != NUL && *s2 != NUL) {
@@ -1992,6 +1992,31 @@ theend:
   convert_setup(&vimconv, NULL, NULL);
 }
 
+/// @return  true if string "s" is a valid utf-8 string.
+/// When "end" is NULL stop at the first NUL.
+/// When "end" is positive stop there.
+bool utf_valid_string(const char_u *s, const char_u *end)
+{
+  const char_u *p = s;
+
+  while (end == NULL ? *p != NUL : p < end) {
+    int l = utf8len_tab_zero[*p];
+    if (l == 0) {
+      return false;  // invalid lead byte
+    }
+    if (end != NULL && p + l > end) {
+      return false;  // incomplete byte sequence
+    }
+    p++;
+    while (--l > 0) {
+      if ((*p++ & 0xc0) != 0x80) {
+        return false;  // invalid trail byte
+      }
+    }
+  }
+  return true;
+}
+
 /*
  * If the cursor moves on an trail byte, set the cursor on the lead byte.
  * Thus it moves left if necessary.
@@ -2264,7 +2289,7 @@ char_u *enc_locale(void)
   // Make the name lowercase and replace '_' with '-'.
   // Exception: "ja_JP.EUC" == "euc-jp", "zh_CN.EUC" = "euc-cn",
   // "ko_KR.EUC" == "euc-kr"
-  const char *p = (char *)vim_strchr((char_u *)s, '.');
+  const char *p = vim_strchr(s, '.');
   if (p != NULL) {
     if (p > s + 2 && !STRNICMP(p + 1, "EUC", 3)
         && !isalnum((int)p[4]) && p[4] != '-' && p[-3] == '_') {

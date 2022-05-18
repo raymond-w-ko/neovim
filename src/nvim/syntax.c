@@ -3807,7 +3807,7 @@ static void put_pattern(const char *const s, const int c, const synpat_T *const 
   msg_putchar(c);
 
   // output the pattern, in between a char that is not in the pattern
-  for (i = 0; vim_strchr(spp->sp_pattern, sepchars[i]) != NULL;) {
+  for (i = 0; vim_strchr((char *)spp->sp_pattern, sepchars[i]) != NULL;) {
     if (sepchars[++i] == NUL) {
       i = 0;            // no good char found, just use the first one
       break;
@@ -4393,7 +4393,7 @@ static void syn_cmd_keyword(exarg_T *eap, int syncing)
 
         // 2: Add an entry for each keyword.
         for (kw = keyword_copy; --cnt >= 0; kw += STRLEN(kw) + 1) {
-          for (p = vim_strchr(kw, '[');;) {
+          for (p = (char_u *)vim_strchr((char *)kw, '[');;) {
             if (p != NULL) {
               *p = NUL;
             }
@@ -5075,7 +5075,7 @@ static char_u *get_syn_pattern(char_u *arg, synpat_T *ci)
   char_u *end;
   int *p;
   int idx;
-  char_u *cpo_save;
+  char *cpo_save;
 
   // need at least three chars
   if (arg == NULL || arg[0] == NUL || arg[1] == NUL || arg[2] == NUL) {
@@ -5092,8 +5092,8 @@ static char_u *get_syn_pattern(char_u *arg, synpat_T *ci)
 
   // Make 'cpoptions' empty, to avoid the 'l' flag
   cpo_save = p_cpo;
-  p_cpo = (char_u *)"";
-  ci->sp_prog = vim_regcomp(ci->sp_pattern, RE_MAGIC);
+  p_cpo = "";
+  ci->sp_prog = vim_regcomp((char *)ci->sp_pattern, RE_MAGIC);
   p_cpo = cpo_save;
 
   if (ci->sp_prog == NULL) {
@@ -5174,7 +5174,7 @@ static void syn_cmd_sync(exarg_T *eap, int syncing)
   int illegal = FALSE;
   int finished = FALSE;
   long n;
-  char_u *cpo_save;
+  char *cpo_save;
 
   if (ends_excmd(*arg_start)) {
     syn_cmd_list(eap, TRUE);
@@ -5253,9 +5253,9 @@ static void syn_cmd_sync(exarg_T *eap, int syncing)
 
         // Make 'cpoptions' empty, to avoid the 'l' flag
         cpo_save = p_cpo;
-        p_cpo = (char_u *)"";
+        p_cpo = "";
         curwin->w_s->b_syn_linecont_prog =
-          vim_regcomp(curwin->w_s->b_syn_linecont_pat, RE_MAGIC);
+          vim_regcomp((char *)curwin->w_s->b_syn_linecont_pat, RE_MAGIC);
         p_cpo = cpo_save;
         syn_clear_time(&curwin->w_s->b_syn_linecont_time);
 
@@ -5303,8 +5303,8 @@ static void syn_cmd_sync(exarg_T *eap, int syncing)
 /// @return        FAIL for some error, OK for success.
 static int get_id_list(char_u **const arg, const int keylen, int16_t **const list, const bool skip)
 {
-  char_u *p = NULL;
-  char_u *end;
+  char *p = NULL;
+  char *end;
   int total_count = 0;
   int16_t *retval = NULL;
   regmatch_T regmatch;
@@ -5318,12 +5318,12 @@ static int get_id_list(char_u **const arg, const int keylen, int16_t **const lis
   // grow when a regexp is used.  In that case round 1 is done once again.
   for (int round = 1; round <= 2; round++) {
     // skip "contains"
-    p = (char_u *)skipwhite((char *)(*arg) + keylen);
+    p = skipwhite((char *)(*arg) + keylen);
     if (*p != '=') {
       semsg(_("E405: Missing equal sign: %s"), *arg);
       break;
     }
-    p = (char_u *)skipwhite((char *)p + 1);
+    p = skipwhite(p + 1);
     if (ends_excmd(*p)) {
       semsg(_("E406: Empty argument: %s"), *arg);
       break;
@@ -5333,7 +5333,7 @@ static int get_id_list(char_u **const arg, const int keylen, int16_t **const lis
     int count = 0;
     do {
       for (end = p; *end && !ascii_iswhite(*end) && *end != ','; end++) {}
-      char_u *const name = xmalloc(end - p + 3);   // leave room for "^$"
+      char *const name = xmalloc(end - p + 3);   // leave room for "^$"
       STRLCPY(name + 1, p, end - p + 1);
       if (STRCMP(name + 1, "ALLBUT") == 0
           || STRCMP(name + 1, "ALL") == 0
@@ -5367,14 +5367,14 @@ static int get_id_list(char_u **const arg, const int keylen, int16_t **const lis
         if (skip) {
           id = -1;
         } else {
-          id = syn_check_cluster(name + 2, (int)(end - p - 1));
+          id = syn_check_cluster((char_u *)name + 2, (int)(end - p - 1));
         }
       } else {
         /*
          * Handle full group name.
          */
-        if (strpbrk((char *)name + 1, "\\.*^$~[") == NULL) {
-          id = syn_check_group((char *)(name + 1), (int)(end - p));
+        if (strpbrk(name + 1, "\\.*^$~[") == NULL) {
+          id = syn_check_group((name + 1), (int)(end - p));
         } else {
           // Handle match of regexp with group names.
           *name = '^';
@@ -5427,11 +5427,11 @@ static int get_id_list(char_u **const arg, const int keylen, int16_t **const lis
         }
         ++count;
       }
-      p = (char_u *)skipwhite((char *)end);
+      p = skipwhite(end);
       if (*p != ',') {
         break;
       }
-      p = (char_u *)skipwhite((char *)p + 1);             // skip comma in between arguments
+      p = skipwhite(p + 1);             // skip comma in between arguments
     } while (!ends_excmd(*p));
     if (failed) {
       break;
@@ -5443,7 +5443,7 @@ static int get_id_list(char_u **const arg, const int keylen, int16_t **const lis
     }
   }
 
-  *arg = p;
+  *arg = (char_u *)p;
   if (failed || retval == NULL) {
     xfree(retval);
     return FAIL;
@@ -5669,7 +5669,7 @@ void ex_ownsyntax(exarg_T *eap)
   }
 
   // Apply the "syntax" autocommand event, this finds and loads the syntax file.
-  apply_autocmds(EVENT_SYNTAX, (char_u *)eap->arg, curbuf->b_fname, true, curbuf);
+  apply_autocmds(EVENT_SYNTAX, eap->arg, curbuf->b_fname, true, curbuf);
 
   // Move value of b:current_syntax to w:current_syntax.
   new_value = get_var_value("b:current_syntax");
@@ -5763,26 +5763,26 @@ void set_context_in_syntax_cmd(expand_T *xp, const char *arg)
  * Function given to ExpandGeneric() to obtain the list syntax names for
  * expansion.
  */
-char_u *get_syntax_name(expand_T *xp, int idx)
+char *get_syntax_name(expand_T *xp, int idx)
 {
   switch (expand_what) {
   case EXP_SUBCMD:
-    return (char_u *)subcommands[idx].name;
+    return subcommands[idx].name;
   case EXP_CASE: {
     static char *case_args[] = { "match", "ignore", NULL };
-    return (char_u *)case_args[idx];
+    return case_args[idx];
   }
   case EXP_SPELL: {
     static char *spell_args[] =
     { "toplevel", "notoplevel", "default", NULL };
-    return (char_u *)spell_args[idx];
+    return spell_args[idx];
   }
   case EXP_SYNC: {
     static char *sync_args[] =
     { "ccomment", "clear", "fromstart",
       "linebreaks=", "linecont", "lines=", "match",
       "maxlines=", "minlines=", "region", NULL };
-    return (char_u *)sync_args[idx];
+    return sync_args[idx];
   }
   }
   return NULL;
@@ -5965,17 +5965,17 @@ static void syntime_clear(void)
  * Function given to ExpandGeneric() to obtain the possible arguments of the
  * ":syntime {on,off,clear,report}" command.
  */
-char_u *get_syntime_arg(expand_T *xp, int idx)
+char *get_syntime_arg(expand_T *xp, int idx)
 {
   switch (idx) {
   case 0:
-    return (char_u *)"on";
+    return "on";
   case 1:
-    return (char_u *)"off";
+    return "off";
   case 2:
-    return (char_u *)"clear";
+    return "clear";
   case 3:
-    return (char_u *)"report";
+    return "report";
   }
   return NULL;
 }

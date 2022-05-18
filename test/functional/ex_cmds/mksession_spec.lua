@@ -10,11 +10,11 @@ local funcs = helpers.funcs
 local matches = helpers.matches
 local pesc = helpers.pesc
 local rmdir = helpers.rmdir
+local sleep = helpers.sleep
 
 local file_prefix = 'Xtest-functional-ex_cmds-mksession_spec'
 
 describe(':mksession', function()
-  if helpers.pending_win32(pending) then return end
   local session_file = file_prefix .. '.vim'
   local tab_dir = file_prefix .. '.d'
 
@@ -103,9 +103,11 @@ describe(':mksession', function()
     local session_path = cwd_dir..'/'..session_file
 
     command('cd '..tab_dir)
-    command('terminal echo $PWD')
+    command('terminal')
     command('cd '..cwd_dir)
     command('mksession '..session_path)
+    command('bd!')
+    sleep(100)  -- Make sure the process exits.
     command('qall!')
 
     -- Create a new test instance of Nvim.
@@ -114,6 +116,7 @@ describe(':mksession', function()
 
     local expected_cwd = cwd_dir..'/'..tab_dir
     matches('^term://'..pesc(expected_cwd)..'//%d+:', funcs.expand('%'))
-    command('qall!')
+    command('bd!')
+    sleep(100)  -- Make sure the process exits.
   end)
 end)

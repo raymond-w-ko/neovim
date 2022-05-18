@@ -200,12 +200,12 @@ static char *pexpand_cmds[] = {
 
 /// Function given to ExpandGeneric() to obtain the profile command
 /// specific expansion.
-char_u *get_profile_name(expand_T *xp, int idx)
+char *get_profile_name(expand_T *xp, int idx)
   FUNC_ATTR_PURE
 {
   switch (pexpand_what) {
   case PEXP_SUBCMD:
-    return (char_u *)pexpand_cmds[idx];
+    return pexpand_cmds[idx];
   // case PEXP_FUNC: TODO
   default:
     return NULL;
@@ -554,7 +554,7 @@ void dialog_changed(buf_T *buf, bool checkall)
     .forceit = false,
   };
 
-  dialog_msg((char *)buff, _("Save changes to \"%s\"?"), (char *)buf->b_fname);
+  dialog_msg((char *)buff, _("Save changes to \"%s\"?"), buf->b_fname);
   if (checkall) {
     ret = vim_dialog_yesnoallcancel(VIM_QUESTION, NULL, (char_u *)buff, 1);
   } else {
@@ -563,11 +563,7 @@ void dialog_changed(buf_T *buf, bool checkall)
 
   if (ret == VIM_YES) {
     if (buf->b_fname != NULL
-        && check_overwrite(&ea,
-                           buf,
-                           (char *)buf->b_fname,
-                           (char *)buf->b_ffname,
-                           false) == OK) {
+        && check_overwrite(&ea, buf, buf->b_fname, (char *)buf->b_ffname, false) == OK) {
       // didn't hit Cancel
       (void)buf_write_all(buf, false);
     }
@@ -583,7 +579,7 @@ void dialog_changed(buf_T *buf, bool checkall)
         set_bufref(&bufref, buf2);
 
         if (buf2->b_fname != NULL
-            && check_overwrite(&ea, buf2, (char *)buf2->b_fname,
+            && check_overwrite(&ea, buf2, buf2->b_fname,
                                (char *)buf2->b_ffname, false) == OK) {
           // didn't hit Cancel
           (void)buf_write_all(buf2, false);
@@ -611,7 +607,7 @@ bool dialog_close_terminal(buf_T *buf)
   char buff[DIALOG_MSG_SIZE];
 
   dialog_msg(buff, _("Close \"%s\"?"),
-             (buf->b_fname != NULL) ? (char *)buf->b_fname : "?");
+             (buf->b_fname != NULL) ? buf->b_fname : "?");
 
   int ret = vim_dialog_yesnocancel(VIM_QUESTION, NULL, (char_u *)buff, 1);
 
@@ -738,7 +734,7 @@ bool check_changed_any(bool hidden, bool unload)
     if ((buf->terminal && channel_job_running((uint64_t)buf->b_p_channel))
         ? semsg(_("E947: Job still running in buffer \"%s\""), buf->b_fname)
         : semsg(_("E162: No write since last change for buffer \"%s\""),
-                buf_spname(buf) != NULL ? buf_spname(buf) : buf->b_fname)) {
+                buf_spname(buf) != NULL ? buf_spname(buf) : (char_u *)buf->b_fname)) {
       save = no_wait_return;
       no_wait_return = false;
       wait_return(false);
@@ -792,7 +788,7 @@ int buf_write_all(buf_T *buf, int forceit)
   int retval;
   buf_T *old_curbuf = curbuf;
 
-  retval = (buf_write(buf, buf->b_ffname, buf->b_fname,
+  retval = (buf_write(buf, (char *)buf->b_ffname, buf->b_fname,
                       (linenr_T)1, buf->b_ml.ml_line_count, NULL,
                       false, forceit, true, false));
   if (curbuf != old_curbuf) {
@@ -908,7 +904,7 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
     if (curbuf->b_ffname == NULL) {
       return FAIL;
     }
-    str = (char *)curbuf->b_fname;
+    str = curbuf->b_fname;
     arg_escaped = false;
   }
 
@@ -924,11 +920,11 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
     regmatch.rm_ic = p_fic;     // ignore case when 'fileignorecase' is set
     for (int i = 0; i < new_ga.ga_len && !got_int; i++) {
       p = ((char **)new_ga.ga_data)[i];
-      p = (char *)file_pat_to_reg_pat((char_u *)p, NULL, NULL, false);
+      p = file_pat_to_reg_pat(p, NULL, NULL, false);
       if (p == NULL) {
         break;
       }
-      regmatch.regprog = vim_regcomp((char_u *)p, p_magic ? RE_MAGIC : 0);
+      regmatch.regprog = vim_regcomp(p, p_magic ? RE_MAGIC : 0);
       if (regmatch.regprog == NULL) {
         xfree(p);
         break;
@@ -1518,12 +1514,11 @@ void ex_listdo(exarg_T *eap)
         // buffer was opened while Syntax autocommands were disabled,
         // need to trigger them now.
         if (buf == curbuf) {
-          apply_autocmds(EVENT_SYNTAX, curbuf->b_p_syn,
-                         curbuf->b_fname, true, curbuf);
+          apply_autocmds(EVENT_SYNTAX, (char *)curbuf->b_p_syn, curbuf->b_fname, true,
+                         curbuf);
         } else {
           aucmd_prepbuf(&aco, buf);
-          apply_autocmds(EVENT_SYNTAX, buf->b_p_syn,
-                         buf->b_fname, true, buf);
+          apply_autocmds(EVENT_SYNTAX, (char *)buf->b_p_syn, buf->b_fname, true, buf);
           aucmd_restbuf(&aco);
         }
 
@@ -1571,12 +1566,12 @@ static void alist_add_list(int count, char **files, int after, bool will_edit)
 
 // Function given to ExpandGeneric() to obtain the possible arguments of the
 // argedit and argdelete commands.
-char_u *get_arglist_name(expand_T *xp FUNC_ATTR_UNUSED, int idx)
+char *get_arglist_name(expand_T *xp FUNC_ATTR_UNUSED, int idx)
 {
   if (idx >= ARGCOUNT) {
     return NULL;
   }
-  return alist_name(&ARGLIST[idx]);
+  return (char *)alist_name(&ARGLIST[idx]);
 }
 
 /// ":compiler[!] {name}"
@@ -1766,7 +1761,7 @@ typedef struct {
 ///
 /// @return pointer to allocated line, or NULL for end-of-file or
 ///         some error.
-static char_u *get_str_line(int c, void *cookie, int indent, bool do_concat)
+static char *get_str_line(int c, void *cookie, int indent, bool do_concat)
 {
   GetStrLineCookie *p = cookie;
   if (STRLEN(p->buf) <= p->offset) {
@@ -1818,16 +1813,16 @@ scriptitem_T *new_script_item(char *const name, scid_T *const sid_out)
 
 static int source_using_linegetter(void *cookie, LineGetter fgetline, const char *traceback_name)
 {
-  char *save_sourcing_name = (char *)sourcing_name;
+  char *save_sourcing_name = sourcing_name;
   linenr_T save_sourcing_lnum = sourcing_lnum;
   char sourcing_name_buf[256];
   if (save_sourcing_name == NULL) {
-    sourcing_name = (char_u *)traceback_name;
+    sourcing_name = (char *)traceback_name;
   } else {
     snprintf((char *)sourcing_name_buf, sizeof(sourcing_name_buf),
              "%s called at %s:%" PRIdLINENR, traceback_name, save_sourcing_name,
              save_sourcing_lnum);
-    sourcing_name = (char_u *)sourcing_name_buf;  // -V507 reassigned below, before return.
+    sourcing_name = sourcing_name_buf;  // -V507 reassigned below, before return.
   }
   sourcing_lnum = 0;
 
@@ -1842,7 +1837,7 @@ static int source_using_linegetter(void *cookie, LineGetter fgetline, const char
   int retval = do_cmdline(NULL, fgetline, cookie,
                           DOCMD_VERBOSE | DOCMD_NOWAIT | DOCMD_REPEAT);
   sourcing_lnum = save_sourcing_lnum;
-  sourcing_name = (char_u *)save_sourcing_name;
+  sourcing_name = save_sourcing_name;
   current_sctx = save_current_sctx;
   restore_funccal();
   return retval;
@@ -1920,7 +1915,7 @@ int do_source(char *fname, int check_other, int is_vimrc)
   proftime_T wait_start;
   bool trigger_source_post = false;
 
-  p = (char *)expand_env_save((char_u *)fname);
+  p = expand_env_save(fname);
   if (p == NULL) {
     return retval;
   }
@@ -1935,25 +1930,25 @@ int do_source(char *fname, int check_other, int is_vimrc)
   }
 
   // Apply SourceCmd autocommands, they should get the file and source it.
-  if (has_autocmd(EVENT_SOURCECMD, (char_u *)fname_exp, NULL)
-      && apply_autocmds(EVENT_SOURCECMD, (char_u *)fname_exp, (char_u *)fname_exp,
+  if (has_autocmd(EVENT_SOURCECMD, fname_exp, NULL)
+      && apply_autocmds(EVENT_SOURCECMD, fname_exp, fname_exp,
                         false, curbuf)) {
     retval = aborting() ? FAIL : OK;
     if (retval == OK) {
       // Apply SourcePost autocommands.
-      apply_autocmds(EVENT_SOURCEPOST, (char_u *)fname_exp, (char_u *)fname_exp, false, curbuf);
+      apply_autocmds(EVENT_SOURCEPOST, fname_exp, fname_exp, false, curbuf);
     }
     goto theend;
   }
 
   // Apply SourcePre autocommands, they may get the file.
-  apply_autocmds(EVENT_SOURCEPRE, (char_u *)fname_exp, (char_u *)fname_exp, false, curbuf);
+  apply_autocmds(EVENT_SOURCEPRE, fname_exp, fname_exp, false, curbuf);
 
   cookie.fp = fopen_noinh_readbin(fname_exp);
   if (cookie.fp == NULL && check_other) {
     // Try again, replacing file name ".vimrc" by "_vimrc" or vice versa,
     // and ".exrc" by "_exrc" or vice versa.
-    p = (char *)path_tail((char_u *)fname_exp);
+    p = path_tail(fname_exp);
     if ((*p == '.' || *p == '_')
         && (STRICMP(p + 1, "nvimrc") == 0 || STRICMP(p + 1, "exrc") == 0)) {
       *p = (*p == '_') ? '.' : '_';
@@ -2014,8 +2009,8 @@ int do_source(char *fname, int check_other, int is_vimrc)
   cookie.level = ex_nesting_level;
 
   // Keep the sourcing name/lnum, for recursive calls.
-  save_sourcing_name = (char *)sourcing_name;
-  sourcing_name = (char_u *)fname_exp;
+  save_sourcing_name = sourcing_name;
+  sourcing_name = fname_exp;
   save_sourcing_lnum = sourcing_lnum;
   sourcing_lnum = 0;
 
@@ -2059,7 +2054,7 @@ int do_source(char *fname, int check_other, int is_vimrc)
   cookie.conv.vc_type = CONV_NONE;              // no conversion
 
   // Read the first line so we can check for a UTF-8 BOM.
-  firstline = getsourceline(0, (void *)&cookie, 0, true);
+  firstline = (uint8_t *)getsourceline(0, (void *)&cookie, 0, true);
   if (firstline != NULL && STRLEN(firstline) >= 3 && firstline[0] == 0xef
       && firstline[1] == 0xbb && firstline[2] == 0xbf) {
     // Found BOM; setup conversion, skip over BOM and recode the line.
@@ -2104,7 +2099,7 @@ int do_source(char *fname, int check_other, int is_vimrc)
   if (got_int) {
     emsg(_(e_interr));
   }
-  sourcing_name = (char_u *)save_sourcing_name;
+  sourcing_name = save_sourcing_name;
   sourcing_lnum = save_sourcing_lnum;
   if (p_verbose > 1) {
     verbose_enter();
@@ -2143,7 +2138,7 @@ int do_source(char *fname, int check_other, int is_vimrc)
   convert_setup(&cookie.conv, NULL, NULL);
 
   if (trigger_source_post) {
-    apply_autocmds(EVENT_SOURCEPOST, (char_u *)fname_exp, (char_u *)fname_exp, false, curbuf);
+    apply_autocmds(EVENT_SOURCEPOST, fname_exp, fname_exp, false, curbuf);
   }
 
 theend:
@@ -2302,7 +2297,7 @@ linenr_T get_sourced_lnum(LineGetter fgetline, void *cookie)
 ///
 /// @return pointer to the line in allocated memory, or NULL for end-of-file or
 ///         some error.
-char_u *getsourceline(int c, void *cookie, int indent, bool do_concat)
+char *getsourceline(int c, void *cookie, int indent, bool do_concat)
 {
   struct source_cookie *sp = (struct source_cookie *)cookie;
   char *line;
@@ -2382,7 +2377,7 @@ char_u *getsourceline(int c, void *cookie, int indent, bool do_concat)
     sp->dbg_tick = debug_tick;
   }
 
-  return (char_u *)line;
+  return line;
 }
 
 static char *get_one_sourceline(struct source_cookie *sp)
@@ -2942,36 +2937,36 @@ void free_locales(void)
 
 /// Function given to ExpandGeneric() to obtain the possible arguments of the
 /// ":language" command.
-char_u *get_lang_arg(expand_T *xp, int idx)
+char *get_lang_arg(expand_T *xp, int idx)
 {
   if (idx == 0) {
-    return (char_u *)"messages";
+    return "messages";
   }
   if (idx == 1) {
-    return (char_u *)"ctype";
+    return "ctype";
   }
   if (idx == 2) {
-    return (char_u *)"time";
+    return "time";
   }
   if (idx == 3) {
-    return (char_u *)"collate";
+    return "collate";
   }
 
   init_locales();
   if (locales == NULL) {
     return NULL;
   }
-  return (char_u *)locales[idx - 4];
+  return locales[idx - 4];
 }
 
 /// Function given to ExpandGeneric() to obtain the available locales.
-char_u *get_locales(expand_T *xp, int idx)
+char *get_locales(expand_T *xp, int idx)
 {
   init_locales();
   if (locales == NULL) {
     return NULL;
   }
-  return (char_u *)locales[idx];
+  return locales[idx];
 }
 
 #endif

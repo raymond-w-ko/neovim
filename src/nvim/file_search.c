@@ -298,7 +298,7 @@ void *vim_findfile_init(char_u *path, char_u *filename, char_u *stopdirs, int le
       && (vim_ispathsep(path[1]) || path[1] == NUL)
       && (!tagfile || vim_strchr(p_cpo, CPO_DOTTAG) == NULL)
       && rel_fname != NULL) {
-    size_t len = (size_t)(path_tail(rel_fname) - rel_fname);
+    size_t len = (size_t)((char_u *)path_tail((char *)rel_fname) - rel_fname);
 
     if (!vim_isAbsName(rel_fname) && len + 1 < MAXPATHL) {
       // Make the start dir an absolute path name.
@@ -371,7 +371,7 @@ void *vim_findfile_init(char_u *path, char_u *filename, char_u *stopdirs, int le
       ptr = xrealloc(search_ctx->ffsc_stopdirs_v,
                      (dircount + 1) * sizeof(char_u *));
       search_ctx->ffsc_stopdirs_v = ptr;
-      walker = vim_strchr(walker, ';');
+      walker = (char_u *)vim_strchr((char *)walker, ';');
       if (walker) {
         assert(walker - helper >= 0);
         search_ctx->ffsc_stopdirs_v[dircount - 1] =
@@ -396,7 +396,7 @@ void *vim_findfile_init(char_u *path, char_u *filename, char_u *stopdirs, int le
    *  -fix path
    *  -wildcard_stuff (might be NULL)
    */
-  wc_part = vim_strchr(path, '*');
+  wc_part = (char_u *)vim_strchr((char *)path, '*');
   if (wc_part != NULL) {
     int64_t llevel;
     int len;
@@ -477,7 +477,7 @@ void *vim_findfile_init(char_u *path, char_u *filename, char_u *stopdirs, int le
       STRCAT(ff_expand_buffer, search_ctx->ffsc_fix_path);
       add_pathsep((char *)ff_expand_buffer);
     } else {
-      char_u *p =  path_tail(search_ctx->ffsc_fix_path);
+      char_u *p = (char_u *)path_tail((char *)search_ctx->ffsc_fix_path);
       char_u *wc_path = NULL;
       char_u *temp = NULL;
       int len = 0;
@@ -1481,7 +1481,7 @@ char_u *find_file_in_path_option(char_u *ptr, size_t len, int options, int first
             && rel_fname != NULL
             && STRLEN(rel_fname) + l < MAXPATHL) {
           STRCPY(NameBuff, rel_fname);
-          STRCPY(path_tail(NameBuff), ff_file_to_find);
+          STRCPY(path_tail((char *)NameBuff), ff_file_to_find);
           l = STRLEN(NameBuff);
         } else {
           STRCPY(NameBuff, ff_file_to_find);
@@ -1643,7 +1643,7 @@ void do_autocmd_dirchanged(char *new_dir, CdScope scope, CdCause cause, bool pre
     abort();
   }
 
-  apply_autocmds(event, (char_u *)buf, (char_u *)new_dir, false, curbuf);
+  apply_autocmds(event, buf, new_dir, false, curbuf);
 
   restore_v_event(dict, &save_v_event);
 

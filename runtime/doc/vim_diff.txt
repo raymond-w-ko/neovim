@@ -87,6 +87,8 @@ of these in your config by simply removing the mapping, e.g. ":unmap Y".
 	nnoremap <C-L> <Cmd>nohlsearch<Bar>diffupdate<Bar>normal! <C-L><CR>
 	inoremap <C-U> <C-G>u<C-U>
 	inoremap <C-W> <C-G>u<C-W>
+	xnoremap * y/\V<C-R>"<CR>
+	xnoremap # y?\V<C-R>"<CR>
 <
 Default Autocommands ~
 							*default-autocmds*
@@ -366,9 +368,8 @@ Macro/|recording| behavior
   the results of keys from 'keymap'.
 
 Mappings:
-- Creating a mapping for a simplifiable key (e.g. <C-I>) doesn't replace an
+  Creating a mapping for a simplifiable key (e.g. <C-I>) doesn't replace an
   existing mapping for its simplified form (e.g. <Tab>).
-- The rhs of a mapping is not simplified when it is defined.
 
 Motion:
   The |jumplist| avoids useless/phantom jumps.

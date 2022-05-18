@@ -844,8 +844,11 @@ nvim_eval_statusline({str}, {*opts})                  *nvim_eval_statusline()*
                               Treated as single-width even if it isn't.
                             • highlights: (boolean) Return highlight
                               information.
+                            • use_winbar: (boolean) Evaluate winbar instead of
+                              statusline.
                             • use_tabline: (boolean) Evaluate tabline instead
                               of statusline. When |TRUE|, {winid} is ignored.
+                              Mutually exclusive with {use_winbar}.
 
                 Return: ~
                     Dictionary containing statusline information, with these
@@ -1570,18 +1573,46 @@ nvim_set_current_win({window})                        *nvim_set_current_win()*
 nvim_set_hl({ns_id}, {name}, {*val})                           *nvim_set_hl()*
                 Sets a highlight group.
 
-                Note: Unlike the `:highlight` command which can update a
-                highlight group, this function completely replaces the
-                definition. For example: `nvim_set_hl(0, 'Visual', {})` will
-                clear the highlight group 'Visual'.
+                Note:
+                    Unlike the `:highlight` command which can update a
+                    highlight group, this function completely replaces the
+                    definition. For example: `nvim_set_hl(0, 'Visual', {})`
+                    will clear the highlight group 'Visual'.
+
+                Note:
+                    The fg and bg keys also accept the string values `"fg"` or
+                    `"bg"` which act as aliases to the corresponding
+                    foreground and background values of the Normal group. If
+                    the Normal group has not been defined, using these values
+                    results in an error.
 
                 Parameters: ~
                     {ns_id}  Namespace id for this highlight
                              |nvim_create_namespace()|. Use 0 to set a
                              highlight group globally |:highlight|.
                     {name}   Highlight group name, e.g. "ErrorMsg"
-                    {val}    Highlight definition map, like |synIDattr()|. In
-                             addition, the following keys are recognized:
+                    {val}    Highlight definition map, accepts the following
+                             keys:
+                             • fg (or foreground): color name or "#RRGGBB",
+                               see note.
+                             • bg (or background): color name or "#RRGGBB",
+                               see note.
+                             • sp (or special): color name or "#RRGGBB"
+                             • blend: integer between 0 and 100
+                             • bold: boolean
+                             • standout: boolean
+                             • underline: boolean
+                             • underlineline: boolean
+                             • undercurl: boolean
+                             • underdot: boolean
+                             • underdash: boolean
+                             • strikethrough: boolean
+                             • italic: boolean
+                             • reverse: boolean
+                             • nocombine: boolean
+                             • link: name of another highlight group to link
+                               to, see |:hi-link|. Additionally, the following
+                               keys are recognized:
                              • default: Don't override existing definition
                                |:hi-default|
                              • ctermfg: Sets foreground of cterm color
@@ -1589,8 +1620,9 @@ nvim_set_hl({ns_id}, {name}, {*val})                           *nvim_set_hl()*
                              • ctermbg: Sets background of cterm color
                                |highlight-ctermbg|
                              • cterm: cterm attribute map, like
-                               |highlight-args|. Note: Attributes default to
-                               those set for `gui` if not set.
+                               |highlight-args|. If not set, cterm attributes
+                               will match those from the attribute map
+                               documented above.
 
 nvim_set_keymap({mode}, {lhs}, {rhs}, {*opts})             *nvim_set_keymap()*
                 Sets a global |mapping| for the given mode.
@@ -1615,13 +1647,15 @@ nvim_set_keymap({mode}, {lhs}, {rhs}, {*opts})             *nvim_set_keymap()*
                             for |:map|.
                     {lhs}   Left-hand-side |{lhs}| of the mapping.
                     {rhs}   Right-hand-side |{rhs}| of the mapping.
-                    {opts}  Optional parameters map. Accepts all
-                            |:map-arguments| as keys excluding |<buffer>| but
-                            including |noremap| and "desc". "desc" can be used
-                            to give a description to keymap. When called from
-                            Lua, also accepts a "callback" key that takes a
-                            Lua function to call when the mapping is executed.
-                            Values are Booleans. Unknown key is an error.
+                    {opts}  Optional parameters map: keys are
+                            |:map-arguments|, values are booleans (default
+                            false). Accepts all |:map-arguments| as keys
+                            excluding |<buffer>| but including |noremap| and
+                            "desc". Unknown key is an error. "desc" can be
+                            used to give a description to the mapping. When
+                            called from Lua, also accepts a "callback" key
+                            that takes a Lua function to call when the mapping
+                            is executed.
 
 nvim_set_option({name}, {value})                           *nvim_set_option()*
                 Sets the global value of an option.
@@ -1694,8 +1728,7 @@ Vimscript Functions                                            *api-vimscript*
 nvim_call_dict_function({dict}, {fn}, {args})
                 Calls a VimL |Dictionary-function| with the given arguments.
 
-                On execution error: fails with VimL error, does not update
-                v:errmsg.
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Parameters: ~
                     {dict}  Dictionary, or String evaluating to a VimL |self|
@@ -1709,8 +1742,7 @@ nvim_call_dict_function({dict}, {fn}, {args})
 nvim_call_function({fn}, {args})                        *nvim_call_function()*
                 Calls a VimL function with the given arguments.
 
-                On execution error: fails with VimL error, does not update
-                v:errmsg.
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Parameters: ~
                     {fn}    Function to call
@@ -1728,6 +1760,8 @@ nvim_cmd({*cmd}, {*opts})                                         *nvim_cmd()*
                 allows for things such as having spaces inside a command
                 argument, expanding filenames in a command that otherwise
                 doesn't expand filenames, etc.
+
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Parameters: ~
                     {cmd}   Command to execute. Must be a Dictionary that can
@@ -1750,8 +1784,7 @@ nvim_cmd({*cmd}, {*opts})                                         *nvim_cmd()*
 nvim_command({command})                                       *nvim_command()*
                 Executes an Ex command.
 
-                On execution error: fails with VimL error, does not update
-                v:errmsg.
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Prefer using |nvim_cmd()| or |nvim_exec()| over this. To
                 evaluate multiple lines of Vim script or an Ex command
@@ -1767,8 +1800,7 @@ nvim_eval({expr})                                                *nvim_eval()*
                 Evaluates a VimL |expression|. Dictionaries and Lists are
                 recursively expanded.
 
-                On execution error: fails with VimL error, does not update
-                v:errmsg.
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Parameters: ~
                     {expr}  VimL expression string
@@ -1783,8 +1815,7 @@ nvim_exec({src}, {output})                                       *nvim_exec()*
                 Unlike |nvim_command()| this function supports heredocs,
                 script-scope (s:), etc.
 
-                On execution error: fails with VimL error, does not update
-                v:errmsg.
+                On execution error: fails with VimL error, updates v:errmsg.
 
                 Parameters: ~
                     {src}     Vimscript code

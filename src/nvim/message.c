@@ -586,7 +586,7 @@ void msg_source(int attr)
     if (sourcing_name == NULL) {
       last_sourcing_name = NULL;
     } else {
-      last_sourcing_name = vim_strsave(sourcing_name);
+      last_sourcing_name = vim_strsave((char_u *)sourcing_name);
     }
   }
   --no_wait_return;
@@ -598,8 +598,8 @@ void msg_source(int attr)
 ///            If "emsg_skip" is set: never do error messages.
 int emsg_not_now(void)
 {
-  if ((emsg_off > 0 && vim_strchr(p_debug, 'm') == NULL
-       && vim_strchr(p_debug, 't') == NULL)
+  if ((emsg_off > 0 && vim_strchr((char *)p_debug, 'm') == NULL
+       && vim_strchr((char *)p_debug, 't') == NULL)
       || emsg_skip > 0) {
     return TRUE;
   }
@@ -623,14 +623,12 @@ static bool emsg_multiline(const char *s, bool multiline)
   bool severe = emsg_severe;
   emsg_severe = false;
 
-  if (!emsg_off || vim_strchr(p_debug, 't') != NULL) {
-    /*
-     * Cause a throw of an error exception if appropriate.  Don't display
-     * the error message in this case.  (If no matching catch clause will
-     * be found, the message will be displayed later on.)  "ignore" is set
-     * when the message should be ignored completely (used for the
-     * interrupt message).
-     */
+  if (!emsg_off || vim_strchr((char *)p_debug, 't') != NULL) {
+    // Cause a throw of an error exception if appropriate.  Don't display
+    // the error message in this case.  (If no matching catch clause will
+    // be found, the message will be displayed later on.)  "ignore" is set
+    // when the message should be ignored completely (used for the
+    // interrupt message).
     if (cause_errthrow(s, severe, &ignore)) {
       if (!ignore) {
         did_emsg++;
@@ -1212,7 +1210,7 @@ void wait_return(int redraw)
     if (c == K_LEFTMOUSE || c == K_MIDDLEMOUSE || c == K_RIGHTMOUSE
         || c == K_X1MOUSE || c == K_X2MOUSE) {
       (void)jump_to_mouse(MOUSE_SETPOS, NULL, 0);
-    } else if (vim_strchr((char_u *)"\r\n ", c) == NULL && c != Ctrl_C) {
+    } else if (vim_strchr("\r\n ", c) == NULL && c != Ctrl_C) {
       // Put the character back in the typeahead buffer.  Don't use the
       // stuff buffer, because lmaps wouldn't work.
       ins_char_typebuf(vgetc_char, vgetc_mod_mask);
@@ -2418,7 +2416,7 @@ void msg_reset_scroll(void)
 static void inc_msg_scrolled(void)
 {
   if (*get_vim_var_str(VV_SCROLLSTART) == NUL) {
-    char *p = (char *)sourcing_name;
+    char *p = sourcing_name;
     char *tofree = NULL;
 
     // v:scrollstart is empty, set it to the script/function name and line

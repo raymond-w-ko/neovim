@@ -1034,7 +1034,7 @@ char *set_context_in_menu_cmd(expand_T *xp, const char *cmd, char *arg, bool for
  * Function given to ExpandGeneric() to obtain the list of (sub)menus (not
  * entries).
  */
-char_u *get_menu_name(expand_T *xp, int idx)
+char *get_menu_name(expand_T *xp, int idx)
 {
   static vimmenu_T *menu = NULL;
   char *str;
@@ -1076,14 +1076,14 @@ char_u *get_menu_name(expand_T *xp, int idx)
 
   should_advance = !should_advance;
 
-  return (char_u *)str;
+  return str;
 }
 
 /*
  * Function given to ExpandGeneric() to obtain the list of menus and menu
  * entries.
  */
-char_u *get_menu_names(expand_T *xp, int idx)
+char *get_menu_names(expand_T *xp, int idx)
 {
   static vimmenu_T *menu = NULL;
 #define TBUFFER_LEN 256
@@ -1143,7 +1143,7 @@ char_u *get_menu_names(expand_T *xp, int idx)
 
   should_advance = !should_advance;
 
-  return (char_u *)str;
+  return str;
 }
 
 
@@ -1301,7 +1301,7 @@ static char *menu_text(const char *str, int *mnemonic, char **actext)
   char *text;
 
   // Locate accelerator text, after the first TAB
-  p = (char *)vim_strchr((char_u *)str, TAB);
+  p = vim_strchr(str, TAB);
   if (p != NULL) {
     if (actext != NULL) {
       *actext = xstrdup(p + 1);
@@ -1314,7 +1314,7 @@ static char *menu_text(const char *str, int *mnemonic, char **actext)
 
   // Find mnemonic characters "&a" and reduce "&&" to "&".
   for (p = text; p != NULL;) {
-    p = (char *)vim_strchr((char_u *)p, '&');
+    p = vim_strchr(p, '&');
     if (p != NULL) {
       if (p[1] == NUL) {            // trailing "&"
         break;

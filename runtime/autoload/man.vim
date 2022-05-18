@@ -125,9 +125,7 @@ endfunction
 function! s:set_options(pager) abort
   setlocal noswapfile buftype=nofile bufhidden=hide
   setlocal nomodified readonly nomodifiable
-  if a:pager
-    nnoremap <silent> <buffer> <nowait> q :lclose<CR>:q<CR>
-  endif
+  let b:pager = a:pager
   setlocal filetype=man
 endfunction
 
@@ -173,6 +171,12 @@ function! man#show_toc() abort
   while lnum && lnum < last_line
     let text = getline(lnum)
     if text =~# '^\%( \{3\}\)\=\S.*$'
+      " if text is a section title
+      call add(toc, {'bufnr': bufnr('%'), 'lnum': lnum, 'text': text})
+    elseif text =~# '^\s\+\%(+\|-\)\S\+'
+      " if text is a flag title. we strip whitespaces and prepend two
+      " spaces to have a consistent format in the loclist.
+      let text = '  ' .. substitute(text, '^\s*\(.\{-}\)\s*$', '\1', '')
       call add(toc, {'bufnr': bufnr('%'), 'lnum': lnum, 'text': text})
     endif
     let lnum = nextnonblank(lnum + 1)

@@ -571,7 +571,7 @@ static int makeopens(FILE *fd, char_u *dirnow)
   if (ssop_flags & SSOP_SESDIR) {
     PUTLINE_FAIL("exe \"cd \" . escape(expand(\"<sfile>:p:h\"), ' ')");
   } else if (ssop_flags & SSOP_CURDIR) {
-    sname = home_replace_save(NULL, globaldir != NULL ? globaldir : dirnow);
+    sname = home_replace_save(NULL, globaldir != NULL ? (char_u *)globaldir : dirnow);
     char *fname_esc = ses_escape_fname((char *)sname, &ssop_flags);
     if (fprintf(fd, "cd %s\n", fname_esc) < 0) {
       xfree(fname_esc);
@@ -930,7 +930,7 @@ void ex_mkrc(exarg_T *eap)
     viewFile = fname;
     using_vdir = true;
   } else if (*eap->arg != NUL) {
-    fname = (char *)eap->arg;
+    fname = eap->arg;
   } else if (eap->cmdidx == CMD_mkvimrc) {
     fname = VIMRC_FILE;
   } else if (eap->cmdidx == CMD_mksession) {
@@ -997,7 +997,7 @@ void ex_mkrc(exarg_T *eap)
           }
         } else if (*dirnow != NUL
                    && (ssop_flags & SSOP_CURDIR) && globaldir != NULL) {
-          if (os_chdir((char *)globaldir) == 0) {
+          if (os_chdir(globaldir) == 0) {
             shorten_fnames(true);
           }
         }
@@ -1012,15 +1012,6 @@ void ex_mkrc(exarg_T *eap)
             emsg(_(e_prev_dir));
           }
           shorten_fnames(true);
-          // restore original dir
-          if (*dirnow != NUL && ((ssop_flags & SSOP_SESDIR)
-                                 || ((ssop_flags & SSOP_CURDIR) && globaldir !=
-                                     NULL))) {
-            if (os_chdir((char *)dirnow) != 0) {
-              emsg(_(e_prev_dir));
-            }
-            shorten_fnames(true);
-          }
         }
         xfree(dirnow);
       } else {
