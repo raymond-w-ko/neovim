@@ -53,11 +53,9 @@
 #include "nvim/vim.h"
 #include "nvim/window.h"
 
-
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "window.c.generated.h"
 #endif
-
 
 #define NOWIN           ((win_T *)-1)   // non-existing window
 
@@ -515,9 +513,14 @@ wingotofile:
     if ((len = find_ident_under_cursor(&ptr, FIND_IDENT)) == 0) {
       break;
     }
+
+    // Make a copy, if the line was changed it will be freed.
+    ptr = vim_strnsave(ptr, len);
+
     find_pattern_in_path(ptr, 0, len, true, Prenum == 0,
                          type, Prenum1, ACTION_SPLIT, 1, MAXLNUM);
-    curwin->w_set_curswant = TRUE;
+    xfree(ptr);
+    curwin->w_set_curswant = true;
     break;
 
   // Quickfix window only: view the result under the cursor in a new split.
@@ -527,7 +530,6 @@ wingotofile:
       qf_view_result(true);
     }
     break;
-
 
   // CTRL-W g  extended commands
   case 'g':
@@ -767,7 +769,6 @@ void win_config_float(win_T *wp, FloatConfig fconfig)
                         || memcmp(fconfig.border_hl_ids,
                                   wp->w_float_config.border_hl_ids,
                                   sizeof fconfig.border_hl_ids));
-
 
   wp->w_float_config = fconfig;
 
@@ -1049,7 +1050,6 @@ int win_split_ins(int size, int flags, win_T *new_wp, int dir)
     }
     need_status = STATUS_HEIGHT;
   }
-
 
   if (flags & WSP_VERT) {
     int wmw1;
@@ -1515,7 +1515,6 @@ int win_split_ins(int size, int flags, win_T *new_wp, int dir)
   return OK;
 }
 
-
 /*
  * Initialize window "newp" from window "oldp".
  * Used when splitting a window and when creating a new tab page.
@@ -1750,7 +1749,6 @@ static void win_exchange(long Prenum)
     beep_flush();
     return;
   }
-
 
   /*
    * find window to exchange with
@@ -2028,6 +2026,37 @@ void win_move_after(win_T *win1, win_T *win2)
   win2->w_pos_changed = true;
 }
 
+/// Compute maximum number of windows that can fit within "height" in frame "fr".
+static int get_maximum_wincount(frame_T *fr, int height)
+{
+  if (fr->fr_layout != FR_COL) {
+    return (height / (p_wmh + STATUS_HEIGHT + frame2win(fr)->w_winbar_height));
+  } else if (global_winbar_height()) {
+    // If winbar is globally enabled, no need to check each window for it.
+    return (height / (p_wmh + STATUS_HEIGHT + 1));
+  }
+
+  frame_T *frp;
+  int total_wincount = 0;
+
+  // First, try to fit all child frames of "fr" into "height"
+  FOR_ALL_FRAMES(frp, fr->fr_child) {
+    win_T *wp = frame2win(frp);
+
+    if (height < (p_wmh + STATUS_HEIGHT + wp->w_winbar_height)) {
+      break;
+    }
+    height -= p_wmh + STATUS_HEIGHT + wp->w_winbar_height;
+    total_wincount += 1;
+  }
+
+  // If we still have enough room for more windows, just use the default winbar height (which is 0)
+  // in order to get the amount of windows that'd fit in the remaining space
+  total_wincount += height / (p_wmh + STATUS_HEIGHT);
+
+  return total_wincount;
+}
+
 /// Make all windows the same height.
 ///'next_curwin' will soon be the current window, make sure it has enough rows.
 ///
@@ -2227,7 +2256,7 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       } else {
         extra_sep = 0;
       }
-      totwincount = (n + extra_sep) / (p_wmh + STATUS_HEIGHT + global_winbar_height());
+      totwincount = get_maximum_wincount(topfr, n + extra_sep);
       has_next_curwin = frame_has_win(topfr, next_curwin);
 
       /*
@@ -2261,8 +2290,7 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
             }
           } else {
             // These windows don't use up room.
-            totwincount -= (n + (fr->fr_next == NULL
-                                 ? extra_sep : 0)) / (p_wmh + STATUS_HEIGHT + global_winbar_height());
+            totwincount -= get_maximum_wincount(fr, (n + (fr->fr_next == NULL ? extra_sep : 0)));
           }
           room -= new_size - n;
           if (room < 0) {
@@ -2307,8 +2335,7 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       } else {
         // Compute the maximum number of windows vert. in "fr".
         n = frame_minheight(fr, NOWIN);
-        wincount = (n + (fr->fr_next == NULL ? extra_sep : 0))
-                   / (p_wmh + STATUS_HEIGHT + global_winbar_height());
+        wincount = get_maximum_wincount(fr, (n + (fr->fr_next == NULL ? extra_sep : 0)));
         m = frame_minheight(fr, next_curwin);
         if (has_next_curwin) {
           hnc = frame_has_win(fr, next_curwin);
@@ -3809,7 +3836,6 @@ static int frame_minwidth(frame_T *topfrp, win_T *next_curwin)
   return m;
 }
 
-
 /// Try to close all windows except current one.
 /// Buffers in the other windows become hidden if 'hidden' is set, or '!' is
 /// used and the buffer was modified.
@@ -4526,7 +4552,6 @@ void tabpage_move(int nr)
   redraw_tabline = true;
 }
 
-
 /*
  * Go to another window.
  * When jumping to another buffer, stop Visual mode.  Do this before
@@ -4563,7 +4588,6 @@ void win_goto(win_T *wp)
     redrawWinline(curwin, curwin->w_cursor.lnum);
   }
 }
-
 
 /*
  * Find the tabpage for window "win".
@@ -5027,7 +5051,6 @@ static win_T *win_alloc(win_T *after, bool hidden)
   return new_wp;
 }
 
-
 // Free one wininfo_T.
 void free_wininfo(wininfo_T *wip, buf_T *bp)
 {
@@ -5037,7 +5060,6 @@ void free_wininfo(wininfo_T *wip, buf_T *bp)
   }
   xfree(wip);
 }
-
 
 /// Remove window 'wp' from the window list and free the structure.
 ///
@@ -5084,6 +5106,12 @@ static void win_free(win_T *wp, tabpage_T *tp)
 
   xfree(wp->w_localdir);
   xfree(wp->w_prevdir);
+
+  stl_clear_click_defs(wp->w_status_click_defs, wp->w_status_click_defs_size);
+  xfree(wp->w_status_click_defs);
+
+  stl_clear_click_defs(wp->w_winbar_click_defs, wp->w_winbar_click_defs_size);
+  xfree(wp->w_winbar_click_defs);
 
   // Remove the window from the b_wininfo lists, it may happen that the
   // freed memory is re-used for another window.
@@ -5242,7 +5270,6 @@ static void frame_remove(frame_T *frp)
     frp->fr_next->fr_prev = frp->fr_prev;
   }
 }
-
 
 /*
  * Called from win_new_shellsize() after Rows changed.
@@ -5433,7 +5460,6 @@ static void frame_comp_pos(frame_T *topfrp, int *row, int *col)
   }
 }
 
-
 /*
  * Set current window height and take care of repositioning other windows to
  * fit around it.
@@ -5480,7 +5506,6 @@ void win_setheight_win(int height, win_T *win)
     showmode();
   }
 }
-
 
 /*
  * Set the height of a frame to "height" and take care that all frames and
@@ -6092,7 +6117,6 @@ void win_drag_vsep_line(win_T *dragwin, int offset)
   redraw_all_later(NOT_VALID);
 }
 
-
 #define FRACTION_MULT   16384L
 
 // Set wp->w_fraction for the current w_wrow and w_height.
@@ -6263,7 +6287,6 @@ void win_set_inner_size(win_T *wp)
     }
     wp->w_skipcol = 0;
     wp->w_height_inner = height;
-    wp->w_winrow_off = wp->w_border_adj[0] + wp->w_winbar_height;
 
     // There is no point in adjusting the scroll position when exiting.  Some
     // values might be invalid.
@@ -6291,11 +6314,13 @@ void win_set_inner_size(win_T *wp)
 
   wp->w_height_outer = (wp->w_height_inner + win_extra_height(wp));
   wp->w_width_outer = (wp->w_width_inner + win_extra_width(wp));
+  wp->w_winrow_off = wp->w_border_adj[0] + wp->w_winbar_height;
+  wp->w_wincol_off = wp->w_border_adj[3];
 }
 
 static int win_extra_height(win_T *wp)
 {
-  return wp->w_border_adj[0] + wp->w_border_adj[2];
+  return wp->w_border_adj[0] + wp->w_border_adj[2] + wp->w_winbar_height;
 }
 
 static int win_extra_width(win_T *wp)
@@ -6577,6 +6602,23 @@ void last_status(bool morewin)
                   global_stl_height() > 0);
 }
 
+// Remove status line from window, replacing it with a horizontal separator if needed.
+static void win_remove_status_line(win_T *wp, bool add_hsep)
+{
+  wp->w_status_height = 0;
+  if (add_hsep) {
+    wp->w_hsep_height = 1;
+  } else {
+    win_new_height(wp, wp->w_height + STATUS_HEIGHT);
+  }
+  comp_col();
+
+  stl_clear_click_defs(wp->w_status_click_defs, wp->w_status_click_defs_size);
+  xfree(wp->w_status_click_defs);
+  wp->w_status_click_defs_size = 0;
+  wp->w_status_click_defs = NULL;
+}
+
 // Look for resizable frames and take lines from them to make room for the statusline
 static void resize_frame_for_status(frame_T *fr)
 {
@@ -6617,10 +6659,7 @@ static void last_status_rec(frame_T *fr, bool statusline, bool is_stl_global)
 
     if (is_last) {
       if (wp->w_status_height != 0 && (!statusline || is_stl_global)) {
-        // Remove status line
-        wp->w_status_height = 0;
-        win_new_height(wp, wp->w_height + STATUS_HEIGHT);
-        comp_col();
+        win_remove_status_line(wp, false);
       } else if (wp->w_status_height == 0 && !is_stl_global && statusline) {
         // Add statusline to window if needed
         wp->w_status_height = STATUS_HEIGHT;
@@ -6630,9 +6669,7 @@ static void last_status_rec(frame_T *fr, bool statusline, bool is_stl_global)
     } else if (wp->w_status_height != 0 && is_stl_global) {
       // If statusline is global and the window has a statusline, replace it with a horizontal
       // separator
-      wp->w_status_height = 0;
-      wp->w_hsep_height = 1;
-      comp_col();
+      win_remove_status_line(wp, true);
     } else if (wp->w_status_height == 0 && !is_stl_global) {
       // If statusline isn't global and the window doesn't have a statusline, re-add it
       wp->w_status_height = STATUS_HEIGHT;
@@ -6640,13 +6677,8 @@ static void last_status_rec(frame_T *fr, bool statusline, bool is_stl_global)
       comp_col();
     }
     redraw_all_later(SOME_VALID);
-  } else if (fr->fr_layout == FR_COL) {
-    // For a column frame, recursively call this function for all child frames
-    FOR_ALL_FRAMES(fp, fr->fr_child) {
-      last_status_rec(fp, statusline, is_stl_global);
-    }
   } else {
-    // For a row frame, recursively call this function for all child frames
+    // For a column or row frame, recursively call this function for all child frames
     FOR_ALL_FRAMES(fp, fr->fr_child) {
       last_status_rec(fp, statusline, is_stl_global);
     }
@@ -6661,7 +6693,15 @@ void set_winbar(void)
     if (wp->w_winbar_height != winbar_height) {
       wp->w_winbar_height = winbar_height;
       win_set_inner_size(wp);
-      wp->w_redr_winbar = winbar_height;
+      wp->w_redr_status = wp->w_redr_status || winbar_height;
+
+      if (winbar_height == 0) {
+        // When removing winbar, deallocate the w_winbar_click_defs array
+        stl_clear_click_defs(wp->w_winbar_click_defs, wp->w_winbar_click_defs_size);
+        xfree(wp->w_winbar_click_defs);
+        wp->w_winbar_click_defs_size = 0;
+        wp->w_winbar_click_defs = NULL;
+      }
     }
   }
 }

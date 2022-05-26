@@ -63,26 +63,45 @@ function M.hover()
   request('textDocument/hover', params)
 end
 
+---@private
+local function request_with_options(name, params, options)
+  local req_handler
+  if options then
+    req_handler = function(err, result, ctx, config)
+      local client = vim.lsp.get_client_by_id(ctx.client_id)
+      local handler = client.handlers[name] or vim.lsp.handlers[name]
+      handler(err, result, ctx, vim.tbl_extend('force', config or {}, options))
+    end
+  end
+  request(name, params, req_handler)
+end
+
 --- Jumps to the declaration of the symbol under the cursor.
 ---@note Many servers do not implement this method. Generally, see |vim.lsp.buf.definition()| instead.
 ---
-function M.declaration()
+---@param options table|nil additional options
+---     - reuse_win: (boolean) Jump to existing window if buffer is already open.
+function M.declaration(options)
   local params = util.make_position_params()
-  request('textDocument/declaration', params)
+  request_with_options('textDocument/declaration', params, options)
 end
 
 --- Jumps to the definition of the symbol under the cursor.
 ---
-function M.definition()
+---@param options table|nil additional options
+---     - reuse_win: (boolean) Jump to existing window if buffer is already open.
+function M.definition(options)
   local params = util.make_position_params()
-  request('textDocument/definition', params)
+  request_with_options('textDocument/definition', params, options)
 end
 
 --- Jumps to the definition of the type of the symbol under the cursor.
 ---
-function M.type_definition()
+---@param options table|nil additional options
+---     - reuse_win: (boolean) Jump to existing window if buffer is already open.
+function M.type_definition(options)
   local params = util.make_position_params()
-  request('textDocument/typeDefinition', params)
+  request_with_options('textDocument/typeDefinition', params, options)
 end
 
 --- Lists all the implementations for the symbol under the cursor in the
@@ -158,20 +177,15 @@ end
 ---     - bufnr (number|nil):
 ---         Restrict formatting to the clients attached to the given buffer, defaults to the current
 ---         buffer (0).
+---
 ---     - filter (function|nil):
----         Predicate to filter clients used for formatting. Receives the list of clients attached
----         to bufnr as the argument and must return the list of clients on which to request
----         formatting. Example:
+---         Predicate used to filter clients. Receives a client as argument and must return a
+---         boolean. Clients matching the predicate are included. Example:
 ---
 ---         <pre>
 ---         -- Never request typescript-language-server for formatting
 ---         vim.lsp.buf.format {
----           filter = function(clients)
----             return vim.tbl_filter(
----               function(client) return client.name ~= "tsserver" end,
----               clients
----             )
----           end
+---           filter = function(client) return client.name ~= "tsserver" end
 ---         }
 ---         </pre>
 ---
@@ -188,18 +202,14 @@ end
 function M.format(options)
   options = options or {}
   local bufnr = options.bufnr or vim.api.nvim_get_current_buf()
-  local clients = vim.lsp.buf_get_clients(bufnr)
+  local clients = vim.lsp.get_active_clients({
+    id = options.id,
+    bufnr = bufnr,
+    name = options.name,
+  })
 
   if options.filter then
-    clients = options.filter(clients)
-  elseif options.id then
-    clients = vim.tbl_filter(function(client)
-      return client.id == options.id
-    end, clients)
-  elseif options.name then
-    clients = vim.tbl_filter(function(client)
-      return client.name == options.name
-    end, clients)
+    clients = vim.tbl_filter(options.filter, clients)
   end
 
   clients = vim.tbl_filter(function(client)
@@ -367,23 +377,20 @@ end
 ---                name using |vim.ui.input()|.
 ---@param options table|nil additional options
 ---     - filter (function|nil):
----         Predicate to filter clients used for rename.
----         Receives the attached clients as argument and must return a list of
----         clients.
+---         Predicate used to filter clients. Receives a client as argument and
+---         must return a boolean. Clients matching the predicate are included.
 ---     - name (string|nil):
 ---         Restrict clients used for rename to ones where client.name matches
 ---         this field.
 function M.rename(new_name, options)
   options = options or {}
   local bufnr = options.bufnr or vim.api.nvim_get_current_buf()
-  local clients = vim.lsp.buf_get_clients(bufnr)
-
+  local clients = vim.lsp.get_active_clients({
+    bufnr = bufnr,
+    name = options.name,
+  })
   if options.filter then
-    clients = options.filter(clients)
-  elseif options.name then
-    clients = vim.tbl_filter(function(client)
-      return client.name == options.name
-    end, clients)
+    clients = vim.tbl_filter(options.filter, clients)
   end
 
   -- Clients must at least support rename, prepareRename is optional
@@ -844,7 +851,8 @@ function M.code_action(options)
   end
   local context = options.context or {}
   if not context.diagnostics then
-    context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics()
+    local bufnr = vim.api.nvim_get_current_buf()
+    context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics(bufnr)
   end
   local params = util.make_range_params()
   params.context = context
@@ -870,7 +878,8 @@ function M.range_code_action(context, start_pos, end_pos)
   validate({ context = { context, 't', true } })
   context = context or {}
   if not context.diagnostics then
-    context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics()
+    local bufnr = vim.api.nvim_get_current_buf()
+    context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics(bufnr)
   end
   local params = util.make_given_range_params(start_pos, end_pos)
   params.context = context

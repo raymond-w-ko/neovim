@@ -73,7 +73,6 @@
 #include "nvim/vim.h"
 #include "nvim/window.h"
 
-
 /// Case matching style to use for :substitute
 typedef enum {
   kSubHonorOptions = 0,  ///< Honor the user's 'ignorecase'/'smartcase' options
@@ -971,7 +970,11 @@ int do_move(linenr_T line1, linenr_T line2, linenr_T dest)
    */
   last_line = curbuf->b_ml.ml_line_count;
   mark_adjust_nofold(line1, line2, last_line - line2, 0L, kExtmarkNOOP);
+
+  disable_fold_update++;
   changed_lines(last_line - num_lines + 1, 0, last_line + 1, num_lines, false);
+  disable_fold_update--;
+
   int line_off = 0;
   bcount_t byte_off = 0;
   if (dest >= line2) {
@@ -1005,7 +1008,9 @@ int do_move(linenr_T line1, linenr_T line2, linenr_T dest)
   mark_adjust_nofold(last_line - num_lines + 1, last_line,
                      -(last_line - dest - extra), 0L, kExtmarkNOOP);
 
+  disable_fold_update++;
   changed_lines(last_line - num_lines + 1, 0, last_line + 1, -extra, false);
+  disable_fold_update--;
 
   // send update regarding the new lines that were added
   buf_updates_send_changes(curbuf, dest + 1, num_lines, 0, true);
@@ -1500,7 +1505,6 @@ void do_shell(char *cmd, int flags)
     msg_end();
     return;
   }
-
 
   /*
    * For autocommands we want to get the output on the current screen, to
@@ -2874,13 +2878,8 @@ int do_ecmd(int fnum, char *ffname, char *sfname, exarg_T *eap, linenr_T newlnum
     redraw_curbuf_later(NOT_VALID);     // redraw this buffer later
   }
 
-  if (p_im && (State & MODE_INSERT) == 0) {
-    need_start_insertmode = true;
-  }
-
   // Change directories when the 'acd' option is set.
   do_autochdir();
-
 
 theend:
   if (bufref_valid(&old_curbuf) && old_curbuf.br_buf->terminal != NULL) {
@@ -4063,7 +4062,6 @@ static buf_T *do_sub(exarg_T *eap, proftime_T timeout, bool do_buf_event, handle
           goto skip;
         }
 
-
         // 3. Substitute the string. During 'inccommand' preview only do this if
         //    there is a replace pattern.
         if (!preview || has_second_delim) {
@@ -4141,7 +4139,6 @@ static buf_T *do_sub(exarg_T *eap, proftime_T timeout, bool do_buf_event, handle
           }
           replaced_bytes += end.col - start.col;
 
-
           // Now the trick is to replace CTRL-M chars with a real line
           // break.  This would make it impossible to insert a CTRL-M in
           // the text.  The line break can be avoided by preceding the
@@ -4196,7 +4193,6 @@ static buf_T *do_sub(exarg_T *eap, proftime_T timeout, bool do_buf_event, handle
                          end.lnum - start.lnum, matchcols, replaced_bytes,
                          lnum - lnum_start, subcols, sublen - 1, kExtmarkUndo);
         }
-
 
         // 4. If subflags.do_all is set, find next match.
         // Prevent endless loop with patterns that match empty
@@ -4749,7 +4745,6 @@ bool prepare_tagpreview(bool undo_sync)
   return false;
 }
 
-
 /// ":help": open a read-only window on a help file
 void ex_help(exarg_T *eap)
 {
@@ -4903,9 +4898,8 @@ void ex_help(exarg_T *eap)
     }
   }
 
-  if (!p_im) {
-    restart_edit = 0;               // don't want insert mode in help file
-  }
+  restart_edit = 0;               // don't want insert mode in help file
+
   // Restore KeyTyped, setting 'filetype=help' may reset it.
   // It is needed for do_tag top open folds under the cursor.
   KeyTyped = old_KeyTyped;
@@ -4930,7 +4924,6 @@ void ex_help(exarg_T *eap)
 erret:
   xfree(tag);
 }
-
 
 /// In an argument search for a language specifiers in the form "@xx".
 /// Changes the "@" to NUL if found, and returns a pointer to "xx".
@@ -5518,7 +5511,6 @@ void ex_viusage(exarg_T *eap)
 {
   do_cmdline_cmd("help normal-index");
 }
-
 
 /// Generate tags in one help directory
 ///

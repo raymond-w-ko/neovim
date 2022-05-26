@@ -159,16 +159,16 @@ retnomove:
     fdc = win_fdccol_count(wp);
     dragwin = NULL;
 
-    if (row == -1 + wp->w_winbar_height) {
-      on_winbar = !!wp->w_winbar_height;
+    if (row == -1) {
+      on_winbar = wp->w_winbar_height != 0;
       return IN_OTHER_WIN | (on_winbar ? MOUSE_WINBAR : 0);
     }
     on_winbar = false;
 
     // winpos and height may change in win_enter()!
-    if (grid == DEFAULT_GRID_HANDLE && row >= wp->w_height) {
+    if (grid == DEFAULT_GRID_HANDLE && row + wp->w_winbar_height >= wp->w_height) {
       // In (or below) status line
-      on_status_line = row - wp->w_height + 1;
+      on_status_line = row + wp->w_winbar_height - wp->w_height + 1;
       dragwin = wp;
     } else {
       on_status_line = 0;
@@ -241,8 +241,8 @@ retnomove:
     }
 
     curwin->w_cursor.lnum = curwin->w_topline;
-  } else if (on_status_line && which_button == MOUSE_LEFT) {
-    if (dragwin != NULL) {
+  } else if (on_status_line) {
+    if (which_button == MOUSE_LEFT && dragwin != NULL) {
       // Drag the status line
       count = row - dragwin->w_winrow - dragwin->w_height + 1
               - on_status_line;
@@ -273,6 +273,9 @@ retnomove:
     if (grid == 0) {
       row -= curwin->w_grid_alloc.comp_row + curwin->w_grid.row_offset;
       col -= curwin->w_grid_alloc.comp_col + curwin->w_grid.col_offset;
+    } else if (grid != DEFAULT_GRID_HANDLE) {
+      row -= curwin->w_grid.row_offset;
+      col -= curwin->w_grid.col_offset;
     }
 
     // When clicking beyond the end of the window, scroll the screen.
@@ -477,7 +480,6 @@ win_T *mouse_find_win(int *gridp, int *rowp, int *colp)
     return NULL;
   }
 
-
   frame_T *fp;
 
   fp = topframe;
@@ -506,7 +508,7 @@ win_T *mouse_find_win(int *gridp, int *rowp, int *colp)
   // exist.
   FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
     if (wp == fp->fr_win) {
-      *rowp -= wp->w_winrow_off - wp->w_winbar_height;
+      *rowp -= wp->w_winbar_height;
       return wp;
     }
   }
@@ -522,8 +524,8 @@ static win_T *mouse_find_grid_win(int *gridp, int *rowp, int *colp)
     win_T *wp = get_win_by_grid_handle(*gridp);
     if (wp && wp->w_grid_alloc.chars
         && !(wp->w_floating && !wp->w_float_config.focusable)) {
-      *rowp = MIN(*rowp - wp->w_grid.row_offset, wp->w_grid.Rows - 1);
-      *colp = MIN(*colp - wp->w_grid.col_offset, wp->w_grid.Columns - 1);
+      *rowp = MIN(*rowp - wp->w_grid.row_offset, wp->w_grid.rows - 1);
+      *colp = MIN(*colp - wp->w_grid.col_offset, wp->w_grid.cols - 1);
       return wp;
     }
   } else if (*gridp == 0) {
@@ -569,7 +571,6 @@ void setmouse(void)
   ui_cursor_shape();
   ui_check_mouse();
 }
-
 
 // Set orig_topline.  Used when jumping to another window, so that a double
 // click still works.
@@ -794,8 +795,8 @@ int mouse_check_fold(void)
 
   wp = mouse_find_win(&click_grid, &click_row, &click_col);
   if (wp && multigrid) {
-    max_row = wp->w_grid_alloc.Rows;
-    max_col = wp->w_grid_alloc.Columns;
+    max_row = wp->w_grid_alloc.rows;
+    max_col = wp->w_grid_alloc.cols;
   }
 
   if (wp && mouse_row >= 0 && mouse_row < max_row

@@ -57,9 +57,9 @@ typedef struct AutoPatCmd {
   char *tail;               // tail of fname
   event_T event;            // current event
   int arg_bufnr;            // initially equal to <abuf>, set to zero when buf is deleted
+  Object *data;             // arbitrary data
   struct AutoPatCmd *next;  // chain of active apc-s for auto-invalidation
 } AutoPatCmd;
-
 
 // Set by the apply_autocmds_group function if the given event is equal to
 // EVENT_FILETYPE. Used by the readfile function in order to determine if
@@ -68,7 +68,6 @@ typedef struct AutoPatCmd {
 // Relying on this value requires one to reset it prior calling
 // apply_autocmds_group.
 EXTERN bool au_did_filetype INIT(= false);
-
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "autocmd.h.generated.h"

@@ -54,7 +54,6 @@
 #include "nvim/undo.h"
 #include "nvim/vim.h"
 
-
 /// Index in scriptin
 static int curscript = 0;
 FileDescriptor *scriptin[NSCRIPT] = { NULL };
@@ -1352,14 +1351,12 @@ void openscript(char_u *name, bool directly)
     int oldcurscript;
     int save_State = State;
     int save_restart_edit = restart_edit;
-    int save_insertmode = p_im;
     int save_finish_op = finish_op;
     int save_msg_scroll = msg_scroll;
 
     State = MODE_NORMAL;
     msg_scroll = false;         // no msg scrolling in Normal mode
     restart_edit = 0;           // don't go to Insert mode
-    p_im = false;               // don't use 'insertmode'
     clear_oparg(&oa);
     finish_op = false;
 
@@ -1373,7 +1370,6 @@ void openscript(char_u *name, bool directly)
     State = save_State;
     msg_scroll = save_msg_scroll;
     restart_edit = save_restart_edit;
-    p_im = save_insertmode;
     finish_op = save_finish_op;
   }
 }
@@ -1881,8 +1877,7 @@ static int handle_mapping(int *keylenp, bool *timedout, int *mapdepth)
   if (no_mapping == 0 && maphash_valid
       && (no_zero_mapping == 0 || tb_c1 != '0')
       && (typebuf.tb_maplen == 0 || is_plug_map
-          || (p_remap
-              && !(typebuf.tb_noremap[typebuf.tb_off] & (RM_NONE|RM_ABBR))))
+          || (!(typebuf.tb_noremap[typebuf.tb_off] & (RM_NONE|RM_ABBR))))
       && !(p_paste && (State & (MODE_INSERT | MODE_CMDLINE)))
       && !(State == MODE_HITRETURN && (tb_c1 == CAR || tb_c1 == ' '))
       && State != MODE_ASKMORE
@@ -2514,16 +2509,12 @@ static int vgetorpeek(bool advance)
             timedout = true;
             continue;
           }
-          // When 'insertmode' is set, ESC just beeps in Insert
-          // mode.  Use CTRL-L to make edit() return.
           // In Ex-mode \n is compatible with original Vim behaviour.
           // For the command line only CTRL-C always breaks it.
           // For the cmdline window: Alternate between ESC and
           // CTRL-C: ESC for most situations and CTRL-C to close the
           // cmdline window.
-          if (p_im && (State & MODE_INSERT)) {
-            c = Ctrl_L;
-          } else if ((State & MODE_CMDLINE) || (cmdwin_type > 0 && tc == ESC)) {
+          if ((State & MODE_CMDLINE) || (cmdwin_type > 0 && tc == ESC)) {
             c = Ctrl_C;
           } else {
             c = ESC;
@@ -3441,7 +3432,6 @@ theend:
   return retval;
 }
 
-
 /// Set or remove a mapping or an abbreviation in the current buffer, OR
 /// display (matching) mappings/abbreviations.
 ///
@@ -3809,7 +3799,7 @@ bool map_to_exists(const char *const str, const char *const modechars, const boo
 #define MAPMODE(mode, modechars, chr, modeflags) \
   do { \
     if (strchr(modechars, chr) != NULL) { \
-      mode |= modeflags; \
+      (mode) |= (modeflags); \
     } \
   } while (0)
   MAPMODE(mode, modechars, 'n', MODE_NORMAL);
@@ -4724,7 +4714,6 @@ char_u *check_map(char_u *keys, int mode, int exact, int ign_mod, int abbr, mapb
   return NULL;
 }
 
-
 /// Add a mapping. Unlike @ref do_map this copies the {map} argument, so
 /// static or read-only strings can be used.
 ///
@@ -4865,7 +4854,6 @@ char *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
       }
       c1 = TO_SPECIAL(c1, c2);
     }
-
 
     if (got_int) {
       aborted = true;

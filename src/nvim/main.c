@@ -530,11 +530,6 @@ int main(int argc, char **argv)
   // 'autochdir' has been postponed.
   do_autochdir();
 
-  // start in insert mode
-  if (p_im) {
-    need_start_insertmode = true;
-  }
-
   set_vim_var_nr(VV_VIM_DID_ENTER, 1L);
   apply_autocmds(EVENT_VIMENTER, NULL, NULL, false, curbuf);
   TIME_MSG("VimEnter autocommands");
@@ -815,7 +810,6 @@ static void init_locale(void)
 }
 #endif
 
-
 static uint64_t server_connect(char *server_addr, const char **errmsg)
 {
   if (server_addr == NULL) {
@@ -921,7 +915,6 @@ static void remote_request(mparm_T *params, int remote_args, char *server_addr, 
     params->window_layout = WIN_TABS;
   }
 }
-
 
 /// Decides whether text (as opposed to commands) will be read from stdin.
 /// @see EDIT_STDIN
@@ -1497,7 +1490,6 @@ static void set_window_layout(mparm_T *paramp)
     }
   }
 }
-
 
 /*
  * "-q errorfile": Load the error file now.
@@ -2179,7 +2171,6 @@ static void usage(void)
   mch_msg(_("  --startuptime <file>  Write startup timing messages to <file>\n"));
   mch_msg(_("\nSee \":help startup-options\" for all options.\n"));
 }
-
 
 /*
  * Check the result of the ATTENTION dialog:

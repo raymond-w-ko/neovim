@@ -344,7 +344,6 @@ static int enc_canon_search(const char_u *name)
   return -1;
 }
 
-
 /*
  * Find canonical encoding "name" in the list and return its properties.
  * Returns 0 if not found.
@@ -473,27 +472,12 @@ static bool intable(const struct interval *table, size_t n_items, int c)
 int utf_char2cells(int c)
 {
   if (c >= 0x100) {
-#ifdef USE_WCHAR_FUNCTIONS
-    //
-    // Assume the library function wcwidth() works better than our own
-    // stuff.  It should return 1 for ambiguous width chars!
-    //
-    int n = wcwidth(c);
-
-    if (n < 0) {
-      return 6;                 // unprintable, displays <xxxx>
-    }
-    if (n > 1) {
-      return n;
-    }
-#else
     if (!utf_printable(c)) {
       return 6;                 // unprintable, displays <xxxx>
     }
     if (intable(doublewidth, ARRAY_SIZE(doublewidth), c)) {
       return 2;
     }
-#endif
     if (p_emoji && intable(emoji_width, ARRAY_SIZE(emoji_width), c)) {
       return 2;
     }
@@ -1061,12 +1045,6 @@ bool utf_iscomposing(int c)
  */
 bool utf_printable(int c)
 {
-#ifdef USE_WCHAR_FUNCTIONS
-  /*
-   * Assume the iswprint() library function works better than our own stuff.
-   */
-  return iswprint(c);
-#else
   // Sorted list of non-overlapping intervals.
   // 0xd800-0xdfff is reserved for UTF-16, actually illegal.
   static struct interval nonprint[] =
@@ -1077,7 +1055,6 @@ bool utf_printable(int c)
   };
 
   return !intable(nonprint, ARRAY_SIZE(nonprint), c);
-#endif
 }
 
 /*
@@ -1547,7 +1524,6 @@ ssize_t mb_utf_index_to_bytes(const char_u *s, size_t len, size_t index, bool us
   return -1;
 }
 
-
 /*
  * Version of strnicmp() that handles multi-byte characters.
  * Needed for Big5, Shift-JIS and UTF-8 encoding.  Other DBCS encodings can
@@ -1889,7 +1865,6 @@ int mb_tail_off(const char_u *base, const char_u *p)
   return i;
 }
 
-
 /// Return the offset from "p" to the first byte of the character it points
 /// into. Can start anywhere in a stream of bytes.
 /// Unlike utf_head_off() this doesn't include composing characters and returns a negative value.
@@ -2151,7 +2126,6 @@ const char *mb_unescape(const char **const pp)
   return NULL;
 }
 
-
 /*
  * Skip the Vim specific head of a 'encoding' name.
  */
@@ -2247,7 +2221,6 @@ static int enc_alias_search(const char_u *name)
   return -1;
 }
 
-
 #ifdef HAVE_LANGINFO_H
 # include <langinfo.h>
 #endif
@@ -2320,7 +2293,6 @@ enc_locale_copy_enc:
 }
 
 #if defined(HAVE_ICONV)
-
 
 /*
  * Call iconv_open() with a check if iconv() works properly (there are broken
@@ -2450,7 +2422,6 @@ static char_u *iconv_string(const vimconv_T *const vcp, char_u *str, size_t slen
 }
 
 #endif  // HAVE_ICONV
-
 
 /*
  * Setup "vcp" for conversion from "from" to "to".

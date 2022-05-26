@@ -30,32 +30,21 @@ typedef enum {
 // Maximum columns for terminal highlight attributes
 #define TERM_ATTRS_MAX 1024
 
-/// Status line click definition
-typedef struct {
-  enum {
-    kStlClickDisabled = 0,  ///< Clicks to this area are ignored.
-    kStlClickTabSwitch,     ///< Switch to the given tab.
-    kStlClickTabClose,      ///< Close given tab.
-    kStlClickFuncRun,       ///< Run user function.
-  } type;      ///< Type of the click.
-  int tabnr;   ///< Tab page number.
-  char *func;  ///< Function to run.
-} StlClickDefinition;
-
-/// Used for tabline clicks
-typedef struct {
-  StlClickDefinition def;  ///< Click definition.
-  const char *start;       ///< Location where region starts.
-} StlClickRecord;
-
 /// Array defining what should be done when tabline is clicked
-extern StlClickDefinition *tab_page_click_defs;
+EXTERN StlClickDefinition *tab_page_click_defs INIT(= NULL);
 
 /// Size of the tab_page_click_defs array
-extern long tab_page_click_defs_size;
+EXTERN long tab_page_click_defs_size INIT(= 0);
 
 #define W_ENDCOL(wp)   ((wp)->w_wincol + (wp)->w_width)
 #define W_ENDROW(wp)   ((wp)->w_winrow + (wp)->w_height)
+
+// While redrawing the screen this flag is set.  It means the screen size
+// ('lines' and 'rows') must not be changed.
+EXTERN bool updating_screen INIT(= 0);
+
+// While resizing the screen this flag is set.
+EXTERN bool resizing_screen INIT(= 0);
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "screen.h.generated.h"

@@ -94,28 +94,27 @@ static bool ns_initialized(uint32_t ns)
   return ns < (uint32_t)next_namespace_id;
 }
 
-
-static Array extmark_to_array(ExtmarkInfo extmark, bool id, bool add_dict)
+static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict)
 {
   Array rv = ARRAY_DICT_INIT;
   if (id) {
-    ADD(rv, INTEGER_OBJ((Integer)extmark.mark_id));
+    ADD(rv, INTEGER_OBJ((Integer)extmark->mark_id));
   }
-  ADD(rv, INTEGER_OBJ(extmark.row));
-  ADD(rv, INTEGER_OBJ(extmark.col));
+  ADD(rv, INTEGER_OBJ(extmark->row));
+  ADD(rv, INTEGER_OBJ(extmark->col));
 
   if (add_dict) {
     Dictionary dict = ARRAY_DICT_INIT;
 
-    PUT(dict, "right_gravity", BOOLEAN_OBJ(extmark.right_gravity));
+    PUT(dict, "right_gravity", BOOLEAN_OBJ(extmark->right_gravity));
 
-    if (extmark.end_row >= 0) {
-      PUT(dict, "end_row", INTEGER_OBJ(extmark.end_row));
-      PUT(dict, "end_col", INTEGER_OBJ(extmark.end_col));
-      PUT(dict, "end_right_gravity", BOOLEAN_OBJ(extmark.end_right_gravity));
+    if (extmark->end_row >= 0) {
+      PUT(dict, "end_row", INTEGER_OBJ(extmark->end_row));
+      PUT(dict, "end_col", INTEGER_OBJ(extmark->end_col));
+      PUT(dict, "end_right_gravity", BOOLEAN_OBJ(extmark->end_right_gravity));
     }
 
-    Decoration *decor = &extmark.decor;
+    const Decoration *decor = &extmark->decor;
     if (decor->hl_id) {
       String name = cstr_to_string((const char *)syn_id2name(decor->hl_id));
       PUT(dict, "hl_group", STRING_OBJ(name));
@@ -233,12 +232,11 @@ ArrayOf(Integer) nvim_buf_get_extmark_by_id(Buffer buffer, Integer ns_id,
     }
   }
 
-
   ExtmarkInfo extmark = extmark_from_id(buf, (uint32_t)ns_id, (uint32_t)id);
   if (extmark.row < 0) {
     return rv;
   }
-  return extmark_to_array(extmark, false, details);
+  return extmark_to_array(&extmark, false, details);
 }
 
 /// Gets extmarks in "traversal order" from a |charwise| region defined by
@@ -333,7 +331,6 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
     limit = INT64_MAX;
   }
 
-
   bool reverse = false;
 
   int l_row;
@@ -352,12 +349,11 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
     reverse = true;
   }
 
-
   ExtmarkInfoArray marks = extmark_get(buf, (uint32_t)ns_id, l_row, l_col,
                                        u_row, u_col, (int64_t)limit, reverse);
 
   for (size_t i = 0; i < kv_size(marks); i++) {
-    ADD(rv, ARRAY_OBJ(extmark_to_array(kv_A(marks, i), true, (bool)details)));
+    ADD(rv, ARRAY_OBJ(extmark_to_array(&kv_A(marks, i), true, (bool)details)));
   }
 
   kv_destroy(marks);
@@ -366,12 +362,11 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 
 /// Creates or updates an extmark.
 ///
-/// To create a new extmark, pass id=0. The extmark id will be returned.
-/// To move an existing mark, pass its id.
-///
-/// It is also allowed to create a new mark by passing in a previously unused
-/// id, but the caller must then keep track of existing and unused ids itself.
-/// (Useful over RPC, to avoid waiting for the return value.)
+/// By default a new extmark is created when no id is passed in, but it is also
+/// possible to create a new mark by passing in a previously unused id or move
+/// an existing mark by passing in its id. The caller must then keep track of
+/// existing and unused ids itself. (Useful over RPC, to avoid waiting for the
+/// return value.)
 ///
 /// Using the optional arguments, it is possible to use this to highlight
 /// a range of text, and also to associate virtual text to the mark.
@@ -676,7 +671,6 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
     goto error;
   }
 
-
   OPTION_TO_BOOL(decor.virt_lines_above, virt_lines_above, false);
 
   if (opts->priority.type == kObjectTypeInteger) {
@@ -777,7 +771,6 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
   } else if (line2 >= 0) {
     col2 = 0;
   }
-
 
   // TODO(bfredl): synergize these two branches even more
   if (ephemeral && decor_state.buf == buf) {

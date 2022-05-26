@@ -115,7 +115,6 @@ struct loop_cookie {
   void *cookie;
 };
 
-
 // Struct to save a few things while debugging.  Used in do_cmdline() only.
 struct dbg_stuff {
   int trylevel;
@@ -624,7 +623,6 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
       next_cmdline = cmdline_copy;
     }
 
-
     // reset did_emsg for a function that is not aborted by an error
     if (did_emsg && !force_abort
         && getline_equal(fgetline, cookie, get_func_line)
@@ -1109,7 +1107,6 @@ static int current_tab_nr(tabpage_T *tab)
 #define CURRENT_TAB_NR current_tab_nr(curtab)
 #define LAST_TAB_NR current_tab_nr(NULL)
 
-
 /// Figure out the address type for ":wincmd".
 static void get_wincmd_addr_type(char *arg, exarg_T *eap)
 {
@@ -1583,13 +1580,14 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, char **er
 /// @param cmdinfo Command parse information
 void execute_cmd(exarg_T *eap, CmdParseInfo *cmdinfo)
 {
+  char *errormsg = NULL;
+
 #define ERROR(msg) \
   do { \
-    emsg(msg); \
+    errormsg = msg; \
     goto end; \
   } while (0)
 
-  char *errormsg = NULL;
   cmdmod_T save_cmdmod = cmdmod;
   cmdmod = cmdinfo->cmdmod;
 
@@ -1648,7 +1646,7 @@ void execute_cmd(exarg_T *eap, CmdParseInfo *cmdinfo)
   // If filename expansion is enabled, expand filenames
   if (cmdinfo->magic.file) {
     if (expand_filename(eap, (char_u **)eap->cmdlinep, &errormsg) == FAIL) {
-      ERROR(errormsg);
+      goto end;
     }
   }
 
@@ -1706,14 +1704,20 @@ void execute_cmd(exarg_T *eap, CmdParseInfo *cmdinfo)
     eap->errmsg = NULL;
     (cmdnames[eap->cmdidx].cmd_func)(eap);
     if (eap->errmsg != NULL) {
-      ERROR(_(eap->errmsg));
+      errormsg = _(eap->errmsg);
     }
   }
+
 end:
+  if (errormsg != NULL && *errormsg != NUL) {
+    emsg(errormsg);
+  }
   // Undo command modifiers
   undo_cmdmod(eap, msg_scroll);
   cmdmod = save_cmdmod;
-
+  if (eap->did_sandbox) {
+    sandbox--;
+  }
 #undef ERROR
 }
 
@@ -4668,7 +4672,6 @@ static void correct_range(exarg_T *eap)
   }
 }
 
-
 /// For a ":vimgrep" or ":vimgrepadd" command return a pointer past the
 /// pattern.  Otherwise return eap->arg.
 static char *skip_grep_pat(exarg_T *eap)
@@ -5521,6 +5524,11 @@ char *uc_validate_name(char *name)
   return name;
 }
 
+/// Create a new user command {name}, if one doesn't already exist.
+///
+/// This function takes ownership of compl_arg, compl_luaref, and luaref.
+///
+/// @return  OK if the command is created, FAIL otherwise.
 int uc_add_command(char *name, size_t name_len, char *rep, uint32_t argt, long def, int flags,
                    int compl, char *compl_arg, LuaRef compl_luaref, cmd_addr_T addr_type,
                    LuaRef luaref, bool force)
@@ -5622,7 +5630,6 @@ fail:
   NLUA_CLEAR_REF(compl_luaref);
   return FAIL;
 }
-
 
 static struct {
   cmd_addr_T expand;
@@ -6946,7 +6953,6 @@ static void ex_highlight(exarg_T *eap)
   do_highlight((const char *)eap->arg, eap->forceit, false);
 }
 
-
 /// Call this function if we thought we were going to exit, but we won't
 /// (because of an error).  May need to restore the terminal mode.
 void not_exiting(void)
@@ -7152,7 +7158,6 @@ void ex_win_close(int forceit, win_T *win, tabpage_T *tp)
       return;
     }
   }
-
 
   // free buffer when not hiding it or when it's a scratch buffer
   if (tp == NULL) {
@@ -7420,7 +7425,7 @@ static void ex_goto(exarg_T *eap)
 /// Clear an argument list: free all file names and reset it to zero entries.
 void alist_clear(alist_T *al)
 {
-#define FREE_AENTRY_FNAME(arg) xfree(arg->ae_fname)
+#define FREE_AENTRY_FNAME(arg) xfree((arg)->ae_fname)
   GA_DEEP_CLEAR(&al->al_ga, aentry_T, FREE_AENTRY_FNAME);
 }
 
@@ -7429,7 +7434,6 @@ void alist_init(alist_T *al)
 {
   ga_init(&al->al_ga, (int)sizeof(aentry_T), 5);
 }
-
 
 /// Remove a reference from an argument list.
 /// Ignored when the argument list is the global one.
@@ -7671,7 +7675,6 @@ void ex_splitview(exarg_T *eap)
     do_exedit(eap, old_curwin);
   }
 
-
 theend:
   xfree(fname);
 }
@@ -7788,7 +7791,6 @@ static void ex_tabs(exarg_T *eap)
     }
   }
 }
-
 
 /// ":mode":
 /// If no argument given, get the screen size and redraw.
@@ -7999,7 +8001,6 @@ static void ex_nogui(exarg_T *eap)
   eap->errmsg = N_("E25: Nvim does not have a built-in GUI");
 }
 
-
 static void ex_swapname(exarg_T *eap)
 {
   if (curbuf->b_ml.ml_mfp == NULL || curbuf->b_ml.ml_mfp->mf_fname == NULL) {
@@ -8042,7 +8043,6 @@ static void ex_syncbind(exarg_T *eap)
     topline = 1;
   }
 
-
   /*
    * Set all scrollbind windows to the same topline.
    */
@@ -8076,7 +8076,6 @@ static void ex_syncbind(exarg_T *eap)
     }
   }
 }
-
 
 static void ex_read(exarg_T *eap)
 {
@@ -8967,7 +8966,6 @@ bool save_current_state(save_state_T *sst)
   sst->save_restart_edit = restart_edit;
   sst->save_msg_didout = msg_didout;
   sst->save_State = State;
-  sst->save_insertmode = p_im;
   sst->save_finish_op = finish_op;
   sst->save_opcount = opcount;
   sst->save_reg_executing = reg_executing;
@@ -8975,7 +8973,6 @@ bool save_current_state(save_state_T *sst)
 
   msg_scroll = false;   // no msg scrolling in Normal mode
   restart_edit = 0;     // don't go to Insert mode
-  p_im = false;         // don't use 'insertmode
 
   // Save the current typeahead.  This is required to allow using ":normal"
   // from an event handler and makes sure we don't hang when the argument
@@ -8998,7 +8995,6 @@ void restore_current_state(save_state_T *sst)
     // override the value of restart_edit anyway.
     restart_edit = sst->save_restart_edit;
   }
-  p_im = sst->save_insertmode;
   finish_op = sst->save_finish_op;
   opcount = sst->save_opcount;
   reg_executing = sst->save_reg_executing;
@@ -9234,7 +9230,6 @@ static void ex_findpat(exarg_T *eap)
                          n, action, eap->line1, eap->line2);
   }
 }
-
 
 /// ":ptag", ":ptselect", ":ptjump", ":ptnext", etc.
 static void ex_ptag(exarg_T *eap)

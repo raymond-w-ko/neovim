@@ -146,7 +146,7 @@ char *vim_strnsave_unquoted(const char *const string, const size_t length)
   FUNC_ATTR_NONNULL_RET
 {
 #define ESCAPE_COND(p, inquote, string_end) \
-  (*p == '\\' && inquote && p + 1 < string_end && (p[1] == '\\' || p[1] == '"'))
+  (*(p) == '\\' && (inquote) && (p) + 1 < (string_end) && ((p)[1] == '\\' || (p)[1] == '"'))
   size_t ret_length = 0;
   bool inquote = false;
   const char *const string_end = string + length;
@@ -552,7 +552,6 @@ char_u *concat_str(const char_u *restrict str1, const char_u *restrict str2)
   STRCPY(dest + l, str2);
   return dest;
 }
-
 
 static const char *const e_printf =
   N_("E766: Insufficient arguments for printf()");
@@ -1496,6 +1495,7 @@ int kv_do_printf(StringBuilder *str, const char *fmt, ...)
   // printed string didn't fit, resize and try again
   if ((size_t)printed >= remaining) {
     kv_ensure_space(*str, (size_t)printed + 1);  // include space for NUL terminator at the end
+    assert(str->items != NULL);
     va_start(ap, fmt);
     printed = vsnprintf(str->items + str->size, str->capacity - str->size, fmt, ap);
     va_end(ap);
@@ -1506,4 +1506,25 @@ int kv_do_printf(StringBuilder *str, const char *fmt, ...)
 
   str->size += (size_t)printed;
   return printed;
+}
+
+/// Reverse text into allocated memory.
+///
+/// @return  the allocated string.
+char_u *reverse_text(char_u *s)
+  FUNC_ATTR_NONNULL_RET
+{
+  // Reverse the pattern.
+  size_t len = STRLEN(s);
+  char_u *rev = xmalloc(len + 1);
+  size_t rev_i = len;
+  for (size_t s_i = 0; s_i < len; s_i++) {
+    const int mb_len = utfc_ptr2len((char *)s + s_i);
+    rev_i -= (size_t)mb_len;
+    memmove(rev + rev_i, s + s_i, (size_t)mb_len);
+    s_i += (size_t)mb_len - 1;
+  }
+  rev[len] = NUL;
+
+  return rev;
 }

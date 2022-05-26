@@ -101,7 +101,6 @@
 #define OPT_BUF(x)  (idopt_T)(PV_BUF + (int)(x))
 #define OPT_BOTH(x) (idopt_T)(PV_BOTH + (int)(x))
 
-
 // WV_ and BV_ values get typecasted to this for the "indir" field
 typedef enum {
   PV_NONE = 0,
@@ -210,7 +209,6 @@ typedef struct vimoption {
   char_u *def_val;         // default values for variable (neovim!!)
   LastSet last_set;             // script in which the option was last set
 } vimoption_T;
-
 
 /*
  * Flags
@@ -519,7 +517,6 @@ void set_init_1(bool clean_arg)
    */
   set_options_default(0);
 
-
   curbuf->b_p_initialized = true;
   curbuf->b_p_ar = -1;          // no local 'autoread' value
   curbuf->b_p_ul = NO_LOCAL_UNDOLEVEL;
@@ -778,7 +775,6 @@ void free_all_options(void)
 }
 #endif
 
-
 /// Initialize the options, part two: After getting Rows and Columns.
 void set_init_2(bool headless)
 {
@@ -908,7 +904,6 @@ void set_helplang_default(const char *lang)
     options[idx].flags |= P_ALLOCED;
   }
 }
-
 
 /// 'title' and 'icon' only default to true if they have not been set or reset
 /// in .vimrc and we can read the old value.
@@ -2167,7 +2162,6 @@ static uint32_t *insecure_flag(win_T *const wp, int opt_idx, int opt_flags)
   // Nothing special, return global flags field.
   return &options[opt_idx].flags;
 }
-
 
 /// Redraw the window title and/or tab page text later.
 static void redraw_titles(void)
@@ -3967,7 +3961,6 @@ static char *set_bool_option(const int opt_idx, char_u *const varp, const int va
   // Remember where the option was set.
   set_option_sctx_idx(opt_idx, opt_flags, current_sctx);
 
-
   // May set global value for local option.
   if ((opt_flags & (OPT_LOCAL | OPT_GLOBAL)) == 0) {
     *(int *)get_varp_scope(&(options[opt_idx]), OPT_GLOBAL) = value;
@@ -4049,36 +4042,9 @@ static char *set_bool_option(const int opt_idx, char_u *const varp, const int va
       // buf->b_p_swf
       mf_close_file(curbuf, true);              // remove the swap file
     }
-  } else if ((int *)varp == &p_terse) {
-    // when 'terse' is set change 'shortmess'
-    char *p = vim_strchr((char *)p_shm, SHM_SEARCH);
-
-    // insert 's' in p_shm
-    if (p_terse && p == NULL) {
-      STRCPY(IObuff, p_shm);
-      STRCAT(IObuff, "s");
-      set_string_option_direct("shm", -1, IObuff, OPT_FREE, 0);
-    } else if (!p_terse && p != NULL) {  // remove 's' from p_shm
-      STRMOVE(p, p + 1);
-    }
   } else if ((int *)varp == &p_paste) {
     // when 'paste' is set or reset also change other options
     paste_option_changed();
-  } else if ((int *)varp == &p_im) {
-    // when 'insertmode' is set from an autocommand need to do work here
-    if (p_im) {
-      if ((State & MODE_INSERT) == 0) {
-        need_start_insertmode = true;
-      }
-      stop_insert_mode = false;
-    } else if (old_value) {  // only reset if it was set previously
-      need_start_insertmode = false;
-      stop_insert_mode = true;
-      if (restart_edit != 0 && mode_displayed) {
-        clear_cmdline = true;  // remove "(insert)"
-      }
-      restart_edit = 0;
-    }
   } else if ((int *)varp == &p_ic && p_hls) {
     // when 'ignorecase' is set or reset and 'hlsearch' is set, redraw
     redraw_all_later(SOME_VALID);
@@ -4221,7 +4187,6 @@ static char *set_bool_option(const int opt_idx, char_u *const varp, const int va
       curbuf->b_p_imsearch = B_IMODE_USE_INSERT;
     }
   }
-
 
   /*
    * End of handling side effects for bool options.
@@ -4591,7 +4556,6 @@ static char *set_num_option(int opt_idx, char_u *varp, long value, char *errbuf,
     curwin->w_hl_needs_update = true;
     check_blending(curwin);
   }
-
 
   // Check the (new) bounds for Rows and Columns here.
   if (p_lines < min_rows() && full_screen) {
@@ -6556,6 +6520,7 @@ void buf_copy_options(buf_T *buf, int flags)
       COPY_OPT_SCTX(buf, BV_SI);
       buf->b_p_channel = 0;
       buf->b_p_ci = p_ci;
+
       COPY_OPT_SCTX(buf, BV_CI);
       buf->b_p_cin = p_cin;
       COPY_OPT_SCTX(buf, BV_CIN);
@@ -6565,6 +6530,7 @@ void buf_copy_options(buf_T *buf, int flags)
       COPY_OPT_SCTX(buf, BV_CINO);
       buf->b_p_cinsd = vim_strsave(p_cinsd);
       COPY_OPT_SCTX(buf, BV_CINSD);
+
       // Don't copy 'filetype', it must be detected
       buf->b_p_ft = empty_option;
       buf->b_p_pi = p_pi;

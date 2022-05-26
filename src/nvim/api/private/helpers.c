@@ -407,7 +407,6 @@ void set_option_to(uint64_t channel_id, void *to, int type, String name, Object 
   });
 }
 
-
 buf_T *find_buffer_by_handle(Buffer buffer, Error *err)
 {
   if (buffer == 0) {
@@ -1040,8 +1039,8 @@ Object copy_object(Object obj)
   }
 }
 
-static void set_option_value_for(char *key, int numval, char *stringval, int opt_flags,
-                                 int opt_type, void *from, Error *err)
+void set_option_value_for(char *key, long numval, char *stringval, int opt_flags, int opt_type,
+                          void *from, Error *err)
 {
   switchwin_T switchwin;
   aco_save_T aco;
@@ -1080,8 +1079,7 @@ static void set_option_value_for(char *key, int numval, char *stringval, int opt
   try_end(err);
 }
 
-
-static void set_option_value_err(char *key, int numval, char *stringval, int opt_flags, Error *err)
+static void set_option_value_err(char *key, long numval, char *stringval, int opt_flags, Error *err)
 {
   char *errmsg;
 
@@ -1562,7 +1560,6 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
     goto err;
   }
 
-
   if (api_object_to_bool(opts->register_, "register", false, err)) {
     argt |= EX_REGSTR;
   } else if (ERROR_SET(err)) {
@@ -1616,7 +1613,7 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
   if (uc_add_command(name.data, name.size, rep, argt, def, flags, compl, compl_arg, compl_luaref,
                      addr_type_arg, luaref, force) != OK) {
     api_set_error(err, kErrorTypeException, "Failed to create user command");
-    goto err;
+    // Do not goto err, since uc_add_command now owns luaref, compl_luaref, and compl_arg
   }
 
   return;
@@ -1624,6 +1621,7 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
 err:
   NLUA_CLEAR_REF(luaref);
   NLUA_CLEAR_REF(compl_luaref);
+  xfree(compl_arg);
 }
 
 int find_sid(uint64_t channel_id)

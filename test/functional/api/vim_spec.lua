@@ -1439,6 +1439,24 @@ describe('API', function()
       nvim('set_option_value', 'autoread', NIL, {scope = 'local'})
       eq(NIL, nvim('get_option_value', 'autoread', {scope = 'local'}))
     end)
+
+    it('set window options', function()
+      -- Same as to nvim_win_set_option
+      nvim('set_option_value', 'colorcolumn', '4,3', {win=0})
+      eq('4,3', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+      command("set modified hidden")
+      command("enew") -- edit new buffer, window option is preserved
+      eq('4,3', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+    end)
+
+    it('set local window options', function()
+      -- Different to nvim_win_set_option
+      nvim('set_option_value', 'colorcolumn', '4,3', {win=0, scope='local'})
+      eq('4,3', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+      command("set modified hidden")
+      command("enew") -- edit new buffer, window option is reset
+      eq('', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+    end)
   end)
 
   describe('nvim_{get,set}_current_buf, nvim_list_bufs', function()
@@ -3635,6 +3653,14 @@ describe('API', function()
     it('works with empty arguments list', function()
       meths.cmd({ cmd = "update" }, {})
       meths.cmd({ cmd = "buffer", count = 0 }, {})
+    end)
+    it('doesn\'t suppress errors when used in keymapping', function()
+      meths.exec_lua([[
+        vim.keymap.set("n", "[l",
+                       function() vim.api.nvim_cmd({ cmd = "echo", args = {"foo"} }, {}) end)
+      ]], {})
+      feed("[l")
+      neq(nil, string.find(eval("v:errmsg"), "E5108:"))
     end)
   end)
 end)

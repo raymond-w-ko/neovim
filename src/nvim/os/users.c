@@ -30,7 +30,7 @@ static void add_user(garray_T *users, char *user, bool need_copy)
 
   if (user_copy == NULL || *user_copy == NUL) {
     if (need_copy) {
-      xfree(user);
+      xfree(user_copy);
     }
     return;
   }
@@ -159,7 +159,6 @@ char *os_get_user_directory(const char *name)
 #endif
   return NULL;
 }
-
 
 #if defined(EXITFREE)
 

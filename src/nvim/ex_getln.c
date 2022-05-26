@@ -916,7 +916,6 @@ static uint8_t *command_line_enter(int firstc, long count, int indent, bool init
     apply_autocmds(EVENT_CMDLINEENTER, firstcbuf, firstcbuf, false, curbuf);
     restore_v_event(dict, &save_v_event);
 
-
     tl_ret = try_leave(&tstate, &err);
     if (!tl_ret && ERROR_SET(&err)) {
       msg_putchar('\n');
@@ -1336,8 +1335,7 @@ static int command_line_execute(VimState *state, int key)
     }
   }
 
-  // CTRL-\ CTRL-N goes to Normal mode, CTRL-\ CTRL-G goes to Insert
-  // mode when 'insertmode' is set, CTRL-\ e prompts for an expression.
+  // CTRL-\ CTRL-N goes to Normal mode, CTRL-\ e prompts for an expression.
   if (s->c == Ctrl_BSL) {
     no_mapping++;
     allow_keys++;
@@ -1399,9 +1397,6 @@ static int command_line_execute(VimState *state, int key)
       redrawcmd();
       return command_line_not_changed(s);
     } else {
-      if (s->c == Ctrl_G && p_im && restart_edit == 0) {
-        restart_edit = 'a';
-      }
       s->gotesc = true;        // will free ccline.cmdbuff after putting it
                                // in history
       return 0;                // back to Normal mode
@@ -1609,7 +1604,6 @@ static int may_do_command_line_next_incsearch(int firstc, long count, incsearch_
   char_u *pat;
   int search_flags = SEARCH_NOOF;
   char_u save;
-
 
   if (search_delim == ccline.cmdbuff[skiplen]) {
     pat = last_search_pattern();
@@ -2004,7 +1998,6 @@ static int command_line_handle_key(CommandLineState *s)
     // Ignore mouse event or open_cmdwin() result.
     return command_line_not_changed(s);
 
-
   case K_MIDDLEDRAG:
   case K_MIDDLERELEASE:
     return command_line_not_changed(s);                 // Ignore mouse
@@ -2013,7 +2006,6 @@ static int command_line_handle_key(CommandLineState *s)
     cmdline_paste(eval_has_provider("clipboard") ? '*' : 0, true, true);
     redrawcmd();
     return command_line_changed(s);
-
 
   case K_LEFTDRAG:
   case K_LEFTRELEASE:
@@ -2063,7 +2055,6 @@ static int command_line_handle_key(CommandLineState *s)
   case K_X2RELEASE:
   case K_MOUSEMOVE:
     return command_line_not_changed(s);
-
 
   case K_SELECT:          // end of Select mode mapping - ignore
     return command_line_not_changed(s);
@@ -2287,7 +2278,6 @@ static int command_line_handle_key(CommandLineState *s)
   }
   return command_line_changed(s);
 }
-
 
 static int command_line_not_changed(CommandLineState *s)
 {
@@ -2558,7 +2548,6 @@ static int cmd_startcol(void)
   return ccline.cmdindent + ((ccline.cmdfirstc != NUL) ? 1 : 0);
 }
 
-
 /// Compute the column position for a byte position on the command line.
 static int cmd_screencol(int bytepos)
 {
@@ -2620,7 +2609,6 @@ bool cmdline_overstrike(void)
 {
   return ccline.overstrike;
 }
-
 
 /// Return true if the cursor is at the end of the cmdline.
 bool cmdline_at_end(void)
@@ -3444,7 +3432,6 @@ static bool cmdline_paste(int regname, bool literally, bool remcr)
   if (got_int) {
     return FAIL;
   }
-
 
   // Need to  set "textlock" to avoid nasty things like going to another
   // buffer when evaluating an expression.
@@ -5591,7 +5578,6 @@ static int ExpandPackAddDir(char_u *pat, int *num_file, char_u ***file)
   return OK;
 }
 
-
 /// Expand `file` for all comma-separated directories in `path`.
 /// Adds matches to `ga`.
 void globpath(char_u *path, char_u *file, garray_T *ga, int expand_options)
@@ -5631,7 +5617,6 @@ void globpath(char_u *path, char_u *file, garray_T *ga, int expand_options)
 
   xfree(buf);
 }
-
 
 /*********************************
 *  Command line history stuff    *
@@ -5922,7 +5907,6 @@ void add_to_history(int histype, char_u *new_entry, int in_map, int sep)
   }
 }
 
-
 /*
  * Get identifier of newest history entry.
  * "histype" may be one of the HIST_ values.
@@ -5936,7 +5920,6 @@ int get_history_idx(int histype)
 
   return history[histype][hisidx[histype]].hisnum;
 }
-
 
 /// Get pointer to the command line info to use. save_cmdline() may clear
 /// ccline and put the previous value in ccline.prev_ccline.

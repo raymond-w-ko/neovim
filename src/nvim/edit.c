@@ -245,7 +245,6 @@ typedef struct insert_state {
   char_u *ptr;
 } InsertState;
 
-
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "edit.c.generated.h"
 #endif
@@ -459,9 +458,8 @@ static void insert_enter(InsertState *s)
 
   where_paste_started.lnum = 0;
   can_cindent = true;
-  // The cursor line is not in a closed fold, unless 'insertmode' is set or
-  // restarting.
-  if (!p_im && did_restart_edit == 0) {
+  // The cursor line is not in a closed fold, unless restarting.
+  if (did_restart_edit == 0) {
     foldOpenCursor();
   }
 
@@ -473,7 +471,7 @@ static void insert_enter(InsertState *s)
     s->i = showmode();
   }
 
-  if (!p_im && did_restart_edit == 0) {
+  if (did_restart_edit == 0) {
     change_warning(curbuf, s->i == 0 ? 0 : s->i + 1);
   }
 
@@ -554,7 +552,7 @@ static int insert_check(VimState *state)
   }
 
   if (stop_insert_mode && !compl_started) {
-    // ":stopinsert" used or 'insertmode' reset
+    // ":stopinsert" used
     s->count = 0;
     return 0;  // exit insert mode
   }
@@ -575,7 +573,6 @@ static int insert_check(VimState *state)
 
   // When emsg() was called msg_scroll will have been set.
   msg_scroll = false;
-
 
   // Open fold at the cursor line, according to 'foldopen'.
   if (fdo_flags & FDO_INSERT) {
@@ -756,7 +753,6 @@ static int insert_execute(VimState *state, int key)
   }
 
   // CTRL-\ CTRL-N goes to Normal mode,
-  // CTRL-\ CTRL-G goes to mode selected with 'insertmode',
   // CTRL-\ CTRL-O is like CTRL-O but without moving the cursor
   if (s->c == Ctrl_BSL) {
     // may need to redraw when no more chars available now
@@ -770,8 +766,6 @@ static int insert_execute(VimState *state, int key)
       // it's something else
       vungetc(s->c);
       s->c = Ctrl_BSL;
-    } else if (s->c == Ctrl_G && p_im) {
-      return 1;  // continue
     } else {
       if (s->c == Ctrl_O) {
         ins_ctrl_o();
@@ -842,17 +836,6 @@ static int insert_execute(VimState *state, int key)
   return insert_handle_key(s);
 }
 
-
-/// Return true when need to go to Insert mode because of 'insertmode'.
-///
-/// Don't do this when still processing a command or a mapping.
-/// Don't do this when inside a ":normal" command.
-bool goto_im(void)
-  FUNC_ATTR_PURE
-{
-  return p_im && stuff_empty() && typebuf_typed();
-}
-
 static int insert_handle_key(InsertState *s)
 {
   // The big switch to handle a character in insert mode.
@@ -884,26 +867,10 @@ static int insert_handle_key(InsertState *s)
       }
     }
 
-    // when 'insertmode' set, and not halfway through a mapping, don't leave
-    // Insert mode
-    if (goto_im()) {
-      if (got_int) {
-        (void)vgetc();                        // flush all buffers
-        got_int = false;
-      } else {
-        vim_beep(BO_IM);
-      }
-      break;
-    }
     return 0;  // exit insert mode
 
-  case Ctrl_Z:        // suspend when 'insertmode' set
-    if (!p_im) {
-      goto normalchar;                // insert CTRL-Z as normal char
-    }
-    do_cmdline_cmd("stop");
-    ui_cursor_shape();  // may need to update cursor shape
-    break;
+  case Ctrl_Z:
+    goto normalchar;                // insert CTRL-Z as normal char
 
   case Ctrl_O:        // execute one command
     if (ctrl_x_mode == CTRL_X_OMNI) {
@@ -934,16 +901,11 @@ static int insert_handle_key(InsertState *s)
   case K_SELECT:      // end of Select mode mapping - ignore
     break;
 
-
   case K_HELP:        // Help key works like <ESC> <Help>
   case K_F1:
   case K_XF1:
     stuffcharReadbuff(K_HELP);
-    if (p_im) {
-      need_start_insertmode = true;
-    }
     return 0;  // exit insert mode
-
 
   case ' ':
     if (mod_mask != MOD_MASK_CTRL) {
@@ -956,7 +918,7 @@ static int insert_handle_key(InsertState *s)
     // For ^@ the trailing ESC will end the insert, unless there is an
     // error.
     if (stuff_inserted(NUL, 1L, (s->c == Ctrl_A)) == FAIL
-        && s->c != Ctrl_A && !p_im) {
+        && s->c != Ctrl_A) {
       return 0;  // exit insert mode
     }
     s->inserted_space = false;
@@ -1190,7 +1152,6 @@ check_pum:
     }
     break;
 
-
   case K_S_TAB:       // When not mapped, use like a normal TAB
     s->c = TAB;
     FALLTHROUGH;
@@ -1236,7 +1197,7 @@ check_pum:
       }
       break;
     }
-    if (!ins_eol(s->c) && !p_im) {
+    if (!ins_eol(s->c)) {
       return 0;  // out of memory
     }
     auto_format(false, false);
@@ -1288,13 +1249,6 @@ check_pum:
 
   case Ctrl_L:        // Whole line completion after ^X
     if (ctrl_x_mode != CTRL_X_WHOLE_LINE) {
-      // CTRL-L with 'insertmode' set: Leave Insert mode
-      if (p_im) {
-        if (echeck_abbr(Ctrl_L + ABBR_OFF)) {
-          break;
-        }
-        return 0;  // exit insert mode
-      }
       goto normalchar;
     }
     FALLTHROUGH;
@@ -1632,7 +1586,7 @@ void edit_putchar(int c, bool highlight)
     pc_col = 0;
     pc_status = PC_STATUS_UNSET;
     if (curwin->w_p_rl) {
-      pc_col += curwin->w_grid.Columns - 1 - curwin->w_wcol;
+      pc_col += curwin->w_grid.cols - 1 - curwin->w_wcol;
       const int fix_col = grid_fix_col(&curwin->w_grid, pc_col, pc_row);
 
       if (fix_col != pc_col) {
@@ -1759,7 +1713,7 @@ void display_dollar(colnr_T col)
   char_u *p = get_cursor_line_ptr();
   curwin->w_cursor.col -= utf_head_off(p, p + col);
   curs_columns(curwin, false);              // Recompute w_wrow and w_wcol
-  if (curwin->w_wcol < curwin->w_grid.Columns) {
+  if (curwin->w_wcol < curwin->w_grid.cols) {
     edit_putchar('$', false);
     dollar_vcol = curwin->w_virtcol;
   }
@@ -2111,7 +2065,6 @@ bool ctrl_x_mode_not_defined_yet(void)
   return ctrl_x_mode == CTRL_X_NOT_DEFINED_YET;
 }
 
-
 /// Check that the "dict" or "tsr" option can be used.
 ///
 /// @param  dict_opt  check "dict" when true, "tsr" when false.
@@ -2398,9 +2351,9 @@ static int ins_compl_add(char_u *const str, int len, char_u *const fname,
   }
 #define FREE_CPTEXT(cptext, cptext_allocated) \
   do { \
-    if (cptext != NULL && cptext_allocated) { \
+    if ((cptext) != NULL && (cptext_allocated)) { \
       for (size_t i = 0; i < CPT_COUNT; i++) { \
-        xfree(cptext[i]); \
+        xfree((cptext)[i]); \
       } \
     } \
   } while (0)
@@ -2648,7 +2601,6 @@ void completeopt_was_set(void)
   }
 }
 
-
 /*
  * Start completion for the complete() function.
  * "startcol" is where the matched text starts (1 is first column).
@@ -2712,12 +2664,10 @@ void set_completion(colnr_T startcol, list_T *list)
   ui_flush();
 }
 
-
 /* "compl_match_array" points the currently displayed list of entries in the
  * popup menu.  It is NULL when there is no popup menu. */
 static pumitem_T *compl_match_array = NULL;
 static int compl_match_arraysize;
-
 
 /*
  * Remove any popup menu.
@@ -3383,7 +3333,6 @@ static char_u *ins_compl_mode(void)
   return (char_u *)"";
 }
 
-
 /*
  * Delete one character before the cursor and show the subset of the matches
  * that match the word that is now before the cursor.
@@ -3799,6 +3748,7 @@ static bool ins_compl_prep(int c)
       }
 
       bool want_cindent = (can_cindent && cindent_on());
+
       // When completing whole lines: fix indent for 'cindent'.
       // Otherwise, break line if it's too long.
       if (compl_cont_mode == CTRL_X_WHOLE_LINE) {
@@ -3967,7 +3917,6 @@ static buf_T *ins_compl_next_buf(buf_T *buf, int flag)
   }
   return buf;
 }
-
 
 /// Get the user-defined completion function name for completion 'type'
 static char_u *get_complete_funcname(int type)
@@ -5432,7 +5381,6 @@ static int ins_complete(int c, bool enable_pum)
   save_w_leftcol = curwin->w_leftcol;
   n = ins_compl_next(true, ins_compl_key2count(c), insert_match, false);
 
-
   if (n > 1) {          // all matches have been found
     compl_matches = n;
   }
@@ -6285,6 +6233,7 @@ static void internal_format(int textwidth, int second_indent, int flags, int for
     open_line(FORWARD, OPENLINE_DELSPACES + OPENLINE_MARKFIX
               + (fo_white_par ? OPENLINE_KEEPTRAIL : 0)
               + (do_comments ? OPENLINE_DO_COM : 0)
+              + OPENLINE_FORMAT
               + ((flags & INSCHAR_COM_LIST) ? OPENLINE_COM_LIST : 0),
               ((flags & INSCHAR_COM_LIST) ? second_indent : old_indent),
               &did_do_comment);
@@ -7792,7 +7741,6 @@ static void ins_reg(void)
     add_to_showcmd_c(Ctrl_R);
   }
 
-
   // Don't map the register name. This also prevents the mode message to be
   // deleted when ESC is hit.
   no_mapping++;
@@ -7963,10 +7911,8 @@ static bool ins_esc(long *count, int cmdchar, bool nomove)
   }
   if (!arrow_used) {
     // Don't append the ESC for "r<CR>" and "grx".
-    // When 'insertmode' is set only CTRL-L stops Insert mode.  Needed for
-    // when "count" is non-zero.
     if (cmdchar != 'r' && cmdchar != 'v') {
-      AppendToRedobuff(p_im ? "\014" : ESC_STR);
+      AppendToRedobuff(ESC_STR);
     }
 
     /*
@@ -8038,7 +7984,6 @@ static bool ins_esc(long *count, int cmdchar, bool nomove)
       mb_adjust_cursor();
     }
   }
-
 
   State = MODE_NORMAL;
   may_trigger_modechanged();
@@ -8242,7 +8187,6 @@ static void ins_del(void)
   AppendCharToRedobuff(K_DEL);
 }
 
-
 /*
  * Delete one character for ins_bs().
  */
@@ -8412,9 +8356,7 @@ static bool ins_bs(int c, int mode, int *inserted_space_p)
     mincol = 0;
     // keep indent
     if (mode == BACKSPACE_LINE
-        && (curbuf->b_p_ai
-            || cindent_on()
-            )
+        && (curbuf->b_p_ai || cindent_on())
         && !revins_on) {
       save_col = curwin->w_cursor.col;
       beginline(BL_WHITE);
@@ -8669,7 +8611,6 @@ static void ins_mousescroll(int dir)
     can_cindent = true;
   }
 }
-
 
 static void ins_left(void)
 {
@@ -9195,7 +9136,6 @@ static int ins_digraph(void)
     did_putchar = true;
     add_to_showcmd_c(Ctrl_K);
   }
-
 
   // don't map the digraph chars. This also prevents the
   // mode message to be deleted when ESC is hit

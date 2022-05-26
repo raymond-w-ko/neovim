@@ -85,6 +85,8 @@ return {
   };
   option = {
     "scope";
+    "win";
+    "buf";
   };
   highlight = {
     "bold";
@@ -146,6 +148,7 @@ return {
     "group";
     "modeline";
     "pattern";
+    "data";
   };
   get_autocmds = {
     "event";

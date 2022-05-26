@@ -114,7 +114,6 @@ bool keep_msg_more = false;    // keep_msg was set by msgmore()
  *                  This is an allocated string or NULL when not used.
  */
 
-
 // Extended msg state, currently used for external UIs with ext_messages
 static const char *msg_ext_kind = NULL;
 static Array msg_ext_chunks = ARRAY_DICT_INIT;
@@ -124,6 +123,8 @@ static size_t msg_ext_cur_len = 0;
 
 static bool msg_ext_overwrite = false;  ///< will overwrite last message
 static int msg_ext_visible = 0;  ///< number of messages currently visible
+
+static bool msg_ext_history_visible = false;
 
 /// Shouldn't clear message after leaving cmdline
 static bool msg_ext_keep_after_cmdline = false;
@@ -162,7 +163,7 @@ void msg_grid_validate(void)
 {
   grid_assign_handle(&msg_grid);
   bool should_alloc = msg_use_grid();
-  if (should_alloc && (msg_grid.Rows != Rows || msg_grid.Columns != Columns
+  if (should_alloc && (msg_grid.rows != Rows || msg_grid.cols != Columns
                        || !msg_grid.chars)) {
     // TODO(bfredl): eventually should be set to "invalid". I e all callers
     // will use the grid including clear to EOS if necessary.
@@ -174,9 +175,9 @@ void msg_grid_validate(void)
 
     // Tricky: allow resize while pager is active
     int pos = msg_scrolled ? msg_grid_pos : Rows - p_ch;
-    ui_comp_put_grid(&msg_grid, pos, 0, msg_grid.Rows, msg_grid.Columns,
+    ui_comp_put_grid(&msg_grid, pos, 0, msg_grid.rows, msg_grid.cols,
                      false, true);
-    ui_call_grid_resize(msg_grid.handle, msg_grid.Columns, msg_grid.Rows);
+    ui_call_grid_resize(msg_grid.handle, msg_grid.cols, msg_grid.rows);
 
     msg_grid.throttled = false;  // don't throttle in 'cmdheight' area
     msg_scrolled_at_flush = msg_scrolled;
@@ -262,7 +263,6 @@ void msg_multiline_attr(const char *s, int attr, bool check_int, bool *need_clea
     msg_outtrans_attr((char_u *)s, attr);
   }
 }
-
 
 /// @param keep set keep_msg if it doesn't scroll
 bool msg_attr_keep(const char *s, int attr, bool keep, bool multiline)
@@ -758,7 +758,6 @@ bool semsg_multiline(const char *const fmt, ...)
   bool ret;
   va_list ap;
 
-
   static char errbuf[MULTILINE_BUFSIZE];
   if (emsg_not_now()) {
     return true;
@@ -1008,7 +1007,6 @@ void ex_messages(void *const eap_p)
     return;
   }
 
-
   p = first_msg_hist;
 
   if (eap->addr_count != 0) {
@@ -1025,6 +1023,9 @@ void ex_messages(void *const eap_p)
 
   // Display what was not skipped.
   if (ui_has(kUIMessages)) {
+    if (msg_silent) {
+      return;
+    }
     Array entries = ARRAY_DICT_INIT;
     for (; p != NULL; p = p->next) {
       if (p->msg != NULL && p->msg[0] != NUL) {
@@ -1040,6 +1041,8 @@ void ex_messages(void *const eap_p)
       }
     }
     ui_call_msg_history_show(entries);
+    msg_ext_history_visible = true;
+    wait_return(false);
   } else {
     msg_hist_off = true;
     for (; p != NULL && !got_int; p = p->next) {
@@ -1160,7 +1163,6 @@ void wait_return(int redraw)
       allow_keys--;
       reg_recording = save_reg_recording;
       scriptout = save_scriptout;
-
 
       /*
        * Allow scrolling back in the messages.
@@ -1335,7 +1337,6 @@ void msgmore(long n)
     }
   }
 }
-
 
 void msg_ext_set_kind(const char *msg_kind)
 {
@@ -2320,10 +2321,10 @@ void msg_scroll_up(bool may_throttle)
     if (msg_grid_pos > 0) {
       msg_grid_set_pos(msg_grid_pos - 1, true);
     } else {
-      grid_del_lines(&msg_grid, 0, 1, msg_grid.Rows, 0, msg_grid.Columns);
+      grid_del_lines(&msg_grid, 0, 1, msg_grid.rows, 0, msg_grid.cols);
       memmove(msg_grid.dirty_col, msg_grid.dirty_col + 1,
-              (msg_grid.Rows - 1) * sizeof(*msg_grid.dirty_col));
-      msg_grid.dirty_col[msg_grid.Rows - 1] = 0;
+              (msg_grid.rows - 1) * sizeof(*msg_grid.dirty_col));
+      msg_grid.dirty_col[msg_grid.rows - 1] = 0;
     }
   } else {
     grid_del_lines(&msg_grid_adj, 0, 1, Rows, 0, Columns);
@@ -2356,7 +2357,7 @@ void msg_scroll_flush(void)
     msg_grid.throttled = false;
     int pos_delta = msg_grid_pos_at_flush - msg_grid_pos;
     assert(pos_delta >= 0);
-    int delta = MIN(msg_scrolled - msg_scrolled_at_flush, msg_grid.Rows);
+    int delta = MIN(msg_scrolled - msg_scrolled_at_flush, msg_grid.rows);
 
     if (pos_delta > 0) {
       ui_ext_msg_set_pos(msg_grid_pos, true);
@@ -2374,7 +2375,7 @@ void msg_scroll_flush(void)
     for (int i = MAX(Rows - MAX(delta, 1), 0); i < Rows; i++) {
       int row = i - msg_grid_pos;
       assert(row >= 0);
-      ui_line(&msg_grid, row, 0, msg_grid.dirty_col[row], msg_grid.Columns,
+      ui_line(&msg_grid, row, 0, msg_grid.dirty_col[row], msg_grid.cols,
               HL_ATTR(HLF_MSG), false);
       msg_grid.dirty_col[row] = 0;
     }
@@ -2400,9 +2401,9 @@ void msg_reset_scroll(void)
     clear_cmdline = true;
     if (msg_grid.chars) {
       // non-displayed part of msg_grid is considered invalid.
-      for (int i = 0; i < MIN(msg_scrollsize(), msg_grid.Rows); i++) {
+      for (int i = 0; i < MIN(msg_scrollsize(), msg_grid.rows); i++) {
         grid_clear_line(&msg_grid, msg_grid.line_offset[i],
-                        msg_grid.Columns, false);
+                        msg_grid.cols, false);
       }
     }
   } else {
@@ -2734,7 +2735,6 @@ static int do_more_prompt(int typed_char)
     } else {
       c = get_keystroke(resize_events);
     }
-
 
     toscroll = 0;
     switch (c) {
@@ -3126,6 +3126,10 @@ void msg_ext_clear(bool force)
     msg_ext_visible = 0;
     msg_ext_overwrite = false;  // nothing to overwrite
   }
+  if (msg_ext_history_visible) {
+    ui_call_msg_history_clear();
+    msg_ext_history_visible = false;
+  }
 
   // Only keep once.
   msg_ext_keep_after_cmdline = false;
@@ -3429,7 +3433,6 @@ int do_dialog(int type, char_u *title, char_u *message, char_u *buttons, int dfl
     return dfltbutton;  // return default option
   }
 
-
   int save_msg_silent = msg_silent;
   int oldState = State;
 
@@ -3495,7 +3498,6 @@ int do_dialog(int type, char_u *title, char_u *message, char_u *buttons, int dfl
 
   return retval;
 }
-
 
 /// Copy one character from "*from" to "*to", taking care of multi-byte
 /// characters.  Return the length of the character in bytes.
@@ -3566,7 +3568,6 @@ static char_u *console_dialog_alloc(const char_u *message, char_u *buttons, bool
   if (!has_hotkey[0]) {
     len += 2;                                // "x" -> "[x]"
   }
-
 
   // Now allocate space for the strings
   xfree(confirm_msg);

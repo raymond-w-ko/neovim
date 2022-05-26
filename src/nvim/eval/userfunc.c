@@ -200,7 +200,6 @@ static void register_closure(ufunc_T *fp)
   [current_funccal->fc_funcs.ga_len++] = fp;
 }
 
-
 /// @return  a name for a lambda.  Returned in static memory.
 char_u *get_lambda_name(void)
 {
@@ -3598,5 +3597,6 @@ char_u *register_cfunc(cfunc_T cb, cfunc_free_T cb_free, void *state)
   STRCPY(fp->uf_name, name);
   hash_add(&func_hashtab, UF2HIKEY(fp));
 
+  // coverity[leaked_storage]
   return fp->uf_name;
 }

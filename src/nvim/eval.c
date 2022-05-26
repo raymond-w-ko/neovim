@@ -53,11 +53,9 @@
 #include "nvim/version.h"
 #include "nvim/window.h"
 
-
 // TODO(ZyX-I): Remove DICT_MAXNEST, make users be non-recursive instead
 
 #define DICT_MAXNEST 100        // maximum nesting of lists and dicts
-
 
 static char *e_letunexp = N_("E18: Unexpected characters in :let");
 static char *e_missbrac = N_("E111: Missing ']'");
@@ -126,13 +124,13 @@ typedef struct {
 
 #define VV(idx, name, type, flags) \
   [idx] = { \
-    .vv_name = name, \
+    .vv_name = (name), \
     .vv_di = { \
-      .di_tv = { .v_type = type }, \
+      .di_tv = { .v_type = (type) }, \
       .di_flags = 0, \
       .di_key = { 0 }, \
     }, \
-    .vv_flags = flags, \
+    .vv_flags = (flags), \
   }
 
 #define VIMVAR_KEY_LEN 16  // Maximum length of the key of v:variables
@@ -1067,7 +1065,6 @@ int get_spellword(list_T *const list, const char **ret_word)
   return tv_list_find_nr(list, -1, NULL);
 }
 
-
 // Call some vim script function and return the result in "*rettv".
 // Uses argv[0] to argv[argc-1] for the function arguments. argv[argc]
 // should have type VAR_UNKNOWN.
@@ -1208,7 +1205,6 @@ void prof_child_exit(proftime_T *tm)
   }
   script_prof_restore(tm);
 }
-
 
 /// Evaluate 'foldexpr'.  Returns the foldlevel, and any character preceding
 /// it in "*cp".  Doesn't give error messages.
@@ -2701,7 +2697,6 @@ void free_for_info(void *fi_void)
   xfree(fi);
 }
 
-
 void set_context_for_expression(expand_T *xp, char *arg, cmdidx_T cmdidx)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -3145,7 +3140,6 @@ void del_menutrans_vars(void)
  * with its prefix. Allocated in cat_prefix_varname(), freed later in
  * get_user_var_name().
  */
-
 
 static char *varnamebuf = NULL;
 static size_t varnamebuflen = 0;
@@ -5636,7 +5630,6 @@ bool set_ref_in_item(typval_T *tv, int copyID, ht_stack_T **ht_stack, list_stack
   return abort;
 }
 
-
 /// Mark all lists and dicts referenced in given mark
 ///
 /// @return  true if setting references failed somehow.
@@ -5682,7 +5675,6 @@ static inline bool set_ref_dict(dict_T *dict, int copyID)
   }
   return false;
 }
-
 
 /// Get the key for *{key: val} into "tv" and advance "arg".
 ///
@@ -6865,8 +6857,8 @@ void screenchar_adjust_grid(ScreenGrid **grid, int *row, int *col)
   // have its own buffer, this should just read from it instead.
   msg_scroll_flush();
   if (msg_grid.chars && msg_grid.comp_index > 0 && *row >= msg_grid.comp_row
-      && *row < (msg_grid.Rows + msg_grid.comp_row)
-      && *col < msg_grid.Columns) {
+      && *row < (msg_grid.rows + msg_grid.comp_row)
+      && *col < msg_grid.cols) {
     *grid = &msg_grid;
     *row -= msg_grid.comp_row;
   }
@@ -6886,6 +6878,7 @@ void set_buffer_lines(buf_T *buf, linenr_T lnum_arg, bool append, const typval_T
   buf_T *curbuf_save = NULL;
   win_T *curwin_save = NULL;
   const bool is_curbuf = buf == curbuf;
+  const bool save_VIsual_active = VIsual_active;
 
   // When using the current buffer ml_mfp will be set if needed.  Useful when
   // setline() is used on startup.  For other buffers the buffer must be
@@ -6896,6 +6889,7 @@ void set_buffer_lines(buf_T *buf, linenr_T lnum_arg, bool append, const typval_T
   }
 
   if (!is_curbuf) {
+    VIsual_active = false;
     curbuf_save = curbuf;
     curwin_save = curwin;
     curbuf = buf;
@@ -6986,6 +6980,7 @@ void set_buffer_lines(buf_T *buf, linenr_T lnum_arg, bool append, const typval_T
   if (!is_curbuf) {
     curbuf = curbuf_save;
     curwin = curwin_save;
+    VIsual_active = save_VIsual_active;
   }
 }
 
@@ -7283,7 +7278,6 @@ static bool set_ref_in_callback(Callback *callback, int copyID, ht_stack_T **ht_
     tv.vval.v_partial = callback->data.partial;
     return set_ref_in_item(&tv, copyID, ht_stack, list_stack);
     break;
-
 
   default:
     abort();
@@ -10245,7 +10239,6 @@ repeat:
     *usedlen += 2;
   }
 
-
   // ":t" - tail, just the basename
   if (src[*usedlen] == ':' && src[*usedlen + 1] == 't') {
     *usedlen += 2;
@@ -10486,7 +10479,6 @@ bool common_job_callbacks(dict_T *vopts, CallbackReader *on_stdout, CallbackRead
   return false;
 }
 
-
 Channel *find_job(uint64_t id, bool show_error)
 {
   Channel *data = find_channel(id);
@@ -10503,7 +10495,6 @@ Channel *find_job(uint64_t id, bool show_error)
   }
   return data;
 }
-
 
 void script_host_eval(char *name, typval_T *argvars, typval_T *rettv)
 {

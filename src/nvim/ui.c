@@ -182,7 +182,6 @@ void ui_event(char *name, Array args)
   }
 }
 
-
 void ui_refresh(void)
 {
   if (!ui_active()) {
@@ -436,7 +435,7 @@ void ui_set_ext_option(UI *ui, UIExtension ext, bool active)
 void ui_line(ScreenGrid *grid, int row, int startcol, int endcol, int clearcol, int clearattr,
              bool wrap)
 {
-  assert(0 <= row && row < grid->Rows);
+  assert(0 <= row && row < grid->rows);
   LineFlags flags = wrap ? kLineFlagWrap : 0;
   if (startcol == -1) {
     startcol = 0;
@@ -453,7 +452,7 @@ void ui_line(ScreenGrid *grid, int row, int startcol, int endcol, int clearcol, 
   if (p_wd && !(rdb_flags & RDB_COMPOSITOR)) {
     // If 'writedelay' is active, set the cursor to indicate what was drawn.
     ui_call_grid_cursor_goto(grid->handle, row,
-                             MIN(clearcol, (int)grid->Columns - 1));
+                             MIN(clearcol, (int)grid->cols - 1));
     ui_call_flush();
     uint64_t wd = (uint64_t)labs(p_wd);
     os_microdelay(wd * 1000u, true);
@@ -532,7 +531,6 @@ void ui_flush(void)
   }
   ui_call_flush();
 }
-
 
 /// Check if 'mouse' is active for the current mode
 ///

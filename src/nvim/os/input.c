@@ -19,6 +19,7 @@
 #include "nvim/memory.h"
 #include "nvim/msgpack_rpc/channel.h"
 #include "nvim/os/input.h"
+#include "nvim/screen.h"
 #include "nvim/state.h"
 #include "nvim/ui.h"
 #include "nvim/vim.h"
@@ -178,15 +179,7 @@ void os_breakcheck(void)
     return;
   }
 
-  int save_us = updating_screen;
-  // We do not want screen_resize() to redraw here.
-  // TODO(bfredl): we are already special casing redraw events, is this
-  // hack still needed?
-  updating_screen++;
-
   loop_poll_events(&main_loop, 0);
-
-  updating_screen = save_us;
 }
 
 #define BREAKCHECK_SKIP 1000
@@ -222,7 +215,6 @@ void veryfast_breakcheck(void)
     os_breakcheck();
   }
 }
-
 
 /// Test whether a file descriptor refers to a terminal.
 ///
@@ -336,7 +328,6 @@ static uint8_t check_multiclick(int code, int grid, int row, int col)
   }
   return modifiers;
 }
-
 
 // Mouse event handling code(Extract row/col if available and detect multiple
 // clicks)

@@ -196,7 +196,6 @@ void nvim_ui_detach(uint64_t channel_id, Error *err)
   remote_ui_disconnect(channel_id);
 }
 
-
 void nvim_ui_try_resize(uint64_t channel_id, Integer width, Integer height, Error *err)
   FUNC_API_SINCE(1) FUNC_API_REMOTE_ONLY
 {
@@ -349,7 +348,11 @@ void nvim_ui_try_resize_grid(uint64_t channel_id, Integer grid, Integer width, I
     return;
   }
 
-  ui_grid_resize((handle_T)grid, (int)width, (int)height, err);
+  if (grid == DEFAULT_GRID_HANDLE) {
+    nvim_ui_try_resize(channel_id, width, height, err);
+  } else {
+    ui_grid_resize((handle_T)grid, (int)width, (int)height, err);
+  }
 }
 
 /// Tells Nvim the number of elements displaying in the popumenu, to decide
@@ -566,7 +569,6 @@ static void remote_ui_highlight_set(UI *ui, int id)
 {
   Array args = ARRAY_DICT_INIT;
   UIData *data = ui->data;
-
 
   if (data->hl_id == id) {
     return;
@@ -789,7 +791,6 @@ static void remote_ui_event(UI *ui, char *name, Array args, bool *args_consumed)
       }
     }
   }
-
 
   Array my_args = ARRAY_DICT_INIT;
   // Objects are currently single-reference
