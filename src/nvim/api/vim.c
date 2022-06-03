@@ -45,6 +45,7 @@
 #include "nvim/move.h"
 #include "nvim/msgpack_rpc/channel.h"
 #include "nvim/msgpack_rpc/helpers.h"
+#include "nvim/msgpack_rpc/unpacker.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
 #include "nvim/os/input.h"
@@ -2188,6 +2189,12 @@ void nvim__screenshot(String path)
   ui_call_screenshot(path);
 }
 
+Object nvim__unpack(String str, Error *err)
+  FUNC_API_FAST
+{
+  return unpack(str.data, str.size, err);
+}
+
 /// Deletes an uppercase/file named mark. See |mark-motions|.
 ///
 /// @note fails with error if a lowercase or buffer local named mark is used.
@@ -2511,6 +2518,7 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
 ///                 - desc: (string) Used for listing the command when a Lua function is used for
 ///                                  {command}.
 ///                 - force: (boolean, default true) Override any previous definition.
+///                 - preview: (function) Preview callback for 'inccommand' |:command-preview|
 /// @param[out] err Error details, if any.
 void nvim_create_user_command(String name, Object command, Dict(user_command) *opts, Error *err)
   FUNC_API_SINCE(9)
