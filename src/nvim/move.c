@@ -108,14 +108,14 @@ void redraw_for_cursorline(win_T *wp)
 }
 
 /// Redraw when w_virtcol changes and 'cursorcolumn' is set or 'cursorlineopt'
-/// contains "screenline" or when the 'CurSearch' highlight is in use.
+/// contains "screenline" or when the "CurSearch" highlight is in use.
 /// Also when concealing is on and 'concealcursor' is active.
 static void redraw_for_cursorcolumn(win_T *wp)
   FUNC_ATTR_NONNULL_ALL
 {
   if ((wp->w_valid & VALID_VIRTCOL) == 0 && !pum_visible()) {
     if (wp->w_p_cuc || ((HL_ATTR(HLF_LC) || wp->w_hl_ids[HLF_LC]) && using_hlsearch())) {
-      // When 'cursorcolumn' is set or 'CurSearch' is in use
+      // When 'cursorcolumn' is set or "CurSearch" is in use
       // need to redraw with SOME_VALID.
       redraw_later(wp, SOME_VALID);
     } else if (wp->w_p_cul && (wp->w_p_culopt_flags & CULOPT_SCRLINE)) {
@@ -1146,8 +1146,8 @@ bool scrollup(long line_count, int byfold)
     curwin->w_botline += lnum - curwin->w_topline;
     curwin->w_topline = lnum;
   } else {
-    curwin->w_topline += line_count;
-    curwin->w_botline += line_count;            // approximate w_botline
+    curwin->w_topline += (linenr_T)line_count;
+    curwin->w_botline += (linenr_T)line_count;            // approximate w_botline
   }
 
   if (curwin->w_topline > curbuf->b_ml.ml_line_count) {
@@ -1518,12 +1518,10 @@ void set_empty_rows(win_T *wp, int used)
   }
 }
 
-/*
- * Recompute topline to put the cursor at the bottom of the window.
- * Scroll at least "min_scroll" lines.
- * If "set_topbot" is true, set topline and botline first (for "zb").
- * This is messy stuff!!!
- */
+/// Recompute topline to put the cursor at the bottom of the window.
+/// When scrolling scroll at least "min_scroll" lines.
+/// If "set_topbot" is true, set topline and botline first (for "zb").
+/// This is messy stuff!!!
 void scroll_cursor_bot(int min_scroll, int set_topbot)
 {
   int used;
@@ -1903,7 +1901,7 @@ int onepage(Direction dir, long count)
         if (p_window <= 2) {
           ++curwin->w_topline;
         } else {
-          curwin->w_topline += p_window - 2;
+          curwin->w_topline += (linenr_T)p_window - 2;
         }
         if (curwin->w_topline > curbuf->b_ml.ml_line_count) {
           curwin->w_topline = curbuf->b_ml.ml_line_count;
@@ -1939,12 +1937,12 @@ int onepage(Direction dir, long count)
         if (p_window <= 2) {
           --curwin->w_topline;
         } else {
-          curwin->w_topline -= p_window - 2;
+          curwin->w_topline -= (linenr_T)p_window - 2;
         }
         if (curwin->w_topline < 1) {
           curwin->w_topline = 1;
         }
-        curwin->w_cursor.lnum = curwin->w_topline + p_window - 1;
+        curwin->w_cursor.lnum = curwin->w_topline + (linenr_T)p_window - 1;
         if (curwin->w_cursor.lnum > curbuf->b_ml.ml_line_count) {
           curwin->w_cursor.lnum = curbuf->b_ml.ml_line_count;
         }

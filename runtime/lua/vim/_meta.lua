@@ -10,28 +10,38 @@ local SET_TYPES = setmetatable({
   GLOBAL = 2,
 }, { __index = error })
 
-local options_info = {}
-for _, v in pairs(a.nvim_get_all_options_info()) do
-  options_info[v.name] = v
-  if v.shortname ~= '' then
-    options_info[v.shortname] = v
-  end
-end
+local options_info = nil
+local buf_options = nil
+local glb_options = nil
+local win_options = nil
 
-local get_scoped_options = function(scope)
-  local result = {}
-  for name, option_info in pairs(options_info) do
-    if option_info.scope == scope then
-      result[name] = true
+local function _setup()
+  if options_info ~= nil then
+    return
+  end
+  options_info = {}
+  for _, v in pairs(a.nvim_get_all_options_info()) do
+    options_info[v.name] = v
+    if v.shortname ~= '' then
+      options_info[v.shortname] = v
     end
   end
 
-  return result
-end
+  local function get_scoped_options(scope)
+    local result = {}
+    for name, option_info in pairs(options_info) do
+      if option_info.scope == scope then
+        result[name] = true
+      end
+    end
 
-local buf_options = get_scoped_options('buf')
-local glb_options = get_scoped_options('global')
-local win_options = get_scoped_options('win')
+    return result
+  end
+
+  buf_options = get_scoped_options('buf')
+  glb_options = get_scoped_options('global')
+  win_options = get_scoped_options('win')
+end
 
 local function make_meta_accessor(get, set, del, validator)
   validator = validator or function()
@@ -81,15 +91,16 @@ do -- buffer option accessor
         return new_buf_opt_accessor(k)
       end
 
-      return a.nvim_buf_get_option(bufnr or 0, k)
+      return a.nvim_get_option_value(k, { buf = bufnr or 0 })
     end
 
     local function set(k, v)
-      return a.nvim_buf_set_option(bufnr or 0, k, v)
+      return a.nvim_set_option_value(k, v, { buf = bufnr or 0 })
     end
 
     return make_meta_accessor(get, set, nil, function(k)
       if type(k) == 'string' then
+        _setup()
         if win_options[k] then
           error(string.format([['%s' is a window option, not a buffer option. See ":help %s"]], k, k))
         elseif glb_options[k] then
@@ -110,15 +121,16 @@ do -- window option accessor
       if winnr == nil and type(k) == 'number' then
         return new_win_opt_accessor(k)
       end
-      return a.nvim_win_get_option(winnr or 0, k)
+      return a.nvim_get_option_value(k, { win = winnr or 0 })
     end
 
     local function set(k, v)
-      return a.nvim_win_set_option(winnr or 0, k, v)
+      return a.nvim_set_option_value(k, v, { win = winnr or 0 })
     end
 
     return make_meta_accessor(get, set, nil, function(k)
       if type(k) == 'string' then
+        _setup()
         if buf_options[k] then
           error(string.format([['%s' is a buffer option, not a window option. See ":help %s"]], k, k))
         elseif glb_options[k] then
@@ -610,6 +622,7 @@ local create_option_metatable = function(set_type)
   local set_mt, option_mt
 
   local make_option = function(name, value)
+    _setup()
     local info = assert(options_info[name], 'Not a valid option name: ' .. name)
 
     if type(value) == 'table' and getmetatable(value) == option_mt then

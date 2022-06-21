@@ -27,6 +27,7 @@ local write_file = helpers.write_file
 local exec_lua = helpers.exec_lua
 local exc_exec = helpers.exc_exec
 local insert = helpers.insert
+local expect_exit = helpers.expect_exit
 
 local pcall_err = helpers.pcall_err
 local format_string = helpers.format_string
@@ -1452,10 +1453,21 @@ describe('API', function()
     it('set local window options', function()
       -- Different to nvim_win_set_option
       nvim('set_option_value', 'colorcolumn', '4,3', {win=0, scope='local'})
-      eq('4,3', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+      eq('4,3', nvim('get_option_value', 'colorcolumn', {win = 0, scope = 'local'}))
       command("set modified hidden")
       command("enew") -- edit new buffer, window option is reset
-      eq('', nvim('get_option_value', 'colorcolumn', {scope = 'local'}))
+      eq('', nvim('get_option_value', 'colorcolumn', {win = 0, scope = 'local'}))
+    end)
+
+    it('get buffer or window-local options', function()
+      nvim('command', 'new')
+      local buf = nvim('get_current_buf').id
+      nvim('buf_set_option', buf, 'tagfunc', 'foobar')
+      eq('foobar', nvim('get_option_value', 'tagfunc', {buf = buf}))
+
+      local win = nvim('get_current_win').id
+      nvim('win_set_option', win, 'number', true)
+      eq(true, nvim('get_option_value', 'number', {win = win}))
     end)
   end)
 
@@ -2617,7 +2629,7 @@ describe('API', function()
 
     it('does not cause heap-use-after-free on exit while setting options', function()
       command('au OptionSet * q')
-      command('silent! call nvim_create_buf(0, 1)')
+      expect_exit(command, 'silent! call nvim_create_buf(0, 1)')
     end)
   end)
 

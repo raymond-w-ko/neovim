@@ -3,6 +3,7 @@
 
 #include "nvim/api/private/helpers.h"
 #include "nvim/log.h"
+#include "nvim/memory.h"
 #include "nvim/msgpack_rpc/helpers.h"
 #include "nvim/msgpack_rpc/unpacker.h"
 
@@ -34,7 +35,7 @@ Object unpack(const char *data, size_t size, Error *err)
 
 static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
 {
-  Unpacker *unpacker = parser->data.p;
+  Unpacker *p = parser->data.p;
   Object *result = NULL;
   String *key_location = NULL;
 
@@ -69,7 +70,7 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
       abort();
     }
   } else {
-    result = &unpacker->result;
+    result = &p->result;
   }
 
   switch (node->tok.type) {
@@ -88,16 +89,17 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
   case MPACK_TOKEN_FLOAT:
     *result = FLOAT_OBJ(mpack_unpack_float(node->tok));
     break;
+
   case MPACK_TOKEN_BIN:
   case MPACK_TOKEN_STR: {
-    String str = { .data = xmallocz(node->tok.length), .size = node->tok.length };
-
+    char *mem = arena_alloc(&p->arena, node->tok.length + 1, false);
+    mem[node->tok.length] = NUL;
+    String str = { .data = mem, .size = node->tok.length };
     if (key_location) {
       *key_location = str;
     } else {
       *result = STRING_OBJ(str);
     }
-
     node->data[0].p = str.data;
     break;
   }
@@ -105,7 +107,6 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
     // handled in chunk; but save result location
     node->data[0].p = result;
     break;
-
   case MPACK_TOKEN_CHUNK:
     assert(parent);
     if (parent->tok.type == MPACK_TOKEN_STR || parent->tok.type == MPACK_TOKEN_BIN) {
@@ -120,12 +121,12 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
         *res = NIL;
         break;
       }
-      memcpy(unpacker->ext_buf + parent->pos,
+      memcpy(p->ext_buf + parent->pos,
              node->tok.data.chunk_ptr, node->tok.length);
       if (parent->pos + node->tok.length < parent->tok.length) {
         break;  // EOF, let's get back to it later
       }
-      const char *buf = unpacker->ext_buf;
+      const char *buf = p->ext_buf;
       size_t size = parent->tok.length;
       mpack_token_t ext_tok;
       int status = mpack_rtoken(&buf, &size, &ext_tok);
@@ -148,7 +149,7 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
 
   case MPACK_TOKEN_ARRAY: {
     Array arr = KV_INITIAL_VALUE;
-    kv_resize(arr, node->tok.length);
+    kv_fixsize_arena(&p->arena, arr, node->tok.length);
     kv_size(arr) = node->tok.length;
     *result = ARRAY_OBJ(arr);
     node->data[0].p = result;
@@ -156,12 +157,13 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
   }
   case MPACK_TOKEN_MAP: {
     Dictionary dict = KV_INITIAL_VALUE;
-    kv_resize(dict, node->tok.length);
+    kv_fixsize_arena(&p->arena, dict, node->tok.length);
     kv_size(dict) = node->tok.length;
     *result = DICTIONARY_OBJ(dict);
     node->data[0].p = result;
     break;
   }
+
   default:
     abort();
   }
@@ -176,6 +178,15 @@ void unpacker_init(Unpacker *p)
   p->parser.data.p = p;
   mpack_tokbuf_init(&p->reader);
   p->unpack_error = (Error)ERROR_INIT;
+
+  p->arena = (Arena)ARENA_EMPTY;
+  p->reuse_blk = NULL;
+}
+
+void unpacker_teardown(Unpacker *p)
+{
+  arena_mem_free(p->reuse_blk, NULL);
+  arena_mem_free(arena_finish(&p->arena), NULL);
 }
 
 bool unpacker_parse_header(Unpacker *p)
@@ -282,6 +293,7 @@ bool unpacker_advance(Unpacker *p)
       return false;
     }
     p->state = p->type == kMessageTypeResponse ? 1 : 2;
+    arena_start(&p->arena, &p->reuse_blk);
   }
 
   int result;

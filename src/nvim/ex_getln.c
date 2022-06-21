@@ -108,11 +108,9 @@ typedef enum {
   kCmdRedrawAll,
 } CmdRedraw;
 
-/*
- * Variables shared between getcmdline(), redrawcmdline() and others.
- * These need to be saved when using CTRL-R |, that's why they are in a
- * structure.
- */
+// Variables shared between getcmdline(), redrawcmdline() and others.
+// These need to be saved when using CTRL-R |, that's why they are in a
+// structure.
 struct cmdline_info {
   char_u *cmdbuff;         // pointer to command line buffer
   int cmdbufflen;               // length of cmdbuff
@@ -139,6 +137,7 @@ struct cmdline_info {
   bool special_shift;           ///< shift of last putcmdline char
   CmdRedraw redraw_state;       ///< needed redraw for external cmdline
 };
+
 /// Last value of prompt_id, incremented when doing new prompt
 static unsigned last_prompt_id = 0;
 
@@ -310,7 +309,6 @@ static bool do_incsearch_highlighting(int firstc, int *search_delim, incsearch_s
   FUNC_ATTR_NONNULL_ALL
 {
   char *cmd;
-  cmdmod_T save_cmdmod = cmdmod;
   char *p;
   bool delim_optional = false;
   int delim;
@@ -347,8 +345,8 @@ static bool do_incsearch_highlighting(int firstc, int *search_delim, incsearch_s
   ea.cmd = (char *)ccline.cmdbuff;
   ea.addr_type = ADDR_LINES;
 
-  parse_command_modifiers(&ea, &dummy, true);
-  cmdmod = save_cmdmod;
+  cmdmod_T dummy_cmdmod;
+  parse_command_modifiers(&ea, &dummy, &dummy_cmdmod, true);
 
   cmd = skip_range(ea.cmd, NULL);
   if (vim_strchr("sgvl", *cmd) == NULL) {
@@ -689,6 +687,14 @@ static void finish_incsearch_highlighting(int gotesc, incsearch_state_T *s, bool
 /// @param init_ccline  clear ccline first
 static uint8_t *command_line_enter(int firstc, long count, int indent, bool init_ccline)
 {
+  bool cmdheight0 = p_ch < 1 && !ui_has(kUIMessages) && vpeekc() == NUL;
+
+  if (cmdheight0) {
+    // If cmdheight is 0, cmdheight must be set to 1 when we enter command line.
+    set_option_value("ch", 1L, NULL, 0);
+    redraw_statuslines();
+  }
+
   // can be invoked recursively, identify each level
   static int cmdline_level = 0;
   cmdline_level++;
@@ -974,6 +980,11 @@ theend:
     restore_cmdline(&save_ccline);
   } else {
     ccline.cmdbuff = NULL;
+  }
+
+  if (cmdheight0) {
+    // Restore cmdheight
+    set_option_value("ch", 0L, NULL, 0);
   }
 
   return p;
@@ -2325,19 +2336,9 @@ static buf_T *cmdpreview_open_buf(void)
 static win_T *cmdpreview_open_win(buf_T *cmdpreview_buf)
 {
   win_T *save_curwin = curwin;
-  bool win_found = false;
 
-  // Try to find an existing preview window.
-  FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
-    if (wp->w_buffer == cmdpreview_buf) {
-      win_enter(wp, false);
-      win_found = true;
-      break;
-    }
-  }
-
-  // If an existing window is not found, create one.
-  if (!win_found && win_split((int)p_cwh, WSP_BOT) == FAIL) {
+  // Open preview window.
+  if (win_split((int)p_cwh, WSP_BOT) == FAIL) {
     return NULL;
   }
 
@@ -2391,11 +2392,12 @@ static void cmdpreview_show(CommandLineState *s)
   // Copy the command line so we can modify it.
   char *cmdline = xstrdup((char *)ccline.cmdbuff);
   char *errormsg = NULL;
-
-  parse_cmdline(cmdline, &ea, &cmdinfo, &errormsg);
-  if (errormsg != NULL) {
+  emsg_off++;  // Block errors when parsing the command line, and don't update v:errmsg
+  if (!parse_cmdline(cmdline, &ea, &cmdinfo, &errormsg)) {
+    emsg_off--;
     goto end;
   }
+  emsg_off--;
 
   // Swap invalid command range if needed
   if ((ea.argt & EX_RANGE) && ea.line1 > ea.line2) {
@@ -2419,7 +2421,8 @@ static void cmdpreview_show(CommandLineState *s)
   cmdmod_T save_cmdmod = cmdmod;
 
   cmdpreview = true;
-  emsg_silent++;                 // Block error reporting as the command may be incomplete
+  emsg_silent++;                 // Block error reporting as the command may be incomplete,
+                                 // but still update v:errmsg
   msg_silent++;                  // Block messages, namely ones that prompt
   block_autocmds();              // Block events
   garray_T save_view;
@@ -2429,9 +2432,9 @@ static void cmdpreview_show(CommandLineState *s)
   curwin->w_p_cul = false;       // Disable 'cursorline' so it doesn't mess up the highlights
   curwin->w_p_cuc = false;       // Disable 'cursorcolumn' so it doesn't mess up the highlights
   p_hls = false;                 // Don't show search highlighting during live substitution
-  cmdmod.split = 0;              // Disable :leftabove/botright modifiers
-  cmdmod.tab = 0;                // Disable :tab modifier
-  cmdmod.noswapfile = true;      // Disable swap for preview buffer
+  cmdmod.cmod_split = 0;         // Disable :leftabove/botright modifiers
+  cmdmod.cmod_tab = 0;           // Disable :tab modifier
+  cmdmod.cmod_flags |= CMOD_NOSWAPFILE;  // Disable swap for preview buffer
 
   // Open preview buffer if inccommand=split.
   if (!icm_split) {
@@ -2459,7 +2462,8 @@ static void cmdpreview_show(CommandLineState *s)
   // If inccommand=split and preview callback returns 2, open preview window.
   if (icm_split && cmdpreview_type == 2
       && (cmdpreview_win = cmdpreview_open_win(cmdpreview_buf)) == NULL) {
-    abort();
+    // If there's not enough room to open the preview window, just preview without the window.
+    cmdpreview_type = 1;
   }
 
   // If preview callback is nonzero, update screen now.
@@ -2516,6 +2520,7 @@ static void cmdpreview_show(CommandLineState *s)
 
   // If preview callback returned 0, update screen to clear remnants of an earlier preview.
   if (cmdpreview_type == 0) {
+    cmdpreview = false;
     update_screen(SOME_VALID);
   }
 end:
@@ -2553,7 +2558,6 @@ static int command_line_changed(CommandLineState *s)
     }
   }
 
-  // 'incsearch' highlighting.
   if (s->firstc == ':'
       && current_sctx.sc_sid == 0    // only if interactive
       && *p_icm != NUL       // 'inccommand' is set
@@ -2677,6 +2681,12 @@ char *getcmdline_prompt(const char firstc, const char *const prompt, const int a
   }
 
   return ret;
+}
+
+// Return current cmdline prompt
+char_u *get_cmdprompt(void)
+{
+  return ccline.cmdprompt;
 }
 
 /*
@@ -3299,45 +3309,53 @@ draw_cmdline_no_arabicshape:
 
 static void ui_ext_cmdline_show(CmdlineInfo *line)
 {
+  Arena arena = ARENA_EMPTY;
+  arena_start(&arena, &ui_ext_fixblk);
   Array content = ARRAY_DICT_INIT;
   if (cmdline_star) {
+    content = arena_array(&arena, 1);
     size_t len = 0;
     for (char_u *p = ccline.cmdbuff; *p; MB_PTR_ADV(p)) {
       len++;
     }
-    char *buf = xmallocz(len);
+    char *buf = arena_alloc(&arena, len, false);
     memset(buf, '*', len);
-    Array item = ARRAY_DICT_INIT;
-    ADD(item, INTEGER_OBJ(0));
-    ADD(item, STRING_OBJ(((String) { .data = buf, .size = len })));
-    ADD(content, ARRAY_OBJ(item));
+    Array item = arena_array(&arena, 2);
+    ADD_C(item, INTEGER_OBJ(0));
+    ADD_C(item, STRING_OBJ(cbuf_as_string(buf, len)));
+    ADD_C(content, ARRAY_OBJ(item));
   } else if (kv_size(line->last_colors.colors)) {
+    content = arena_array(&arena, kv_size(line->last_colors.colors));
     for (size_t i = 0; i < kv_size(line->last_colors.colors); i++) {
       CmdlineColorChunk chunk = kv_A(line->last_colors.colors, i);
-      Array item = ARRAY_DICT_INIT;
-      ADD(item, INTEGER_OBJ(chunk.attr));
+      Array item = arena_array(&arena, 2);
+      ADD_C(item, INTEGER_OBJ(chunk.attr));
 
       assert(chunk.end >= chunk.start);
-      ADD(item, STRING_OBJ(cbuf_to_string((char *)line->cmdbuff + chunk.start,
-                                          (size_t)(chunk.end - chunk.start))));
-      ADD(content, ARRAY_OBJ(item));
+      ADD_C(item, STRING_OBJ(cbuf_as_string((char *)line->cmdbuff + chunk.start,
+                                            (size_t)(chunk.end - chunk.start))));
+      ADD_C(content, ARRAY_OBJ(item));
     }
   } else {
-    Array item = ARRAY_DICT_INIT;
-    ADD(item, INTEGER_OBJ(0));
-    ADD(item, STRING_OBJ(cstr_to_string((char *)(line->cmdbuff))));
-    ADD(content, ARRAY_OBJ(item));
+    Array item = arena_array(&arena, 2);
+    ADD_C(item, INTEGER_OBJ(0));
+    ADD_C(item, STRING_OBJ(cstr_as_string((char *)(line->cmdbuff))));
+    content = arena_array(&arena, 1);
+    ADD_C(content, ARRAY_OBJ(item));
   }
+  char charbuf[2] = { (char)line->cmdfirstc, 0 };
   ui_call_cmdline_show(content, line->cmdpos,
-                       cchar_to_string((char)line->cmdfirstc),
-                       cstr_to_string((char *)(line->cmdprompt)),
+                       cstr_as_string(charbuf),
+                       cstr_as_string((char *)(line->cmdprompt)),
                        line->cmdindent,
                        line->level);
   if (line->special_char) {
-    ui_call_cmdline_special_char(cchar_to_string(line->special_char),
+    charbuf[0] = line->special_char;
+    ui_call_cmdline_special_char(cstr_as_string(charbuf),
                                  line->special_shift,
                                  line->level);
   }
+  arena_mem_free(arena_finish(&arena), &ui_ext_fixblk);
 }
 
 void ui_ext_cmdline_block_append(size_t indent, const char *line)
@@ -3353,9 +3371,9 @@ void ui_ext_cmdline_block_append(size_t indent, const char *line)
   ADD(content, ARRAY_OBJ(item));
   ADD(cmdline_block, ARRAY_OBJ(content));
   if (cmdline_block.size > 1) {
-    ui_call_cmdline_block_append(copy_array(content));
+    ui_call_cmdline_block_append(content);
   } else {
-    ui_call_cmdline_block_show(copy_array(cmdline_block));
+    ui_call_cmdline_block_show(cmdline_block);
   }
 }
 
@@ -3375,7 +3393,7 @@ void cmdline_screen_cleared(void)
   }
 
   if (cmdline_block.size) {
-    ui_call_cmdline_block_show(copy_array(cmdline_block));
+    ui_call_cmdline_block_show(cmdline_block);
   }
 
   int prev_level = ccline.level - 1;
@@ -3432,7 +3450,8 @@ void putcmdline(char c, int shift)
     }
     msg_no_more = false;
   } else if (ccline.redraw_state != kCmdRedrawAll) {
-    ui_call_cmdline_special_char(cchar_to_string(c), shift,
+    char charbuf[2] = { c, 0 };
+    ui_call_cmdline_special_char(cstr_as_string(charbuf), shift,
                                  ccline.level);
   }
   cursorcmd();
@@ -3786,7 +3805,7 @@ void redrawcmd(void)
   msg_no_more = TRUE;
   draw_cmdline(0, ccline.cmdlen);
   msg_clr_eos();
-  msg_no_more = FALSE;
+  msg_no_more = false;
 
   ccline.cmdspos = cmd_screencol(ccline.cmdpos);
 
@@ -6063,7 +6082,7 @@ void add_to_history(int histype, char_u *new_entry, int in_map, int sep)
   }
   assert(histype != HIST_DEFAULT);
 
-  if (cmdmod.keeppatterns && histype == HIST_SEARCH) {
+  if ((cmdmod.cmod_flags & CMOD_KEEPPATTERNS) && histype == HIST_SEARCH) {
     return;
   }
 
@@ -6593,8 +6612,8 @@ static int open_cmdwin(void)
   pum_undisplay(true);
 
   // don't use a new tab page
-  cmdmod.tab = 0;
-  cmdmod.noswapfile = 1;
+  cmdmod.cmod_tab = 0;
+  cmdmod.cmod_flags |= CMOD_NOSWAPFILE;
 
   // Create a window for the command-line buffer.
   if (win_split((int)p_cwh, WSP_BOT) == FAIL) {

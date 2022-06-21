@@ -708,7 +708,7 @@ local function on_code_action_results(results, ctx, options)
       end
       local found = false
       for _, o in ipairs(options.context.only) do
-        -- action kinds are hierachical with . as a separator: when requesting only
+        -- action kinds are hierarchical with . as a separator: when requesting only
         -- 'quickfix' this filter allows both 'quickfix' and 'quickfix.foo', for example
         if a.kind:find('^' .. o .. '$') or a.kind:find('^' .. o .. '%.') then
           found = true
@@ -752,7 +752,14 @@ local function on_code_action_results(results, ctx, options)
         enriched_ctx.client_id = client.id
         fn(command, enriched_ctx)
       else
-        M.execute_command(command)
+        -- Not using command directly to exclude extra properties,
+        -- see https://github.com/python-lsp/python-lsp-server/issues/146
+        local params = {
+          command = command.command,
+          arguments = command.arguments,
+          workDoneToken = command.workDoneToken,
+        }
+        client.request('workspace/executeCommand', params, nil, ctx.bufnr)
       end
     end
   end

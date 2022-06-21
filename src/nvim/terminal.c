@@ -233,6 +233,8 @@ Terminal *terminal_open(buf_T *buf, TerminalOptions opts)
   RESET_BINDING(curwin);
   // Reset cursor in current window.
   curwin->w_cursor = (pos_T){ .lnum = 1, .col = 0, .coladd = 0 };
+  // Initialize to check if the scrollback buffer has been allocated inside a TermOpen autocmd
+  rv->sb_buffer = NULL;
   // Apply TermOpen autocmds _before_ configuring the scrollback buffer.
   apply_autocmds(EVENT_TERMOPEN, NULL, NULL, false, buf);
   // Local 'scrollback' _after_ autocmds.
@@ -273,8 +275,12 @@ Terminal *terminal_open(buf_T *buf, TerminalOptions opts)
   return rv;
 }
 
-void terminal_close(Terminal *term, int status)
+/// Closes the Terminal buffer.
+///
+/// May call terminal_destroy, which sets caller storage to NULL.
+void terminal_close(Terminal **termpp, int status)
 {
+  Terminal *term = *termpp;
   if (term->destroy) {
     return;
   }
@@ -283,7 +289,7 @@ void terminal_close(Terminal *term, int status)
   if (entered_free_all_mem) {
     // If called from close_buffer() inside free_all_mem(), the main loop has
     // already been freed, so it is not safe to call the close callback here.
-    terminal_destroy(term);
+    terminal_destroy(termpp);
     return;
   }
 #endif
@@ -584,8 +590,11 @@ static int terminal_execute(VimState *state, int key)
   return 1;
 }
 
-void terminal_destroy(Terminal *term)
+/// Frees the given Terminal structure and sets the caller storage to NULL (in the spirit of
+/// XFREE_CLEAR).
+void terminal_destroy(Terminal **termpp)
 {
+  Terminal *term = *termpp;
   buf_T *buf = handle_get_buffer(term->buf_handle);
   if (buf) {
     term->buf_handle = 0;
@@ -606,6 +615,7 @@ void terminal_destroy(Terminal *term)
     xfree(term->sb_buffer);
     vterm_free(term->vt);
     xfree(term);
+    *termpp = NULL;  // coverity[dead-store]
   }
 }
 
@@ -1481,8 +1491,16 @@ static void refresh_size(Terminal *term, buf_T *buf)
   term->opts.resize_cb((uint16_t)width, (uint16_t)height, term->opts.data);
 }
 
-/// Adjusts scrollback storage after 'scrollback' option changed.
-static void on_scrollback_option_changed(Terminal *term, buf_T *buf)
+void on_scrollback_option_changed(Terminal *term)
+{
+  // Scrollback buffer may not exist yet, e.g. if 'scrollback' is set in a TermOpen autocmd.
+  if (term->sb_buffer != NULL) {
+    refresh_terminal(term);
+  }
+}
+
+/// Adjusts scrollback storage and the terminal buffer scrollback lines
+static void adjust_scrollback(Terminal *term, buf_T *buf)
 {
   if (buf->b_p_scbk < 1) {  // Local 'scrollback' was set to -1.
     buf->b_p_scbk = SB_MAX;
@@ -1501,7 +1519,7 @@ static void on_scrollback_option_changed(Terminal *term, buf_T *buf)
       term->sb_current--;
       xfree(term->sb_buffer[term->sb_current]);
     }
-    deleted_lines(1, (long)diff);
+    deleted_lines(1, (linenr_T)diff);
   }
 
   // Resize the scrollback storage.
@@ -1554,7 +1572,7 @@ static void refresh_scrollback(Terminal *term, buf_T *buf)
     deleted_lines(buf->b_ml.ml_line_count, 1);
   }
 
-  on_scrollback_option_changed(term, buf);
+  adjust_scrollback(term, buf);
 }
 
 // Refresh the screen (visible part of the buffer when the terminal is

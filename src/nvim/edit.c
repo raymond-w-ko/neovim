@@ -6956,7 +6956,7 @@ int cursor_up(long n, int upd_topline)
         lnum = 1;
       }
     } else {
-      lnum -= n;
+      lnum -= (linenr_T)n;
     }
     curwin->w_cursor.lnum = lnum;
   }
@@ -7007,7 +7007,7 @@ int cursor_down(long n, int upd_topline)
         lnum = curbuf->b_ml.ml_line_count;
       }
     } else {
-      lnum += n;
+      lnum += (linenr_T)n;
     }
     curwin->w_cursor.lnum = lnum;
   }
@@ -7956,7 +7956,7 @@ static bool ins_esc(long *count, int cmdchar, bool nomove)
   }
 
   // Remember the last Insert position in the '^ mark.
-  if (!cmdmod.keepjumps) {
+  if ((cmdmod.cmod_flags & CMOD_KEEPJUMPS) == 0) {
     RESET_FMARK(&curbuf->b_last_insert, curwin->w_cursor, curbuf->b_fnum);
   }
 

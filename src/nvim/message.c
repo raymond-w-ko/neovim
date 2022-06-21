@@ -18,6 +18,7 @@
 #include "nvim/eval.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
+#include "nvim/ex_getln.h"
 #include "nvim/fileio.h"
 #include "nvim/func_attr.h"
 #include "nvim/garray.h"
@@ -163,6 +164,7 @@ void msg_grid_validate(void)
 {
   grid_assign_handle(&msg_grid);
   bool should_alloc = msg_use_grid();
+  int max_rows = Rows - p_ch;
   if (should_alloc && (msg_grid.rows != Rows || msg_grid.cols != Columns
                        || !msg_grid.chars)) {
     // TODO(bfredl): eventually should be set to "invalid". I e all callers
@@ -174,7 +176,7 @@ void msg_grid_validate(void)
     msg_grid.dirty_col = xcalloc(Rows, sizeof(*msg_grid.dirty_col));
 
     // Tricky: allow resize while pager is active
-    int pos = msg_scrolled ? msg_grid_pos : Rows - p_ch;
+    int pos = msg_scrolled ? msg_grid_pos : max_rows;
     ui_comp_put_grid(&msg_grid, pos, 0, msg_grid.rows, msg_grid.cols,
                      false, true);
     ui_call_grid_resize(msg_grid.handle, msg_grid.cols, msg_grid.rows);
@@ -184,7 +186,7 @@ void msg_grid_validate(void)
     msg_grid.focusable = false;
     msg_grid_adj.target = &msg_grid;
     if (!msg_scrolled) {
-      msg_grid_set_pos(Rows - p_ch, false);
+      msg_grid_set_pos(max_rows, false);
     }
   } else if (!should_alloc && msg_grid.chars) {
     ui_comp_remove_grid(&msg_grid);
@@ -195,8 +197,8 @@ void msg_grid_validate(void)
     msg_grid_adj.row_offset = 0;
     msg_grid_adj.target = &default_grid;
     redraw_cmdline = true;
-  } else if (msg_grid.chars && !msg_scrolled && msg_grid_pos != Rows - p_ch) {
-    msg_grid_set_pos(Rows - p_ch, false);
+  } else if (msg_grid.chars && !msg_scrolled && msg_grid_pos != max_rows) {
+    msg_grid_set_pos(max_rows, false);
   }
 
   if (msg_grid.chars && cmdline_row < msg_grid_pos) {
@@ -262,6 +264,25 @@ void msg_multiline_attr(const char *s, int attr, bool check_int, bool *need_clea
   if (*s != NUL) {
     msg_outtrans_attr((char_u *)s, attr);
   }
+}
+
+void msg_multiattr(HlMessage hl_msg, const char *kind, bool history)
+{
+  no_wait_return++;
+  msg_start();
+  msg_clr_eos();
+  bool need_clear = false;
+  for (uint32_t i = 0; i < kv_size(hl_msg); i++) {
+    HlMessageChunk chunk = kv_A(hl_msg, i);
+    msg_multiline_attr((const char *)chunk.text.data, chunk.attr,
+                       true, &need_clear);
+  }
+  msg_ext_set_kind(kind);
+  if (history && kv_size(hl_msg)) {
+    add_msg_hist_multiattr(NULL, 0, 0, true, hl_msg);
+  }
+  no_wait_return--;
+  msg_end();
 }
 
 /// @param keep set keep_msg if it doesn't scroll
@@ -832,7 +853,7 @@ void msg_schedule_semsg(const char *const fmt, ...)
   va_end(ap);
 
   char *s = xstrdup((char *)IObuff);
-  multiqueue_put(main_loop.events, msg_semsg_event, 1, s);
+  loop_schedule_deferred(&main_loop, event_create(msg_semsg_event, 1, s));
 }
 
 /// Like msg(), but truncate to a single line if p_shm contains 't', or when
@@ -889,44 +910,34 @@ char_u *msg_may_trunc(bool force, char_u *s)
   return s;
 }
 
-void clear_hl_msg(HlMessage *hl_msg)
+void hl_msg_free(HlMessage hl_msg)
 {
-  for (size_t i = 0; i < kv_size(*hl_msg); i++) {
-    xfree(kv_A(*hl_msg, i).text.data);
+  for (size_t i = 0; i < kv_size(hl_msg); i++) {
+    xfree(kv_A(hl_msg, i).text.data);
   }
-  kv_destroy(*hl_msg);
-  *hl_msg = (HlMessage)KV_INITIAL_VALUE;
+  kv_destroy(hl_msg);
 }
 
 #define LINE_BUFFER_SIZE 4096
 
 void add_hl_msg_hist(HlMessage hl_msg)
 {
-  // TODO(notomo): support multi highlighted message history
-  size_t pos = 0;
-  char buf[LINE_BUFFER_SIZE];
-  for (uint32_t i = 0; i < kv_size(hl_msg); i++) {
-    HlMessageChunk chunk = kv_A(hl_msg, i);
-    for (uint32_t j = 0; j < chunk.text.size; j++) {
-      if (pos == LINE_BUFFER_SIZE - 1) {
-        buf[pos] = NUL;
-        add_msg_hist((const char *)buf, -1, MSG_HIST, true);
-        pos = 0;
-        continue;
-      }
-      buf[pos++] = chunk.text.data[j];
-    }
-  }
-  if (pos != 0) {
-    buf[pos] = NUL;
-    add_msg_hist((const char *)buf, -1, MSG_HIST, true);
+  if (kv_size(hl_msg)) {
+    add_msg_hist_multiattr(NULL, 0, 0, true, hl_msg);
   }
 }
 
 /// @param[in]  len  Length of s or -1.
 static void add_msg_hist(const char *s, int len, int attr, bool multiline)
 {
+  add_msg_hist_multiattr(s, len, attr, multiline, (HlMessage)KV_INITIAL_VALUE);
+}
+
+static void add_msg_hist_multiattr(const char *s, int len, int attr, bool multiline,
+                                   HlMessage multiattr)
+{
   if (msg_hist_off || msg_silent != 0) {
+    hl_msg_free(multiattr);
     return;
   }
 
@@ -937,21 +948,26 @@ static void add_msg_hist(const char *s, int len, int attr, bool multiline)
 
   // allocate an entry and add the message at the end of the history
   struct msg_hist *p = xmalloc(sizeof(struct msg_hist));
-  if (len < 0) {
-    len = (int)STRLEN(s);
+  if (s) {
+    if (len < 0) {
+      len = (int)STRLEN(s);
+    }
+    // remove leading and trailing newlines
+    while (len > 0 && *s == '\n') {
+      s++;
+      len--;
+    }
+    while (len > 0 && s[len - 1] == '\n') {
+      len--;
+    }
+    p->msg = (char_u *)xmemdupz(s, (size_t)len);
+  } else {
+    p->msg = NULL;
   }
-  // remove leading and trailing newlines
-  while (len > 0 && *s == '\n') {
-    ++s;
-    --len;
-  }
-  while (len > 0 && s[len - 1] == '\n') {
-    len--;
-  }
-  p->msg = (char_u *)xmemdupz(s, (size_t)len);
   p->next = NULL;
   p->attr = attr;
   p->multiline = multiline;
+  p->multiattr = multiattr;
   p->kind = msg_ext_kind;
   if (last_msg_hist != NULL) {
     last_msg_hist->next = p;
@@ -980,6 +996,7 @@ int delete_first_msg(void)
     last_msg_hist = NULL;
   }
   xfree(p->msg);
+  hl_msg_free(p->multiattr);
   xfree(p);
   --msg_hist_len;
   return OK;
@@ -1028,25 +1045,38 @@ void ex_messages(void *const eap_p)
     }
     Array entries = ARRAY_DICT_INIT;
     for (; p != NULL; p = p->next) {
-      if (p->msg != NULL && p->msg[0] != NUL) {
+      if (kv_size(p->multiattr) || (p->msg && p->msg[0])) {
         Array entry = ARRAY_DICT_INIT;
         ADD(entry, STRING_OBJ(cstr_to_string(p->kind)));
-        Array content_entry = ARRAY_DICT_INIT;
-        ADD(content_entry, INTEGER_OBJ(p->attr));
-        ADD(content_entry, STRING_OBJ(cstr_to_string((char *)(p->msg))));
         Array content = ARRAY_DICT_INIT;
-        ADD(content, ARRAY_OBJ(content_entry));
+        if (kv_size(p->multiattr)) {
+          for (uint32_t i = 0; i < kv_size(p->multiattr); i++) {
+            HlMessageChunk chunk = kv_A(p->multiattr, i);
+            Array content_entry = ARRAY_DICT_INIT;
+            ADD(content_entry, INTEGER_OBJ(chunk.attr));
+            ADD(content_entry, STRING_OBJ(copy_string(chunk.text)));
+            ADD(content, ARRAY_OBJ(content_entry));
+          }
+        } else if (p->msg && p->msg[0]) {
+          Array content_entry = ARRAY_DICT_INIT;
+          ADD(content_entry, INTEGER_OBJ(p->attr));
+          ADD(content_entry, STRING_OBJ(cstr_to_string((char *)(p->msg))));
+          ADD(content, ARRAY_OBJ(content_entry));
+        }
         ADD(entry, ARRAY_OBJ(content));
         ADD(entries, ARRAY_OBJ(entry));
       }
     }
     ui_call_msg_history_show(entries);
+    api_free_array(entries);
     msg_ext_history_visible = true;
     wait_return(false);
   } else {
     msg_hist_off = true;
     for (; p != NULL && !got_int; p = p->next) {
-      if (p->msg != NULL) {
+      if (kv_size(p->multiattr)) {
+        msg_multiattr(p->multiattr, p->kind, false);
+      } else if (p->msg != NULL) {
         msg_attr_keep((char *)p->msg, p->attr, false, p->multiline);
       }
     }
@@ -1233,11 +1263,11 @@ void wait_return(int redraw)
     msg_ext_keep_after_cmdline = true;
   }
 
-  // If the window size changed set_shellsize() will redraw the screen.
+  // If the screen size changed screen_resize() will redraw the screen.
   // Otherwise the screen is only redrawn if 'redraw' is set and no ':'
   // typed.
   tmpState = State;
-  State = oldState;                 // restore State before set_shellsize
+  State = oldState;  // restore State before screen_resize()
   setmouse();
   msg_check();
   need_wait_return = false;
@@ -1359,7 +1389,9 @@ void msg_start(void)
     need_fileinfo = false;
   }
 
-  if (need_clr_eos) {
+  bool no_msg_area = !ui_has(kUIMessages) && p_ch < 1;
+
+  if (need_clr_eos || (no_msg_area && redrawing_cmdline)) {
     // Halfway an ":echo" command and getting an (error) message: clear
     // any text from the command.
     need_clr_eos = false;
@@ -1368,10 +1400,11 @@ void msg_start(void)
 
   if (!msg_scroll && full_screen) {     // overwrite last message
     msg_row = cmdline_row;
-    msg_col =
-      cmdmsg_rl ? Columns - 1 :
-      0;
-  } else if (msg_didout) {                // start message on next line
+    msg_col = cmdmsg_rl ? Columns - 1 : 0;
+    if (no_msg_area && get_cmdprompt() == NULL) {
+      msg_row -= 1;
+    }
+  } else if (msg_didout || no_msg_area) {  // start message on next line
     msg_putchar('\n');
     did_return = true;
     cmdline_row = msg_row;
@@ -1783,7 +1816,7 @@ void msg_prt_line(char_u *s, int list)
       }
     }
     // find end of leading whitespace
-    if (curwin->w_p_lcs_chars.lead) {
+    if (curwin->w_p_lcs_chars.lead || curwin->w_p_lcs_chars.leadmultispace != NULL) {
       lead = s;
       while (ascii_iswhite(lead[0])) {
         lead++;
@@ -1819,8 +1852,8 @@ void msg_prt_line(char_u *s, int list)
       } else if (curwin->w_p_lcs_chars.nbsp != NUL && list
                  && (utf_ptr2char((char *)s) == 160
                      || utf_ptr2char((char *)s) == 0x202f)) {
-        utf_char2bytes(curwin->w_p_lcs_chars.nbsp, buf);
-        buf[utfc_ptr2len(buf)] = NUL;
+        int len = utf_char2bytes(curwin->w_p_lcs_chars.nbsp, buf);
+        buf[len] = NUL;
       } else {
         memmove(buf, s, (size_t)l);
         buf[l] = NUL;
@@ -1873,13 +1906,21 @@ void msg_prt_line(char_u *s, int list)
         // the same in plain text.
         attr = HL_ATTR(HLF_0);
       } else if (c == ' ') {
-        if (lead != NULL && s <= lead) {
+        if (list && lead != NULL && s <= lead && in_multispace
+            && curwin->w_p_lcs_chars.leadmultispace != NULL) {
+          c = curwin->w_p_lcs_chars.leadmultispace[multispace_pos++];
+          if (curwin->w_p_lcs_chars.leadmultispace[multispace_pos] == NUL) {
+            multispace_pos = 0;
+          }
+          attr = HL_ATTR(HLF_0);
+        } else if (lead != NULL && s <= lead && curwin->w_p_lcs_chars.lead != NUL) {
           c = curwin->w_p_lcs_chars.lead;
           attr = HL_ATTR(HLF_0);
         } else if (trail != NULL && s > trail) {
           c = curwin->w_p_lcs_chars.trail;
           attr = HL_ATTR(HLF_0);
-        } else if (list && in_multispace && curwin->w_p_lcs_chars.multispace != NULL) {
+        } else if (list && in_multispace
+                   && curwin->w_p_lcs_chars.multispace != NULL) {
           c = curwin->w_p_lcs_chars.multispace[multispace_pos++];
           if (curwin->w_p_lcs_chars.multispace[multispace_pos] == NUL) {
             multispace_pos = 0;
@@ -2284,12 +2325,12 @@ static void msg_puts_display(const char_u *str, int maxlen, int attr, int recurs
 ///          "pattern".
 bool message_filtered(char_u *msg)
 {
-  if (cmdmod.filter_regmatch.regprog == NULL) {
+  if (cmdmod.cmod_filter_regmatch.regprog == NULL) {
     return false;
   }
 
-  bool match = vim_regexec(&cmdmod.filter_regmatch, msg, (colnr_T)0);
-  return cmdmod.filter_force ? match : !match;
+  bool match = vim_regexec(&cmdmod.cmod_filter_regmatch, msg, (colnr_T)0);
+  return cmdmod.cmod_filter_force ? match : !match;
 }
 
 /// including horizontal separator
@@ -3020,7 +3061,7 @@ void repeat_message(void)
 /// Skip this when ":silent" was used, no need to clear for redirection.
 void msg_clr_eos(void)
 {
-  if (msg_silent == 0) {
+  if (msg_silent == 0 && p_ch > 0) {
     msg_clr_eos_force();
   }
 }
@@ -3042,10 +3083,11 @@ void msg_clr_eos_force(void)
     msg_row = msg_grid_pos;
   }
 
-  grid_fill(&msg_grid_adj, msg_row, msg_row + 1, msg_startcol, msg_endcol, ' ',
-            ' ', HL_ATTR(HLF_MSG));
-  grid_fill(&msg_grid_adj, msg_row + 1, Rows, 0, Columns, ' ', ' ',
-            HL_ATTR(HLF_MSG));
+  grid_fill(&msg_grid_adj, msg_row, msg_row + 1, msg_startcol, msg_endcol,
+            ' ', ' ', HL_ATTR(HLF_MSG));
+  if (p_ch > 0) {
+    grid_fill(&msg_grid_adj, msg_row + 1, Rows, 0, Columns, ' ', ' ', HL_ATTR(HLF_MSG));
+  }
 
   redraw_cmdline = true;  // overwritten the command line
   if (msg_row < Rows - 1 || msg_col == (cmdmsg_rl ? Columns : 0)) {
@@ -3095,12 +3137,13 @@ void msg_ext_ui_flush(void)
 
   msg_ext_emit_chunk();
   if (msg_ext_chunks.size > 0) {
-    ui_call_msg_show(cstr_to_string(msg_ext_kind),
+    ui_call_msg_show(cstr_as_string((char *)msg_ext_kind),
                      msg_ext_chunks, msg_ext_overwrite);
     if (!msg_ext_overwrite) {
       msg_ext_visible++;
     }
     msg_ext_kind = NULL;
+    api_free_array(msg_ext_chunks);
     msg_ext_chunks = (Array)ARRAY_DICT_INIT;
     msg_ext_cur_len = 0;
     msg_ext_overwrite = false;
@@ -3114,6 +3157,7 @@ void msg_ext_flush_showmode(void)
   if (ui_has(kUIMessages)) {
     msg_ext_emit_chunk();
     ui_call_msg_showmode(msg_ext_chunks);
+    api_free_array(msg_ext_chunks);
     msg_ext_chunks = (Array)ARRAY_DICT_INIT;
     msg_ext_cur_len = 0;
   }

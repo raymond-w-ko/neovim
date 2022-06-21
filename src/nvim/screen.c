@@ -2453,6 +2453,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
   if (wp->w_p_list && !has_fold && !end_fill) {
     if (wp->w_p_lcs_chars.space
         || wp->w_p_lcs_chars.multispace != NULL
+        || wp->w_p_lcs_chars.leadmultispace != NULL
         || wp->w_p_lcs_chars.trail
         || wp->w_p_lcs_chars.lead
         || wp->w_p_lcs_chars.nbsp) {
@@ -2467,7 +2468,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
       trailcol += (colnr_T)(ptr - line);
     }
     // find end of leading whitespace
-    if (wp->w_p_lcs_chars.lead) {
+    if (wp->w_p_lcs_chars.lead || wp->w_p_lcs_chars.leadmultispace != NULL) {
       leadcol = 0;
       while (ascii_iswhite(ptr[leadcol])) {
         leadcol++;
@@ -3439,10 +3440,22 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
           }
         }
 
-        if ((trailcol != MAXCOL && ptr > line + trailcol && c == ' ')
-            || (leadcol != 0 && ptr < line + leadcol && c == ' ')) {
-          c = (ptr > line + trailcol) ? wp->w_p_lcs_chars.trail
-                                      : wp->w_p_lcs_chars.lead;
+        if (c == ' ' && ((trailcol != MAXCOL && ptr > line + trailcol)
+                         || (leadcol != 0 && ptr < line + leadcol))) {
+          if (leadcol != 0 && in_multispace && ptr < line + leadcol
+              && wp->w_p_lcs_chars.leadmultispace != NULL) {
+            c = wp->w_p_lcs_chars.leadmultispace[multispace_pos++];
+            if (wp->w_p_lcs_chars.leadmultispace[multispace_pos] == NUL) {
+              multispace_pos = 0;
+            }
+          } else if (ptr > line + trailcol && wp->w_p_lcs_chars.trail) {
+            c = wp->w_p_lcs_chars.trail;
+          } else if (ptr < line + leadcol && wp->w_p_lcs_chars.lead) {
+            c = wp->w_p_lcs_chars.lead;
+          } else if (leadcol != 0 && wp->w_p_lcs_chars.space) {
+            c = wp->w_p_lcs_chars.space;
+          }
+
           n_attr = 1;
           extra_attr = win_hl_attr(wp, HLF_0);
           saved_attr2 = char_attr;  // save current attr
@@ -5565,9 +5578,9 @@ void check_for_delay(bool check_msg_scroll)
 ///
 /// There may be some time between setting Rows and Columns and (re)allocating
 /// default_grid arrays.  This happens when starting up and when
-/// (manually) changing the shell size.  Always use default_grid.rows and
+/// (manually) changing the screen size.  Always use default_grid.rows and
 /// default_grid.Columns to access items in default_grid.chars[].  Use Rows
-/// and Columns for positioning text etc. where the final size of the shell is
+/// and Columns for positioning text etc. where the final size of the screen is
 /// needed.
 void screenalloc(void)
 {
@@ -5602,14 +5615,14 @@ retry:
    */
   ++RedrawingDisabled;
 
-  // win_new_shellsize will recompute floats position, but tell the
+  // win_new_screensize will recompute floats position, but tell the
   // compositor to not redraw them yet
   ui_comp_set_screen_valid(false);
   if (msg_grid.chars) {
     msg_grid_invalid = true;
   }
 
-  win_new_shellsize();      // fit the windows in the new sized shell
+  win_new_screensize();      // fit the windows in the new sized screen
 
   comp_col();           // recompute columns for shown command and ruler
 
@@ -6119,6 +6132,10 @@ void unshowmode(bool force)
 // Clear the mode message.
 void clearmode(void)
 {
+  if (p_ch <= 0 && !ui_has(kUIMessages)) {
+    return;
+  }
+
   const int save_msg_row = msg_row;
   const int save_msg_col = msg_col;
 
@@ -6324,35 +6341,49 @@ void draw_tabline(void)
 
 void ui_ext_tabline_update(void)
 {
-  Array tabs = ARRAY_DICT_INIT;
+  Arena arena = ARENA_EMPTY;
+  arena_start(&arena, &ui_ext_fixblk);
+
+  size_t n_tabs = 0;
   FOR_ALL_TABS(tp) {
-    Dictionary tab_info = ARRAY_DICT_INIT;
-    PUT(tab_info, "tab", TABPAGE_OBJ(tp->handle));
+    n_tabs++;
+  }
+
+  Array tabs = arena_array(&arena, n_tabs);
+  FOR_ALL_TABS(tp) {
+    Dictionary tab_info = arena_dict(&arena, 2);
+    PUT_C(tab_info, "tab", TABPAGE_OBJ(tp->handle));
 
     win_T *cwp = (tp == curtab) ? curwin : tp->tp_curwin;
     get_trans_bufname(cwp->w_buffer);
-    PUT(tab_info, "name", STRING_OBJ(cstr_to_string((char *)NameBuff)));
+    PUT_C(tab_info, "name", STRING_OBJ(arena_string(&arena, cstr_as_string((char *)NameBuff))));
 
-    ADD(tabs, DICTIONARY_OBJ(tab_info));
+    ADD_C(tabs, DICTIONARY_OBJ(tab_info));
   }
 
-  Array buffers = ARRAY_DICT_INIT;
+  size_t n_buffers = 0;
+  FOR_ALL_BUFFERS(buf) {
+    n_buffers += buf->b_p_bl ? 1 : 0;
+  }
+
+  Array buffers = arena_array(&arena, n_buffers);
   FOR_ALL_BUFFERS(buf) {
     // Do not include unlisted buffers
     if (!buf->b_p_bl) {
       continue;
     }
 
-    Dictionary buffer_info = ARRAY_DICT_INIT;
-    PUT(buffer_info, "buffer", BUFFER_OBJ(buf->handle));
+    Dictionary buffer_info = arena_dict(&arena, 2);
+    PUT_C(buffer_info, "buffer", BUFFER_OBJ(buf->handle));
 
     get_trans_bufname(buf);
-    PUT(buffer_info, "name", STRING_OBJ(cstr_to_string((char *)NameBuff)));
+    PUT_C(buffer_info, "name", STRING_OBJ(arena_string(&arena, cstr_as_string((char *)NameBuff))));
 
-    ADD(buffers, DICTIONARY_OBJ(buffer_info));
+    ADD_C(buffers, DICTIONARY_OBJ(buffer_info));
   }
 
   ui_call_tabline_update(curtab->handle, tabs, curbuf->handle, buffers);
+  arena_mem_free(arena_finish(&arena), &ui_ext_fixblk);
 }
 
 /*
@@ -6487,7 +6518,6 @@ static void win_redr_ruler(win_T *wp, bool always)
 
   if (*p_ruf) {
     int save_called_emsg = called_emsg;
-
     called_emsg = false;
     win_redr_custom(wp, false, true);
     if (called_emsg) {
@@ -6545,6 +6575,10 @@ static void win_redr_ruler(win_T *wp, bool always)
       off = 0;
     }
 
+    if (!part_of_status && p_ch < 1 && !ui_has(kUIMessages)) {
+      return;
+    }
+
     // In list mode virtcol needs to be recomputed
     colnr_T virtcol = wp->w_virtcol;
     if (wp->w_p_list && wp->w_p_lcs_chars.tab1 == NUL) {
@@ -6598,11 +6632,11 @@ static void win_redr_ruler(win_T *wp, bool always)
     }
 
     if (ui_has(kUIMessages) && !part_of_status) {
-      Array content = ARRAY_DICT_INIT;
-      Array chunk = ARRAY_DICT_INIT;
-      ADD(chunk, INTEGER_OBJ(attr));
-      ADD(chunk, STRING_OBJ(cstr_to_string((char *)buffer)));
-      ADD(content, ARRAY_OBJ(chunk));
+      MAXSIZE_TEMP_ARRAY(content, 1);
+      MAXSIZE_TEMP_ARRAY(chunk, 2);
+      ADD_C(chunk, INTEGER_OBJ(attr));
+      ADD_C(chunk, STRING_OBJ(cstr_as_string((char *)buffer)));
+      ADD_C(content, ARRAY_OBJ(chunk));
       ui_call_msg_ruler(content);
       did_show_ext_ruler = true;
     } else {
@@ -6724,7 +6758,7 @@ static void margin_columns_win(win_T *wp, int *left_col, int *right_col)
   prev_col_off = cur_col_off;
 }
 
-/// Set dimensions of the Nvim application "shell".
+/// Set dimensions of the Nvim application "screen".
 void screen_resize(int width, int height)
 {
   // Avoid recursiveness, can happen when setting the window size causes
@@ -6755,9 +6789,9 @@ void screen_resize(int width, int height)
 
   Rows = height;
   Columns = width;
-  check_shellsize();
+  check_screensize();
   int max_p_ch = Rows - min_rows() + 1;
-  if (!ui_has(kUIMessages) && p_ch > max_p_ch) {
+  if (!ui_has(kUIMessages) && p_ch > 0 && p_ch > max_p_ch) {
     p_ch = max_p_ch ? max_p_ch : 1;
   }
   height = Rows;
@@ -6832,48 +6866,22 @@ void screen_resize(int width, int height)
   resizing_screen = false;
 }
 
-/// Check if the new Nvim application "shell" dimensions are valid.
+/// Check if the new Nvim application "screen" dimensions are valid.
 /// Correct it if it's too small or way too big.
-void check_shellsize(void)
+void check_screensize(void)
 {
+  // Limit Rows and Columns to avoid an overflow in Rows * Columns.
   if (Rows < min_rows()) {
     // need room for one window and command line
     Rows = min_rows();
+  } else if (Rows > 1000) {
+    Rows = 1000;
   }
-  limit_screen_size();
-}
 
-// Limit Rows and Columns to avoid an overflow in Rows * Columns.
-void limit_screen_size(void)
-{
   if (Columns < MIN_COLUMNS) {
     Columns = MIN_COLUMNS;
   } else if (Columns > 10000) {
     Columns = 10000;
-  }
-
-  if (Rows > 1000) {
-    Rows = 1000;
-  }
-}
-
-void win_new_shellsize(void)
-{
-  static long old_Rows = 0;
-  static long old_Columns = 0;
-
-  if (old_Rows != Rows) {
-    // If 'window' uses the whole screen, keep it using that.
-    // Don't change it when set with "-w size" on the command line.
-    if (p_window == old_Rows - 1 || (old_Rows == 0 && p_window == 0)) {
-      p_window = Rows - 1;
-    }
-    old_Rows = Rows;
-    shell_new_rows();  // update window sizes
-  }
-  if (old_Columns != Columns) {
-    old_Columns = Columns;
-    shell_new_columns();  // update window sizes
   }
 }
 

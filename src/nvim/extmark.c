@@ -68,6 +68,7 @@ void extmark_set(buf_T *buf, uint32_t ns_id, uint32_t *idp, int row, colnr_T col
   if (decor) {
     if (kv_size(decor->virt_text)
         || kv_size(decor->virt_lines)
+        || decor->conceal
         || decor_has_sign(decor)
         || decor->ui_watched) {
       decor_full = true;
@@ -499,8 +500,8 @@ void extmark_apply_undo(ExtmarkUndoObject undo_info, bool undo)
 }
 
 /// Adjust extmark row for inserted/deleted rows (columns stay fixed).
-void extmark_adjust(buf_T *buf, linenr_T line1, linenr_T line2, long amount, long amount_after,
-                    ExtmarkOp undo)
+void extmark_adjust(buf_T *buf, linenr_T line1, linenr_T line2, linenr_T amount,
+                    linenr_T amount_after, ExtmarkOp undo)
 {
   if (curbuf_splice_pending) {
     return;

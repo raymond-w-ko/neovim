@@ -1320,6 +1320,9 @@ A jump table for the options with a short description can be found at |Q_op|.
 	The value of this option is stored with the tab page, so that each tab
 	page can have a different value.
 
+	When 'cmdheight' is zero, it disables echo area and all outputs need
+	|hit-enter| prompt.
+
 						*'cmdwinheight'* *'cwh'*
 'cmdwinheight' 'cwh'	number	(default 7)
 			global
@@ -3782,14 +3785,23 @@ A jump table for the options with a short description can be found at |Q_op|.
 			"space" setting is used.  For example,
 			`:set listchars=multispace:---+` shows ten consecutive
 			spaces as:
-				---+---+--
+				---+---+-- ~
 							*lcs-lead*
 	  lead:c	Character to show for leading spaces.  When omitted,
 			leading spaces are blank.  Overrides the "space" and
 			"multispace" settings for leading spaces.  You can
 			combine it with "tab:", for example: >
 				:set listchars+=tab:>-,lead:.
-<							*lcs-trail*
+<							*lcs-leadmultispace*
+	  leadmultispace:c...
+			Like multispace value, but only for leading whitespace
+			Overrides |lcs-lead| for leading multiple spaces.
+			`:set listchars=leadmultispace:---+` shows ten consecutive
+			leading spaces as:
+				---+---+--XXX ~
+			Where "XXX" denotes the first non-blank characters in
+			the line.
+							*lcs-trail*
 	  trail:c	Character to show for trailing spaces.  When omitted,
 			trailing spaces are blank.  Overrides the "space" and
 			"multispace" settings for trailing spaces.
@@ -4808,9 +4820,11 @@ A jump table for the options with a short description can be found at |Q_op|.
 		45%	relative position in the file
 	If 'rulerformat' is set, it will determine the contents of the ruler.
 	Each window has its own ruler.  If a window has a status line, the
-	ruler is shown there.  Otherwise it is shown in the last line of the
-	screen.  If the statusline is given by 'statusline' (i.e. not empty),
-	this option takes precedence over 'ruler' and 'rulerformat'
+	ruler is shown there.  If a window doesn't have a status line and
+	'cmdheight' is 0, the ruler is not shown.  Otherwise it is shown in
+	the last line of the screen.  If the statusline is given by
+	'statusline' (i.e. not empty), this option takes precedence over
+	'ruler' and 'rulerformat'.
 	If the number of characters displayed is different from the number of
 	bytes in the text (e.g., for a TAB or a multibyte character), both
 	the text column (byte number) and the screen column are shown,
@@ -5516,6 +5530,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 			global
 	Show (partial) command in the last line of the screen.  Set this
 	option off if your terminal is slow.
+	The option is disabled if 'cmdheight' is 0.
 	In Visual mode the size of the selected area is shown:
 	- When selecting characters within a line, the number of characters.
 	  If the number of bytes is different it is also displayed: "2-6"
@@ -5562,6 +5577,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 			global
 	If in Insert, Replace or Visual mode put a message on the last line.
 	The |hl-ModeMsg| highlight group determines the highlighting.
+	The option is disabled if 'cmdheight' is 0.
 
 						*'showtabline'* *'stal'*
 'showtabline' 'stal'	number	(default 1)
@@ -6063,10 +6079,9 @@ A jump table for the options with a short description can be found at |Q_op|.
 
 	If the statusline is not updated when you want it (e.g., after setting
 	a variable that's used in an expression), you can force an update by
-	setting an option without changing its value.  Example: >
-		:let &ro = &ro
+	using `:redrawstatus`.
 
-<	A result of all digits is regarded a number for display purposes.
+	A result of all digits is regarded a number for display purposes.
 	Otherwise the result is taken as flag text and applied to the rules
 	described above.
 
