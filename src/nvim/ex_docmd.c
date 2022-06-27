@@ -44,6 +44,7 @@
 #include "nvim/keycodes.h"
 #include "nvim/lua/executor.h"
 #include "nvim/main.h"
+#include "nvim/mapping.h"
 #include "nvim/mark.h"
 #include "nvim/match.h"
 #include "nvim/mbyte.h"
@@ -81,8 +82,13 @@
 #include "nvim/vim.h"
 #include "nvim/window.h"
 
-static char *e_no_such_user_defined_command_str = N_("E184: No such user-defined command: %s");
-static char *e_no_such_user_defined_command_in_current_buffer_str
+static char e_no_such_user_defined_command_str[]
+  = N_("E184: No such user-defined command: %s");
+static char e_ambiguous_use_of_user_defined_command[]
+  = N_("E464: Ambiguous use of user-defined command");
+static char e_not_an_editor_command[]
+  = N_("E492: Not an editor command");
+static char e_no_such_user_defined_command_in_current_buffer_str[]
   = N_("E1237: No such user-defined command in current buffer: %s");
 
 static int quitmore = 0;
@@ -1438,6 +1444,10 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, char **er
     eap->cmd = skipwhite(eap->cmd + 1);
   }
   p = find_ex_command(eap, NULL);
+  if (p == NULL) {
+    *errormsg = _(e_ambiguous_use_of_user_defined_command);
+    return false;
+  }
 
   // Set command address type and parse command range
   set_cmd_addr_type(eap, (char_u *)p);
@@ -1454,7 +1464,7 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, char **er
   }
   // Fail if command is invalid
   if (eap->cmdidx == CMD_SIZE) {
-    STRCPY(IObuff, _("E492: Not an editor command"));
+    STRCPY(IObuff, _(e_not_an_editor_command));
     // If the modifier was parsed OK the error must be in the following command
     char *cmdname = after_modifier ? after_modifier : cmdline;
     append_command(cmdname);
@@ -1885,14 +1895,14 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
 
   if (p == NULL) {
     if (!ea.skip) {
-      errormsg = _("E464: Ambiguous use of user-defined command");
+      errormsg = _(e_ambiguous_use_of_user_defined_command);
     }
     goto doend;
   }
   // Check for wrong commands.
   if (ea.cmdidx == CMD_SIZE) {
     if (!ea.skip) {
-      STRCPY(IObuff, _("E492: Not an editor command"));
+      STRCPY(IObuff, _(e_not_an_editor_command));
       // If the modifier was parsed OK the error must be in the following
       // command
       char *cmdname = after_modifier ? after_modifier : *cmdlinep;
@@ -2826,10 +2836,13 @@ int parse_cmd_address(exarg_T *eap, char **errormsg, bool silent)
         curwin->w_cursor.lnum = eap->line2;
 
         // Don't leave the cursor on an illegal line or column, but do
-        // accept zero as address, so 0;/PATTERN/ works correctly.
+        // accept zero as address, so 0;/PATTERN/ works correctly
+        // (where zero usually means to use the first line).
         // Check the cursor position before returning.
         if (eap->line2 > 0) {
           check_cursor();
+        } else {
+          check_cursor_col();
         }
         need_check_cursor = true;
       }
@@ -2888,11 +2901,13 @@ static void append_command(char *cmd)
 
   STRCAT(IObuff, ": ");
   d = (char *)IObuff + STRLEN(IObuff);
-  while (*s != NUL && (char_u *)d - IObuff < IOSIZE - 7) {
+  while (*s != NUL && (char_u *)d - IObuff + 5 < IOSIZE) {
     if ((char_u)s[0] == 0xc2 && (char_u)s[1] == 0xa0) {
       s += 2;
       STRCPY(d, "<a0>");
       d += 4;
+    } else if ((char_u *)d - IObuff + utfc_ptr2len(s) + 1 >= IOSIZE) {
+      break;
     } else {
       mb_copy_char((const char_u **)&s, (char_u **)&d);
     }
@@ -5251,45 +5266,6 @@ static int get_tabpage_arg(exarg_T *eap)
 
 theend:
   return tab_number;
-}
-
-/// ":abbreviate" and friends.
-static void ex_abbreviate(exarg_T *eap)
-{
-  do_exmap(eap, TRUE);          // almost the same as mapping
-}
-
-/// ":map" and friends.
-static void ex_map(exarg_T *eap)
-{
-  /*
-   * If we are sourcing .exrc or .vimrc in current directory we
-   * print the mappings for security reasons.
-   */
-  if (secure) {
-    secure = 2;
-    msg_outtrans((char_u *)eap->cmd);
-    msg_putchar('\n');
-  }
-  do_exmap(eap, FALSE);
-}
-
-/// ":unmap" and friends.
-static void ex_unmap(exarg_T *eap)
-{
-  do_exmap(eap, FALSE);
-}
-
-/// ":mapclear" and friends.
-static void ex_mapclear(exarg_T *eap)
-{
-  map_clear_mode((char_u *)eap->cmd, (char_u *)eap->arg, eap->forceit, false);
-}
-
-/// ":abclear" and friends.
-static void ex_abclear(exarg_T *eap)
-{
-  map_clear_mode((char_u *)eap->cmd, (char_u *)eap->arg, true, true);
 }
 
 static void ex_autocmd(exarg_T *eap)
@@ -8375,23 +8351,6 @@ void do_sleep(long msec)
   // input buffer, otherwise a following call to input() fails.
   if (got_int) {
     (void)vpeekc();
-  }
-}
-
-static void do_exmap(exarg_T *eap, int isabbrev)
-{
-  int mode;
-  char *cmdp = eap->cmd;
-  mode = get_map_mode(&cmdp, eap->forceit || isabbrev);
-
-  switch (do_map((*cmdp == 'n') ? 2 : (*cmdp == 'u'),
-                 (char_u *)eap->arg, mode, isabbrev)) {
-  case 1:
-    emsg(_(e_invarg));
-    break;
-  case 2:
-    emsg(isabbrev ? _(e_noabbr) : _(e_nomap));
-    break;
   }
 }
 

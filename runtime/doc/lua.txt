@@ -2064,14 +2064,55 @@ add({filetypes})                                          *vim.filetype.add()*
                     {filetypes}  (table) A table containing new filetype maps
                                  (see example).
 
-match({name}, {bufnr})                                  *vim.filetype.match()*
-                Find the filetype for the given filename and buffer.
+match({arg})                                            *vim.filetype.match()*
+                Perform filetype detection.
+
+                The filetype can be detected using one of three methods:
+                1. Using an existing buffer
+                2. Using only a file name
+                3. Using only file contents
+
+                Of these, option 1 provides the most accurate result as it
+                uses both the buffer's filename and (optionally) the buffer
+                contents. Options 2 and 3 can be used without an existing
+                buffer, but may not always provide a match in cases where the
+                filename (or contents) cannot unambiguously determine the
+                filetype.
+
+                Each of the three options is specified using a key to the
+                single argument of this function. Example:
+>
+
+    -- Using a buffer number
+    vim.filetype.match({ buf = 42 })
+
+    -- Override the filename of the given buffer
+    vim.filetype.match({ buf = 42, filename = 'foo.c' })
+
+    -- Using a filename without a buffer
+    vim.filetype.match({ filename = 'main.lua' })
+
+    -- Using file contents
+    vim.filetype.match({ contents = {'#!/usr/bin/env bash'} })
+<
 
                 Parameters: ~
-                    {name}   (string) File name (can be an absolute or
-                             relative path)
-                    {bufnr}  (number|nil) The buffer to set the filetype for.
-                             Defaults to the current buffer.
+                    {arg}  (table) Table specifying which matching strategy to
+                           use. Accepted keys are:
+                           • buf (number): Buffer number to use for matching.
+                             Mutually exclusive with {contents}
+                           • filename (string): Filename to use for matching.
+                             When {buf} is given, defaults to the filename of
+                             the given buffer number. The file need not
+                             actually exist in the filesystem. When used
+                             without {buf} only the name of the file is used
+                             for filetype matching. This may result in failure
+                             to detect the filetype in cases where the
+                             filename alone is not enough to disambiguate the
+                             filetype.
+                           • contents (table): An array of lines representing
+                             file contents to use for matching. Can be used
+                             with {filename}. Mutually exclusive with {buf}.
 
                 Return: ~
                     (string|nil) If a match was found, the matched filetype.
