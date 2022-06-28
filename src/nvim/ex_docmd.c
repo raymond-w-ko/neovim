@@ -1212,7 +1212,7 @@ static char *skip_colon_white(const char *p, bool skipleadingwhite)
 /// Set the addr type for command
 ///
 /// @param p pointer to character after command name in cmdline
-void set_cmd_addr_type(exarg_T *eap, char_u *p)
+void set_cmd_addr_type(exarg_T *eap, char *p)
 {
   // ea.addr_type for user commands is set by find_ucmd
   if (IS_USER_CMDIDX(eap->cmdidx)) {
@@ -1225,7 +1225,7 @@ void set_cmd_addr_type(exarg_T *eap, char_u *p)
   }
   // :wincmd range depends on the argument
   if (eap->cmdidx == CMD_wincmd && p != NULL) {
-    get_wincmd_addr_type(skipwhite((char *)p), eap);
+    get_wincmd_addr_type(skipwhite(p), eap);
   }
   // :.cc in quickfix window uses line number
   if ((eap->cmdidx == CMD_cc || eap->cmdidx == CMD_ll) && bt_quickfix(curbuf)) {
@@ -1405,6 +1405,8 @@ bool is_cmd_ni(cmdidx_T cmdidx)
 }
 
 /// Parse command line and return information about the first command.
+/// If parsing is done successfully, need to free cmod_filter_regmatch.regprog after calling,
+/// usually done using undo_cmdmod() or execute_cmd().
 ///
 /// @param cmdline Command line string
 /// @param[out] eap Ex command arguments
@@ -1432,6 +1434,7 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, char **er
 
   // Parse command modifiers
   if (parse_command_modifiers(eap, errormsg, &cmdinfo->cmdmod, false) == FAIL) {
+    vim_regfree(cmdinfo->cmdmod.cmod_filter_regmatch.regprog);
     return false;
   }
   after_modifier = eap->cmd;
@@ -1450,7 +1453,7 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, char **er
   }
 
   // Set command address type and parse command range
-  set_cmd_addr_type(eap, (char_u *)p);
+  set_cmd_addr_type(eap, p);
   eap->cmd = cmd;
   if (parse_cmd_address(eap, errormsg, false) == FAIL) {
     return false;
@@ -1821,7 +1824,7 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   // The ea.cmd pointer is updated to point to the first character following the
   // range spec. If an initial address is found, but no second, the upper bound
   // is equal to the lower.
-  set_cmd_addr_type(&ea, (char_u *)p);
+  set_cmd_addr_type(&ea, p);
 
   ea.cmd = cmd;
   if (parse_cmd_address(&ea, &errormsg, false) == FAIL) {
@@ -2664,8 +2667,8 @@ static void apply_cmdmod(cmdmod_T *cmod)
   if ((cmod->cmod_flags & CMOD_NOAUTOCMD) && cmod->cmod_save_ei == NULL) {
     // Set 'eventignore' to "all".
     // First save the existing option value for restoring it later.
-    cmod->cmod_save_ei = vim_strsave(p_ei);
-    set_string_option_direct("ei", -1, (char_u *)"all", OPT_FREE, SID_NONE);
+    cmod->cmod_save_ei = (char *)vim_strsave(p_ei);
+    set_string_option_direct("ei", -1, "all", OPT_FREE, SID_NONE);
   }
 }
 
@@ -2685,7 +2688,7 @@ static void undo_cmdmod(cmdmod_T *cmod)
 
   if (cmod->cmod_save_ei != NULL) {
     // Restore 'eventignore' to the value before ":noautocmd".
-    set_string_option_direct("ei", -1, (char_u *)cmod->cmod_save_ei, OPT_FREE, SID_NONE);
+    set_string_option_direct("ei", -1, cmod->cmod_save_ei, OPT_FREE, SID_NONE);
     free_string_option((char_u *)cmod->cmod_save_ei);
     cmod->cmod_save_ei = NULL;
   }
@@ -5801,7 +5804,7 @@ static void uc_list(char *name, size_t name_len)
       } while (len < 25 - over);
 
       IObuff[len] = '\0';
-      msg_outtrans(IObuff);
+      msg_outtrans((char *)IObuff);
 
       msg_outtrans_special(cmd->uc_rep, false,
                            name_len == 0 ? Columns - 47 : 0);
@@ -7571,7 +7574,7 @@ static void ex_recover(exarg_T *eap)
                      | CCGD_EXCMD)
 
       && (*eap->arg == NUL
-          || setfname(curbuf, (char_u *)eap->arg, NULL, true) == OK)) {
+          || setfname(curbuf, eap->arg, NULL, true) == OK)) {
     ml_recover(true);
   }
   recoverymode = false;
@@ -7759,9 +7762,9 @@ static void ex_tabs(exarg_T *eap)
       if (buf_spname(wp->w_buffer) != NULL) {
         STRLCPY(IObuff, buf_spname(wp->w_buffer), IOSIZE);
       } else {
-        home_replace(wp->w_buffer, (char_u *)wp->w_buffer->b_fname, IObuff, IOSIZE, true);
+        home_replace(wp->w_buffer, wp->w_buffer->b_fname, (char *)IObuff, IOSIZE, true);
       }
-      msg_outtrans(IObuff);
+      msg_outtrans((char *)IObuff);
       ui_flush();                  // output one line at a time
       os_breakcheck();
     }
@@ -9643,7 +9646,7 @@ static char *arg_all(void)
   for (;;) {
     len = 0;
     for (idx = 0; idx < ARGCOUNT; idx++) {
-      p = (char *)alist_name(&ARGLIST[idx]);
+      p = alist_name(&ARGLIST[idx]);
       if (p == NULL) {
         continue;
       }
@@ -10038,44 +10041,6 @@ static void ex_terminal(exarg_T *eap)
   }
 
   do_cmdline_cmd(ex_cmd);
-}
-
-/// Checks if `cmd` is "previewable" (i.e. supported by 'inccommand').
-///
-/// @param[in] cmd Commandline to check. May start with a range or modifier.
-///
-/// @return true if `cmd` is previewable
-bool cmd_can_preview(char *cmd)
-{
-  if (cmd == NULL) {
-    return false;
-  }
-
-  // Ignore additional colons at the start...
-  cmd = skip_colon_white(cmd, true);
-
-  // Ignore any leading modifiers (:keeppatterns, :verbose, etc.)
-  for (int len = modifier_len(cmd); len != 0; len = modifier_len(cmd)) {
-    cmd += len;
-    cmd = skip_colon_white(cmd, true);
-  }
-
-  exarg_T ea;
-  memset(&ea, 0, sizeof(ea));
-  // parse the command line
-  ea.cmd = skip_range(cmd, NULL);
-  if (*ea.cmd == '*') {
-    ea.cmd = skipwhite(ea.cmd + 1);
-  }
-
-  if (find_ex_command(&ea, NULL) == NULL || ea.cmdidx == CMD_SIZE) {
-    return false;
-  } else if (!IS_USER_CMDIDX(ea.cmdidx)) {
-    // find_ex_command sets the flags for user commands automatically
-    ea.argt = cmdnames[(int)ea.cmdidx].cmd_argt;
-  }
-
-  return (ea.argt & EX_PREVIEW);
 }
 
 /// Gets a map of maps describing user-commands defined for buffer `buf` or

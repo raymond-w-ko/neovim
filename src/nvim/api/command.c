@@ -13,6 +13,7 @@
 #include "nvim/ex_docmd.h"
 #include "nvim/lua/executor.h"
 #include "nvim/ops.h"
+#include "nvim/regexp.h"
 #include "nvim/window.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -94,6 +95,7 @@ Dictionary nvim_parse_cmd(String str, Dictionary opts, Error *err)
     }
     goto end;
   }
+  vim_regfree(cmdinfo.cmdmod.cmod_filter_regmatch.regprog);
 
   // Parse arguments
   Array args = ARRAY_DICT_INIT;
@@ -411,7 +413,7 @@ String nvim_cmd(uint64_t channel_id, Dict(cmd) *cmd, Dict(cmd_opts) *opts, Error
 
   // Simply pass the first argument (if it exists) as the arg pointer to `set_cmd_addr_type()`
   // since it only ever checks the first argument.
-  set_cmd_addr_type(&ea, argc > 0 ? (char_u *)args[0] : NULL);
+  set_cmd_addr_type(&ea, argc > 0 ? args[0] : NULL);
 
   if (HAS_KEY(cmd->range)) {
     if (!(ea.argt & EX_RANGE)) {
