@@ -2404,7 +2404,7 @@ static bool cmdpreview_may_show(CommandLineState *s)
 
   // Check if command is previewable, if not, don't attempt to show preview
   if (!(ea.argt & EX_PREVIEW)) {
-    vim_regfree(cmdinfo.cmdmod.cmod_filter_regmatch.regprog);
+    undo_cmdmod(&cmdinfo.cmdmod);
     goto end;
   }
 
@@ -6645,8 +6645,8 @@ static int open_cmdwin(void)
   const int histtype = hist_char2type(cmdwin_type);
   if (histtype == HIST_CMD || histtype == HIST_DEBUG) {
     if (p_wc == TAB) {
-      add_map((char_u *)"<buffer> <Tab> <C-X><C-V>", MODE_INSERT, false);
-      add_map((char_u *)"<buffer> <Tab> a<C-X><C-V>", MODE_NORMAL, false);
+      add_map("<Tab>", "<C-X><C-V>", MODE_INSERT, true);
+      add_map("<Tab>", "a<C-X><C-V>", MODE_NORMAL, true);
     }
     set_option_value("ft", 0L, "vim", OPT_LOCAL);
   }
