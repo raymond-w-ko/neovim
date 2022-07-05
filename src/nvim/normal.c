@@ -1493,12 +1493,12 @@ static void call_click_def_func(StlClickDefinition *click_defs, int col, int whi
 /// Do the appropriate action for the current mouse click in the current mode.
 /// Not used for Command-line mode.
 ///
-/// Normal Mode:
+/// Normal and Visual Mode:
 /// event         modi-  position      visual       change   action
 ///               fier   cursor                     window
 /// left press     -     yes         end             yes
 /// left press     C     yes         end             yes     "^]" (2)
-/// left press     S     yes         end             yes     "*" (2)
+/// left press     S     yes     end (popup: extend) yes     "*" (2)
 /// left drag      -     yes     start if moved      no
 /// left relse     -     yes     start if moved      no
 /// middle press   -     yes      if not active      no      put register
@@ -1787,9 +1787,52 @@ bool do_mouse(oparg_T *oap, int c, int dir, long count, bool fixindent)
   if (mouse_model_popup()) {
     if (which_button == MOUSE_RIGHT
         && !(mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))) {
-      // NOTE: Ignore right button down and drag mouse events. Windows only
-      // shows the popup menu on the button up event.
-      return false;
+      if (!is_click) {
+        // Ignore right button release events, only shows the popup
+        // menu on the button down event.
+        return false;
+      }
+      jump_flags = 0;
+      if (STRCMP(p_mousem, "popup_setpos") == 0) {
+        // First set the cursor position before showing the popup
+        // menu.
+        if (VIsual_active) {
+          pos_T m_pos;
+          // set MOUSE_MAY_STOP_VIS if we are outside the
+          // selection or the current window (might have false
+          // negative here)
+          if (mouse_row < curwin->w_winrow
+              || mouse_row > (curwin->w_winrow + curwin->w_height)) {
+            jump_flags = MOUSE_MAY_STOP_VIS;
+          } else if (get_fpos_of_mouse(&m_pos) != IN_BUFFER) {
+            jump_flags = MOUSE_MAY_STOP_VIS;
+          } else {
+            if ((lt(curwin->w_cursor, VIsual)
+                 && (lt(m_pos, curwin->w_cursor) || lt(VIsual, m_pos)))
+                || (lt(VIsual, curwin->w_cursor)
+                    && (lt(m_pos, VIsual) || lt(curwin->w_cursor, m_pos)))) {
+              jump_flags = MOUSE_MAY_STOP_VIS;
+            } else if (VIsual_mode == Ctrl_V) {
+              getvcols(curwin, &curwin->w_cursor, &VIsual, &leftcol, &rightcol);
+              getvcol(curwin, &m_pos, NULL, &m_pos.col, NULL);
+              if (m_pos.col < leftcol || m_pos.col > rightcol) {
+                jump_flags = MOUSE_MAY_STOP_VIS;
+              }
+            }
+          }
+        } else {
+          jump_flags = MOUSE_MAY_STOP_VIS;
+        }
+      }
+      if (jump_flags) {
+        jump_flags = jump_to_mouse(jump_flags, NULL, which_button);
+        update_curbuf(VIsual_active ? INVERTED : VALID);
+        setcursor();
+        ui_flush();  // Update before showing popup menu
+      }
+      show_popupmenu();
+      got_click = false;  // ignore release events
+      return (jump_flags & CURSOR_MOVED) != 0;
     }
     if (which_button == MOUSE_LEFT
         && (mod_mask & (MOD_MASK_SHIFT|MOD_MASK_ALT))) {
@@ -2451,20 +2494,29 @@ static void prep_redo_cmd(cmdarg_T *cap)
 /// Note that only the last argument can be a multi-byte char.
 void prep_redo(int regname, long num, int cmd1, int cmd2, int cmd3, int cmd4, int cmd5)
 {
+  prep_redo_num2(regname, num, cmd1, cmd2, 0L, cmd3, cmd4, cmd5);
+}
+
+/// Prepare for redo of any command with extra count after "cmd2".
+void prep_redo_num2(int regname, long num1, int cmd1, int cmd2, long num2, int cmd3, int cmd4,
+                    int cmd5)
+{
   ResetRedobuff();
   if (regname != 0) {   // yank from specified buffer
     AppendCharToRedobuff('"');
     AppendCharToRedobuff(regname);
   }
-  if (num) {
-    AppendNumberToRedobuff(num);
+  if (num1 != 0) {
+    AppendNumberToRedobuff(num1);
   }
-
   if (cmd1 != NUL) {
     AppendCharToRedobuff(cmd1);
   }
   if (cmd2 != NUL) {
     AppendCharToRedobuff(cmd2);
+  }
+  if (num2 != 0) {
+    AppendNumberToRedobuff(num2);
   }
   if (cmd3 != NUL) {
     AppendCharToRedobuff(cmd3);
@@ -3100,7 +3152,7 @@ bool find_decl(char_u *ptr, size_t len, bool locally, bool thisblock, int flags_
       }
       break;
     }
-    if (get_leader_len(get_cursor_line_ptr(), NULL, false, true) > 0) {
+    if (get_leader_len((char *)get_cursor_line_ptr(), NULL, false, true) > 0) {
       // Ignore this line, continue at start of next line.
       curwin->w_cursor.lnum++;
       curwin->w_cursor.col = 0;
@@ -6113,6 +6165,16 @@ static void nv_g_cmd(cmdarg_T *cap)
       }
       i = curwin->w_leftcol + curwin->w_width_inner - col_off - 1;
       coladvance((colnr_T)i);
+
+      // if the character doesn't fit move one back
+      if (curwin->w_cursor.col > 0 && utf_ptr2cells((const char *)get_cursor_pos_ptr()) > 1) {
+        colnr_T vcol;
+
+        getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol);
+        if (vcol >= curwin->w_leftcol + curwin->w_width - col_off) {
+          curwin->w_cursor.col--;
+        }
+      }
 
       // Make sure we stick in this column.
       validate_virtcol();

@@ -298,6 +298,13 @@ void redraw_win_signcol(win_T *wp)
   }
 }
 
+/// Update all windows that are editing the current buffer.
+void update_curbuf(int type)
+{
+  redraw_curbuf_later(type);
+  update_screen(type);
+}
+
 /// Redraw the parts of the screen that is marked for redraw.
 ///
 /// Most code shouldn't call this directly, rather use redraw_later() and
@@ -4838,7 +4845,7 @@ void win_redr_status_matches(expand_T *xp, int num_matches, char_u **matches, in
   clen = len;
 
   i = first_match;
-  while ((long)(clen + status_match_len(xp, L_MATCH(i)) + 2) < Columns) {
+  while (clen + status_match_len(xp, L_MATCH(i)) + 2 < Columns) {
     if (i == match) {
       selstart = buf + len;
       selstart_col = clen;
@@ -5750,12 +5757,17 @@ static void linecopy(ScreenGrid *grid, int to, int from, int col, int width)
           width * sizeof(sattr_T));
 }
 
-/*
- * Set cursor to its position in the current window.
- */
+/// Set cursor to its position in the current window.
 void setcursor(void)
 {
-  if (redrawing()) {
+  setcursor_mayforce(false);
+}
+
+/// Set cursor to its position in the current window.
+/// @param force  when true, also when not redrawing.
+void setcursor_mayforce(bool force)
+{
+  if (force || redrawing()) {
     validate_cursor();
 
     ScreenGrid *grid = &curwin->w_grid;
@@ -6153,6 +6165,10 @@ void clearmode(void)
 
 static void recording_mode(int attr)
 {
+  if (p_ch <= 0 && !ui_has(kUIMessages)) {
+    return;
+  }
+
   msg_puts_attr(_("recording"), attr);
   if (!shortmess(SHM_RECORDING)) {
     char s[4];
@@ -6396,7 +6412,7 @@ void get_trans_bufname(buf_T *buf)
   } else {
     home_replace(buf, buf->b_fname, (char *)NameBuff, MAXPATHL, true);
   }
-  trans_characters(NameBuff, MAXPATHL);
+  trans_characters((char *)NameBuff, MAXPATHL);
 }
 
 /*
@@ -6457,7 +6473,8 @@ int redrawing(void)
  */
 int messaging(void)
 {
-  return !(p_lz && char_avail() && !KeyTyped);
+  return !(p_lz && char_avail() && !KeyTyped)
+         && (p_ch > 0 || ui_has(kUIMessages));
 }
 
 /// Show current status info in ruler and various other places
@@ -6515,7 +6532,7 @@ static void win_redr_ruler(win_T *wp, bool always)
     }
   }
 
-  if (*p_ruf) {
+  if (*p_ruf && p_ch > 0 && !ui_has(kUIMessages)) {
     int save_called_emsg = called_emsg;
     called_emsg = false;
     win_redr_custom(wp, false, true);
@@ -6596,7 +6613,7 @@ static void win_redr_ruler(win_T *wp, bool always)
                  (wp->w_buffer->b_ml.ml_flags & ML_EMPTY) ? (int64_t)0L
                                                           : (int64_t)wp->w_cursor.lnum);
     size_t len = STRLEN(buffer);
-    col_print((char_u *)buffer + len, RULER_BUF_LEN - len,
+    col_print(buffer + len, RULER_BUF_LEN - len,
               empty_line ? 0 : (int)wp->w_cursor.col + 1,
               (int)virtcol + 1);
 

@@ -224,7 +224,7 @@ EXTERN dict_T vimvardict;                   // Dictionary with v: variables
 EXTERN dict_T globvardict;                  // Dictionary with g: variables
 /// g: value
 #define globvarht globvardict.dv_hashtab
-EXTERN int did_emsg;                        // set by emsg() when the message
+EXTERN bool did_emsg;                       // set by emsg() when the message
                                             // is displayed or thrown
 EXTERN bool called_vim_beep;                // set if vim_beep() is called
 EXTERN bool did_emsg_syntax;                // did_emsg set because of a
@@ -274,11 +274,11 @@ EXTERN except_T *current_exception;
 
 /// Set when a throw that cannot be handled in do_cmdline() must be propagated
 /// to the cstack of the previously called do_cmdline().
-EXTERN int need_rethrow INIT(= false);
+EXTERN bool need_rethrow INIT(= false);
 
 /// Set when a ":finish" or ":return" that cannot be handled in do_cmdline()
 /// must be propagated to the cstack of the previously called do_cmdline().
-EXTERN int check_cstack INIT(= false);
+EXTERN bool check_cstack INIT(= false);
 
 /// Number of nested try conditionals (across function calls and ":source"
 /// commands).
@@ -503,8 +503,7 @@ EXTERN int stdout_isatty INIT(= true);
 EXTERN int stdin_fd INIT(= -1);
 
 // true when doing full-screen output, otherwise only writing some messages.
-// volatile because it is used in a signal handler.
-EXTERN volatile int full_screen INIT(= false);
+EXTERN int full_screen INIT(= false);
 
 /// Non-zero when only "safe" commands are allowed, e.g. when sourcing .exrc or
 /// .vimrc in current directory.
@@ -724,9 +723,9 @@ EXTERN bool need_highlight_changed INIT(= true);
 
 EXTERN FILE *scriptout INIT(= NULL);  ///< Stream to write script to.
 
-// volatile because it is used in a signal handler.
-EXTERN volatile int got_int INIT(= false);  // set to true when interrupt
-                                            // signal occurred
+// Note that even when handling SIGINT, volatile is not necessary because the
+// callback is not called directly from the signal handlers.
+EXTERN bool got_int INIT(= false);          // set to true when interrupt signal occurred
 EXTERN bool bangredo INIT(= false);         // set to true with ! command
 EXTERN int searchcmdlen;                    // length of previous search cmd
 EXTERN int reg_do_extmatch INIT(= 0);       // Used when compiling regexp:
@@ -986,6 +985,7 @@ EXTERN char e_notset[] INIT(= N_("E764: Option '%s' is not set"));
 EXTERN char e_invalidreg[] INIT(= N_("E850: Invalid register name"));
 EXTERN char e_dirnotf[] INIT(= N_("E919: Directory not found in '%s': \"%s\""));
 EXTERN char e_au_recursive[] INIT(= N_("E952: Autocommand caused recursive behavior"));
+EXTERN char e_menuothermode[] INIT(= N_("E328: Menu only exists in another mode"));
 EXTERN char e_autocmd_close[] INIT(= N_("E813: Cannot close autocmd window"));
 EXTERN char e_listarg[] INIT(= N_("E686: Argument of %s must be a List"));
 EXTERN char e_unsupportedoption[] INIT(= N_("E519: Option not supported"));
@@ -1074,5 +1074,7 @@ typedef enum {
 
 // Only filled for Win32.
 EXTERN char windowsVersion[20] INIT(= { 0 });
+
+EXTERN int exit_need_delay INIT(= 0);
 
 #endif  // NVIM_GLOBALS_H

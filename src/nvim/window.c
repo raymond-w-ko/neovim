@@ -1554,9 +1554,9 @@ static void win_init(win_T *newp, win_T *oldp, int flags)
     copy_loclist_stack(oldp, newp);
   }
   newp->w_localdir = (oldp->w_localdir == NULL)
-                     ? NULL : vim_strsave(oldp->w_localdir);
+                     ? NULL : xstrdup(oldp->w_localdir);
   newp->w_prevdir = (oldp->w_prevdir == NULL)
-                    ? NULL : vim_strsave(oldp->w_prevdir);
+                    ? NULL : xstrdup(oldp->w_prevdir);
 
   // copy tagstack and folds
   for (i = 0; i < oldp->w_tagstacklen; i++) {
@@ -2741,6 +2741,8 @@ int win_close(win_T *win, bool free_buf, bool force)
      * to be the last one left, return now.
      */
     if (wp->w_buffer != curbuf) {
+      reset_VIsual_and_resel();  // stop Visual mode
+
       other_buffer = true;
       win->w_closing = true;
       apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, false, curbuf);
@@ -4074,7 +4076,7 @@ int win_new_tabpage(int after, char_u *filename)
   }
 
   newtp->tp_localdir = old_curtab->tp_localdir
-    ? vim_strsave(old_curtab->tp_localdir) : NULL;
+    ? xstrdup(old_curtab->tp_localdir) : NULL;
 
   curtab = newtp;
 
@@ -4897,8 +4899,7 @@ static void win_enter_ext(win_T *const wp, const int flags)
 void fix_current_dir(void)
 {
   // New directory is either the local directory of the window, tab or NULL.
-  char *new_dir = (char *)(curwin->w_localdir
-                           ? curwin->w_localdir : curtab->tp_localdir);
+  char *new_dir = curwin->w_localdir ? curwin->w_localdir : curtab->tp_localdir;
   char cwd[MAXPATHL];
   if (os_dirname((char_u *)cwd, MAXPATHL) != OK) {
     cwd[0] = NUL;
@@ -5560,9 +5561,10 @@ static void frame_setheight(frame_T *curfrp, int height)
   if (curfrp->fr_parent == NULL) {
     // topframe: can only change the command line
     if (height > ROWS_AVAIL) {
-      // If height is greater than the available space, try to create space for the frame by
-      // reducing 'cmdheight' if possible, while making sure `cmdheight` doesn't go below 1.
-      height = MIN(ROWS_AVAIL + (p_ch - 1), height);
+      // If height is greater than the available space, try to create space for
+      // the frame by reducing 'cmdheight' if possible, while making sure
+      // `cmdheight` doesn't go below 1.
+      height = MIN((p_ch > 0 ? ROWS_AVAIL + (p_ch - 1) : ROWS_AVAIL), height);
     }
     if (height > 0) {
       frame_new_height(curfrp, height, false, false);
@@ -6481,7 +6483,7 @@ char_u *grab_file_name(long count, linenr_T *file_lnum)
 
       *file_lnum = getdigits_long(&p, false, 0);
     }
-    return find_file_name_in_path(ptr, len, options, count, curbuf->b_ffname);
+    return find_file_name_in_path(ptr, len, options, count, (char_u *)curbuf->b_ffname);
   }
   return file_name_at_cursor(options | FNAME_HYP, count, file_lnum);
 }
@@ -6502,7 +6504,7 @@ char_u *grab_file_name(long count, linenr_T *file_lnum)
 char_u *file_name_at_cursor(int options, long count, linenr_T *file_lnum)
 {
   return file_name_in_line(get_cursor_line_ptr(),
-                           curwin->w_cursor.col, options, count, curbuf->b_ffname,
+                           curwin->w_cursor.col, options, count, (char_u *)curbuf->b_ffname,
                            file_lnum);
 }
 
