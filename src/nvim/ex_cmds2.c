@@ -1018,8 +1018,7 @@ void check_arg_idx(win_T *win)
     // We are editing the current entry in the argument list.
     // Set "arg_had_last" if it's also the last one
     win->w_arg_idx_invalid = false;
-    if (win->w_arg_idx == WARGCOUNT(win) - 1
-        && win->w_alist == &global_alist) {
+    if (win->w_arg_idx == WARGCOUNT(win) - 1 && win->w_alist == &global_alist) {
       arg_had_last = true;
     }
   }
@@ -1150,8 +1149,7 @@ void do_argfile(exarg_T *eap, int argn)
     }
 
     curwin->w_arg_idx = argn;
-    if (argn == ARGCOUNT - 1
-        && curwin->w_alist == &global_alist) {
+    if (argn == ARGCOUNT - 1 && curwin->w_alist == &global_alist) {
       arg_had_last = true;
     }
 
@@ -2156,31 +2154,23 @@ scriptitem_T *get_current_script_id(char_u *fname, sctx_T *ret_sctx)
   sctx_T script_sctx = { .sc_seq = ++last_current_SID_seq,
                          .sc_lnum = 0,
                          .sc_sid = 0 };
-  FileID file_id;
   scriptitem_T *si = NULL;
 
-  bool file_id_ok = os_fileid((char *)fname, &file_id);
   assert(script_items.ga_len >= 0);
-  for (script_sctx.sc_sid = script_items.ga_len; script_sctx.sc_sid > 0;
-       script_sctx.sc_sid--) {
+  for (script_sctx.sc_sid = script_items.ga_len; script_sctx.sc_sid > 0; script_sctx.sc_sid--) {
+    // We used to check inode here, but that doesn't work:
+    // - If a script is edited and written, it may get a different
+    //   inode number, even though to the user it is the same script.
+    // - If a script is deleted and another script is written, with a
+    //   different name, the inode may be re-used.
     si = &SCRIPT_ITEM(script_sctx.sc_sid);
-    // Compare dev/ino when possible, it catches symbolic links.
-    // Also compare file names, the inode may change when the file was edited.
-    bool file_id_equal = file_id_ok && si->file_id_valid
-                         && os_fileid_equal(&(si->file_id), &file_id);
-    if (si->sn_name != NULL
-        && (file_id_equal || FNAMECMP(si->sn_name, fname) == 0)) {
+    if (si->sn_name != NULL && FNAMECMP(si->sn_name, fname) == 0) {
+      // Found it!
       break;
     }
   }
   if (script_sctx.sc_sid == 0) {
     si = new_script_item((char *)vim_strsave(fname), &script_sctx.sc_sid);
-    if (file_id_ok) {
-      si->file_id_valid = true;
-      si->file_id = file_id;
-    } else {
-      si->file_id_valid = false;
-    }
   }
   if (ret_sctx != NULL) {
     *ret_sctx = script_sctx;

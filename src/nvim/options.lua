@@ -1597,7 +1597,7 @@ return {
       short_desc=N_("the use of mouse clicks"),
       type='string', list='flags', scope={'global'},
       varname='p_mouse',
-      defaults={if_true=""}
+      defaults={if_true="nvi"}
     },
     {
       full_name='mousefocus', abbreviation='mousef',
@@ -1619,7 +1619,15 @@ return {
       short_desc=N_("changes meaning of mouse buttons"),
       type='string', scope={'global'},
       varname='p_mousem',
-      defaults={if_true="extend"}
+      defaults={if_true="popup_setpos"}
+    },
+    {
+      full_name='mousescroll',
+      short_desc=N_("amount to scroll by when scrolling with a mouse"),
+      type='string', list='comma', scope={'global'},
+      vi_def=true,
+      varname='p_mousescroll',
+      defaults={if_true="ver:3,hor:6"}
     },
     {
       full_name='mouseshape', abbreviation='mouses',

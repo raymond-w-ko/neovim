@@ -1720,7 +1720,7 @@ func Test_Cmd_Autocmds()
   au BufWriteCmd XtestE call extend(g:lines, getline(0, '$'))
   wall				" will write other window to 'lines'
   call assert_equal(4, len(g:lines), g:lines)
-  call assert_equal("\tasdf", g:lines[2])
+  call assert_equal("asdf", g:lines[2])
 
   au! BufReadCmd
   au! BufWriteCmd
@@ -2226,7 +2226,7 @@ func Test_autocmd_bufreadpre()
   " (even though the position will be invalid, this should make Vim reset the
   " cursor position in the other window.
   wincmd p
-  1
+  1 " set cpo+=g
   " won't do anything, but try to set the cursor on an invalid lnum
   autocmd BufReadPre <buffer> :norm! 70gg
   " triggers BufReadPre, should not move the cursor in either window
@@ -2241,7 +2241,10 @@ func Test_autocmd_bufreadpre()
   close
   close
   call delete('XAutocmdBufReadPre.txt')
+  " set cpo-=g
 endfunc
+
+" FileChangedShell tested in test_filechanged.vim
 
 " Tests for the following autocommands:
 " - FileWritePre	writing a compressed file
@@ -2560,7 +2563,29 @@ func Test_BufWrite_lockmarks()
   call delete('Xtest2')
 endfunc
 
-" FileChangedShell tested in test_filechanged.vim
+" Test closing a window or editing another buffer from a FileChangedRO handler
+" in a readonly buffer
+func Test_FileChangedRO_winclose()
+  augroup FileChangedROTest
+    au!
+    autocmd FileChangedRO * quit
+  augroup END
+  new
+  set readonly
+  call assert_fails('normal i', 'E788:')
+  close
+  augroup! FileChangedROTest
+
+  augroup FileChangedROTest
+    au!
+    autocmd FileChangedRO * edit Xfile
+  augroup END
+  new
+  set readonly
+  call assert_fails('normal i', 'E788:')
+  close
+  augroup! FileChangedROTest
+endfunc
 
 func LogACmd()
   call add(g:logged, line('$'))
@@ -2666,6 +2691,27 @@ func Test_autocmd_window()
     au!
   augroup END
   augroup! aucmd_win_test1
+  %bw!
+endfunc
+
+" Test for trying to close the temporary window used for executing an autocmd
+func Test_close_autocmd_window()
+  %bw!
+  edit one.txt
+  tabnew two.txt
+  augroup aucmd_win_test2
+    au!
+    " Nvim makes aucmd_win the last window
+    " au BufEnter * if expand('<afile>') == 'one.txt' | 1close | endif
+    au BufEnter * if expand('<afile>') == 'one.txt' | close | endif
+  augroup END
+
+  call assert_fails('doautoall BufEnter', 'E813:')
+
+  augroup aucmd_win_test2
+    au!
+  augroup END
+  augroup! aucmd_win_test2
   %bw!
 endfunc
 

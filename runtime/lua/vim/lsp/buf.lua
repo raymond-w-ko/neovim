@@ -1,30 +1,10 @@
 local vim = vim
+local api = vim.api
 local validate = vim.validate
-local vfn = vim.fn
 local util = require('vim.lsp.util')
+local npcall = vim.F.npcall
 
 local M = {}
-
----@private
---- Returns nil if {status} is false or nil, otherwise returns the rest of the
---- arguments.
-local function ok_or_nil(status, ...)
-  if not status then
-    return
-  end
-  return ...
-end
-
----@private
---- Swallows errors.
----
----@param fn Function to run
----@param ... Function arguments
----@returns Result of `fn(...)` if there are no errors, otherwise nil.
---- Returns nil if errors occur during {fn}, otherwise returns
-local function npcall(fn, ...)
-  return ok_or_nil(pcall(fn, ...))
-end
 
 ---@private
 --- Sends an async request to all active clients attached to the current
@@ -201,7 +181,7 @@ end
 
 function M.format(options)
   options = options or {}
-  local bufnr = options.bufnr or vim.api.nvim_get_current_buf()
+  local bufnr = options.bufnr or api.nvim_get_current_buf()
   local clients = vim.lsp.get_active_clients({
     id = options.id,
     bufnr = bufnr,
@@ -228,7 +208,8 @@ function M.format(options)
       end
       local params = util.make_formatting_params(options.formatting_options)
       client.request('textDocument/formatting', params, function(...)
-        local handler = client.handlers['textDocument/formatting'] or vim.lsp.handlers['textDocument/formatting']
+        local handler = client.handlers['textDocument/formatting']
+          or vim.lsp.handlers['textDocument/formatting']
         handler(...)
         do_format(next(clients, idx))
       end, bufnr)
@@ -261,7 +242,7 @@ function M.formatting(options)
     vim.log.levels.WARN
   )
   local params = util.make_formatting_params(options)
-  local bufnr = vim.api.nvim_get_current_buf()
+  local bufnr = api.nvim_get_current_buf()
   select_client('textDocument/formatting', function(client)
     if client == nil then
       return
@@ -284,9 +265,12 @@ end
 ---@param timeout_ms (number) Request timeout
 ---@see |vim.lsp.buf.formatting_seq_sync|
 function M.formatting_sync(options, timeout_ms)
-  vim.notify_once('vim.lsp.buf.formatting_sync is deprecated. Use vim.lsp.buf.format instead', vim.log.levels.WARN)
+  vim.notify_once(
+    'vim.lsp.buf.formatting_sync is deprecated. Use vim.lsp.buf.format instead',
+    vim.log.levels.WARN
+  )
   local params = util.make_formatting_params(options)
-  local bufnr = vim.api.nvim_get_current_buf()
+  local bufnr = api.nvim_get_current_buf()
   select_client('textDocument/formatting', function(client)
     if client == nil then
       return
@@ -318,9 +302,12 @@ end
 ---in the following order: first all clients that are not in the `order` list, then
 ---the remaining clients in the order as they occur in the `order` list.
 function M.formatting_seq_sync(options, timeout_ms, order)
-  vim.notify_once('vim.lsp.buf.formatting_seq_sync is deprecated. Use vim.lsp.buf.format instead', vim.log.levels.WARN)
+  vim.notify_once(
+    'vim.lsp.buf.formatting_seq_sync is deprecated. Use vim.lsp.buf.format instead',
+    vim.log.levels.WARN
+  )
   local clients = vim.tbl_values(vim.lsp.buf_get_clients())
-  local bufnr = vim.api.nvim_get_current_buf()
+  local bufnr = api.nvim_get_current_buf()
 
   -- sort the clients according to `order`
   for _, client_name in pairs(order or {}) do
@@ -341,12 +328,15 @@ function M.formatting_seq_sync(options, timeout_ms, order)
         'textDocument/formatting',
         params,
         timeout_ms,
-        vim.api.nvim_get_current_buf()
+        api.nvim_get_current_buf()
       )
       if result and result.result then
         util.apply_text_edits(result.result, bufnr, client.offset_encoding)
       elseif err then
-        vim.notify(string.format('vim.lsp.buf.formatting_seq_sync: (%s) %s', client.name, err), vim.log.levels.WARN)
+        vim.notify(
+          string.format('vim.lsp.buf.formatting_seq_sync: (%s) %s', client.name, err),
+          vim.log.levels.WARN
+        )
       end
     end
   end
@@ -384,7 +374,7 @@ end
 ---         this field.
 function M.rename(new_name, options)
   options = options or {}
-  local bufnr = options.bufnr or vim.api.nvim_get_current_buf()
+  local bufnr = options.bufnr or api.nvim_get_current_buf()
   local clients = vim.lsp.get_active_clients({
     bufnr = bufnr,
     name = options.name,
@@ -402,14 +392,14 @@ function M.rename(new_name, options)
     vim.notify('[LSP] Rename, no matching language servers with rename capability.')
   end
 
-  local win = vim.api.nvim_get_current_win()
+  local win = api.nvim_get_current_win()
 
   -- Compute early to account for cursor movements after going async
-  local cword = vfn.expand('<cword>')
+  local cword = vim.fn.expand('<cword>')
 
   ---@private
   local function get_text_at_range(range, offset_encoding)
-    return vim.api.nvim_buf_get_text(
+    return api.nvim_buf_get_text(
       bufnr,
       range.start.line,
       util._get_line_byte_from_position(bufnr, range.start, offset_encoding),
@@ -429,7 +419,8 @@ function M.rename(new_name, options)
     local function rename(name)
       local params = util.make_position_params(win, client.offset_encoding)
       params.newName = name
-      local handler = client.handlers['textDocument/rename'] or vim.lsp.handlers['textDocument/rename']
+      local handler = client.handlers['textDocument/rename']
+        or vim.lsp.handlers['textDocument/rename']
       client.request('textDocument/rename', params, function(...)
         handler(...)
         try_use_client(next(clients, idx))
@@ -443,7 +434,8 @@ function M.rename(new_name, options)
           if next(clients, idx) then
             try_use_client(next(clients, idx))
           else
-            local msg = err and ('Error on prepareRename: ' .. (err.message or '')) or 'Nothing to rename'
+            local msg = err and ('Error on prepareRename: ' .. (err.message or ''))
+              or 'Nothing to rename'
             vim.notify(msg, vim.log.levels.INFO)
           end
           return
@@ -475,7 +467,10 @@ function M.rename(new_name, options)
         end)
       end, bufnr)
     else
-      assert(client.supports_method('textDocument/rename'), 'Client must support textDocument/rename')
+      assert(
+        client.supports_method('textDocument/rename'),
+        'Client must support textDocument/rename'
+      )
       if new_name then
         rename(new_name)
         return
@@ -587,8 +582,9 @@ end
 --- Add the folder at path to the workspace folders. If {path} is
 --- not provided, the user will be prompted for a path using |input()|.
 function M.add_workspace_folder(workspace_folder)
-  workspace_folder = workspace_folder or npcall(vfn.input, 'Workspace Folder: ', vfn.expand('%:p:h'), 'dir')
-  vim.api.nvim_command('redraw')
+  workspace_folder = workspace_folder
+    or npcall(vim.fn.input, 'Workspace Folder: ', vim.fn.expand('%:p:h'), 'dir')
+  api.nvim_command('redraw')
   if not (workspace_folder and #workspace_folder > 0) then
     return
   end
@@ -623,8 +619,9 @@ end
 --- {path} is not provided, the user will be prompted for
 --- a path using |input()|.
 function M.remove_workspace_folder(workspace_folder)
-  workspace_folder = workspace_folder or npcall(vfn.input, 'Workspace Folder: ', vfn.expand('%:p:h'))
-  vim.api.nvim_command('redraw')
+  workspace_folder = workspace_folder
+    or npcall(vim.fn.input, 'Workspace Folder: ', vim.fn.expand('%:p:h'))
+  api.nvim_command('redraw')
   if not (workspace_folder and #workspace_folder > 0) then
     return
   end
@@ -652,7 +649,7 @@ end
 ---
 ---@param query (string, optional)
 function M.workspace_symbol(query)
-  query = query or npcall(vfn.input, 'Query: ')
+  query = query or npcall(vim.fn.input, 'Query: ')
   if query == nil then
     return
   end
@@ -821,7 +818,7 @@ end
 --- with all aggregated results
 ---@private
 local function code_action_request(params, options)
-  local bufnr = vim.api.nvim_get_current_buf()
+  local bufnr = api.nvim_get_current_buf()
   local method = 'textDocument/codeAction'
   vim.lsp.buf_request_all(bufnr, method, params, function(results)
     local ctx = { bufnr = bufnr, method = method, params = params }
@@ -858,7 +855,7 @@ function M.code_action(options)
   end
   local context = options.context or {}
   if not context.diagnostics then
-    local bufnr = vim.api.nvim_get_current_buf()
+    local bufnr = api.nvim_get_current_buf()
     context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics(bufnr)
   end
   local params = util.make_range_params()
@@ -885,7 +882,7 @@ function M.range_code_action(context, start_pos, end_pos)
   validate({ context = { context, 't', true } })
   context = context or {}
   if not context.diagnostics then
-    local bufnr = vim.api.nvim_get_current_buf()
+    local bufnr = api.nvim_get_current_buf()
     context.diagnostics = vim.lsp.diagnostic.get_line_diagnostics(bufnr)
   end
   local params = util.make_given_range_params(start_pos, end_pos)

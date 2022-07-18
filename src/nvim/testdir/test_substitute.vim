@@ -1,5 +1,7 @@
 " Tests for the substitute (:s) command
 
+source shared.vim
+
 func Test_multiline_subst()
   enew!
   call append(0, ["1 aa",
@@ -292,7 +294,7 @@ endfunc
 
 " Test for *:s%* on :substitute.
 func Test_sub_cmd_6()
-  throw "skipped: Nvim removed POSIX-related 'cpoptions' flags"
+  throw 'Skipped: Nvim does not support cpoptions flag "/"'
   set magic&
   set cpo+=/
 
@@ -806,6 +808,41 @@ func Test_sub_expand_text()
   close!
 endfunc
 
+" Test for command failures when the last substitute pattern is not set.
+func Test_sub_with_no_last_pat()
+  let lines =<< trim [SCRIPT]
+    call assert_fails('~', 'E33:')
+    call assert_fails('s//abc/g', 'E476:')
+    call assert_fails('s\/bar', 'E476:')
+    call assert_fails('s\&bar&', 'E476:')
+    call writefile(v:errors, 'Xresult')
+    qall!
+  [SCRIPT]
+  call writefile(lines, 'Xscript')
+  if RunVim([], [], '--clean -S Xscript')
+    call assert_equal([], readfile('Xresult'))
+  endif
+
+  " Nvim does not support cpoptions flag "/"'
+  " let lines =<< trim [SCRIPT]
+  "   set cpo+=/
+  "   call assert_fails('s/abc/%/', 'E33:')
+  "   call writefile(v:errors, 'Xresult')
+  "   qall!
+  " [SCRIPT]
+  " call writefile(lines, 'Xscript')
+  " if RunVim([], [], '--clean -S Xscript')
+  "   call assert_equal([], readfile('Xresult'))
+  " endif
+
+  call delete('Xscript')
+  call delete('Xresult')
+endfunc
+
+func Test_substitute()
+  call assert_equal('a１a２a３a', substitute('１２３', '\zs', 'a', 'g'))
+endfunc
+
 func Test_submatch_list_concatenate()
   let pat = 'A\(.\)'
   let Rep = {-> string([submatch(0, 1)] + [[submatch(1)]])}
@@ -849,6 +886,54 @@ func Test_sub_change_window()
   bwipe!
   bwipe!
   delfunc Repl
+endfunc
+
+" This was undoign a change in between computing the length and using it.
+func Do_Test_sub_undo_change()
+  new
+  norm o0000000000000000000000000000000000000000000000000000
+  silent! s/\%')/\=Repl()
+  bwipe!
+endfunc
+
+func Test_sub_undo_change()
+  func Repl()
+    silent! norm g-
+  endfunc
+  call Do_Test_sub_undo_change()
+
+  func! Repl()
+    silent earlier
+  endfunc
+  call Do_Test_sub_undo_change()
+
+  delfunc Repl
+endfunc
+
+" This was opening a command line window from the expression
+func Test_sub_open_cmdline_win()
+  " the error only happens in a very specific setup, run a new Vim instance to
+  " get a clean starting point.
+  let lines =<< trim [SCRIPT]
+    set vb t_vb=
+    norm o0000000000000000000000000000000000000000000000000000
+    func Replace()
+      norm q/
+    endfunc
+    s/\%')/\=Replace()
+    redir >Xresult
+    messages
+    redir END
+    qall!
+  [SCRIPT]
+  call writefile(lines, 'Xscript')
+  if RunVim([], [], '-u NONE -S Xscript')
+    call assert_match('E565: Not allowed to change text or change window',
+          \ readfile('Xresult')->join('XX'))
+  endif
+
+  call delete('Xscript')
+  call delete('Xresult')
 endfunc
 
 " Test for the 2-letter and 3-letter :substitute commands

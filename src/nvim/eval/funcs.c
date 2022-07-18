@@ -482,7 +482,7 @@ static buf_T *find_buffer(typval_T *avar)
        * buffer, these don't use the full path. */
       FOR_ALL_BUFFERS(bp) {
         if (bp->b_fname != NULL
-            && (path_with_url(bp->b_fname) || bt_nofile(bp))
+            && (path_with_url(bp->b_fname) || bt_nofilename(bp))
             && STRCMP(bp->b_fname, avar->vval.v_string) == 0) {
           buf = bp;
           break;
@@ -1070,15 +1070,12 @@ static void f_complete(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 
   if (argvars[1].v_type != VAR_LIST) {
     emsg(_(e_invarg));
-    return;
+  } else {
+    const colnr_T startcol = tv_get_number_chk(&argvars[0], NULL);
+    if (startcol > 0) {
+      set_completion(startcol - 1, argvars[1].vval.v_list);
+    }
   }
-
-  const colnr_T startcol = tv_get_number_chk(&argvars[0], NULL);
-  if (startcol <= 0) {
-    return;
-  }
-
-  set_completion(startcol - 1, argvars[1].vval.v_list);
 }
 
 /// "complete_add()" function
@@ -2051,6 +2048,12 @@ static void f_exepath(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 
   (void)os_can_exe(tv_get_string(&argvars[0]), &path, true);
 
+#ifdef BACKSLASH_IN_FILENAME
+  if (path != NULL) {
+    slash_adjust((char_u *)path);
+  }
+#endif
+
   rettv->v_type = VAR_STRING;
   rettv->vval.v_string = path;
 }
@@ -2464,7 +2467,7 @@ static void f_fmod(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 /// "fnameescape({string})" function
 static void f_fnameescape(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 {
-  rettv->vval.v_string = vim_strsave_fnameescape(tv_get_string(&argvars[0]), false);
+  rettv->vval.v_string = vim_strsave_fnameescape(tv_get_string(&argvars[0]), VSE_NONE);
   rettv->v_type = VAR_STRING;
 }
 
@@ -3899,15 +3902,14 @@ static void f_wait(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   typval_T argv = TV_INITIAL_VALUE;
   typval_T exprval = TV_INITIAL_VALUE;
   bool error = false;
-  int save_called_emsg = called_emsg;
-  called_emsg = false;
+  const int called_emsg_before = called_emsg;
 
   LOOP_PROCESS_EVENTS_UNTIL(&main_loop, main_loop.events, timeout,
                             eval_expr_typval(&expr, &argv, 0, &exprval) != OK
                             || tv_get_number_chk(&exprval, &error)
-                            || called_emsg || error || got_int);
+                            || called_emsg > called_emsg_before || error || got_int);
 
-  if (called_emsg || error) {
+  if (called_emsg > called_emsg_before || error) {
     rettv->vval.v_number = -3;
   } else if (got_int) {
     got_int = false;
@@ -3916,8 +3918,6 @@ static void f_wait(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   } else if (tv_get_number_chk(&exprval, &error)) {
     rettv->vval.v_number = 0;
   }
-
-  called_emsg = save_called_emsg;
 
   // Stop dummy timer
   time_watcher_stop(tw);

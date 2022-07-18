@@ -17,7 +17,7 @@ local function starsetf(ft, opts)
       end
     end,
     {
-      -- Starset matches should always have lowest priority
+      -- Starset matches should have lowest priority by default
       priority = (opts and opts.priority) or -math.huge,
     },
   }
@@ -172,11 +172,15 @@ local extension = {
     return require('vim.filetype.detect').bindzone(bufnr, '')
   end,
   bicep = 'bicep',
+  bb = 'bitbake',
+  bbappend = 'bitbake',
+  bbclass = 'bitbake',
   bl = 'blank',
   bsdl = 'bsdl',
   bst = 'bst',
   btm = function(path, bufnr)
-    return (vim.g.dosbatch_syntax_for_btm and vim.g.dosbatch_syntax_for_btm ~= 0) and 'dosbatch' or 'btm'
+    return (vim.g.dosbatch_syntax_for_btm and vim.g.dosbatch_syntax_for_btm ~= 0) and 'dosbatch'
+      or 'btm'
   end,
   bzl = 'bzl',
   bazel = 'bzl',
@@ -258,6 +262,7 @@ local extension = {
   fdr = 'csp',
   csp = 'csp',
   css = 'css',
+  csv = 'csv',
   con = 'cterm',
   feature = 'cucumber',
   cuh = 'cuda',
@@ -310,7 +315,7 @@ local extension = {
   end,
   ecd = 'ecd',
   edf = 'edif',
-  edfi = 'edif',
+  edif = 'edif',
   edo = 'edif',
   edn = function(path, bufnr)
     return require('vim.filetype.detect').edn(bufnr)
@@ -425,7 +430,6 @@ local extension = {
   gleam = 'gleam',
   glsl = 'glsl',
   gpi = 'gnuplot',
-  gnuplot = 'gnuplot',
   go = 'go',
   gp = 'gp',
   gs = 'grads',
@@ -974,6 +978,7 @@ local extension = {
   tsscl = 'tsscl',
   tssgm = 'tssgm',
   tssop = 'tssop',
+  tsv = 'tsv',
   tutor = 'tutor',
   twig = 'twig',
   ts = function(path, bufnr)
@@ -1175,9 +1180,8 @@ local extension = {
     return require('vim.filetype.detect').sgml(bufnr)
   end,
   t = function(path, bufnr)
-    if not require('vim.filetype.detect').nroff(bufnr) and not require('vim.filetype.detect').perl(path, bufnr) then
-      return 'tads'
-    end
+    local nroff = require('vim.filetype.detect').nroff(bufnr)
+    return nroff or require('vim.filetype.detect').perl(path, bufnr) or 'tads'
   end,
   -- Ignored extensions
   bak = function(path, bufnr)
@@ -1253,13 +1257,6 @@ local filename = {
   ['.arch-inventory'] = 'arch',
   ['GNUmakefile.am'] = 'automake',
   ['named.root'] = 'bindzone',
-  ['.*/bind/db%..*'] = starsetf('bindzone'),
-  ['.*/named/db%..*'] = starsetf('bindzone'),
-  ['cabal%.project%..*'] = starsetf('cabalproject'),
-  ['sgml%.catalog.*'] = starsetf('catalog'),
-  ['/etc/hostname%..*'] = starsetf('config'),
-  ['.*/etc/cron%.d/.*'] = starsetf('crontab'),
-  ['crontab%..*'] = starsetf('crontab'),
   WORKSPACE = 'bzl',
   BUILD = 'bzl',
   ['cabal.project'] = 'cabalproject',
@@ -1305,9 +1302,6 @@ local filename = {
   ['/debian/copyright'] = 'debcopyright',
   ['/etc/apt/sources.list'] = 'debsources',
   ['denyhosts.conf'] = 'denyhosts',
-  ['.*/debian/patches/.*'] = function(path, bufnr)
-    return require('vim.filetype.detect').dep3patch(path, bufnr)
-  end,
   ['dict.conf'] = 'dictconf',
   ['.dictrc'] = 'dictconf',
   ['/etc/DIR_COLORS'] = 'dircolors',
@@ -1366,6 +1360,7 @@ local filename = {
   ['.gnashpluginrc'] = 'gnash',
   gnashpluginrc = 'gnash',
   gnashrc = 'gnash',
+  ['.gnuplot'] = 'gnuplot',
   ['go.work'] = 'gowork',
   ['.gprc'] = 'gp',
   ['/.gnupg/gpg.conf'] = 'gpg',
@@ -1514,7 +1509,6 @@ local filename = {
   ['.screenrc'] = 'screen',
   ['/etc/sensors3.conf'] = 'sensors',
   ['/etc/sensors.conf'] = 'sensors',
-  ['.*/etc/sensors%.d/[^.].*'] = starsetf('sensors'),
   ['/etc/services'] = 'services',
   ['/etc/serial.conf'] = 'setserial',
   ['/etc/udev/cdsymlinks.conf'] = 'sh',
@@ -1560,13 +1554,15 @@ local filename = {
   ['.slrnrc'] = 'slrnrc',
   ['sendmail.cf'] = 'sm',
   ['squid.conf'] = 'squid',
-  ['/.ssh/config'] = 'sshconfig',
   ['ssh_config'] = 'sshconfig',
   ['sshd_config'] = 'sshdconfig',
   ['/etc/sudoers'] = 'sudoers',
   ['sudoers.tmp'] = 'sudoers',
   ['/etc/sysctl.conf'] = 'sysctl',
   tags = 'tags',
+  ['pending.data'] = 'taskdata',
+  ['completed.data'] = 'taskdata',
+  ['undo.data'] = 'taskdata',
   ['.tclshrc'] = 'tcl',
   ['.wishrc'] = 'tcl',
   ['tclsh.rc'] = 'tcl',
@@ -1667,12 +1663,19 @@ local pattern = {
     return require('vim.filetype.detect').asm(bufnr)
   end,
   ['[mM]akefile%.am'] = 'automake',
+  ['.*/bind/db%..*'] = starsetf('bindzone'),
+  ['.*/named/db%..*'] = starsetf('bindzone'),
+  ['.*/build/conf/.*%.conf'] = 'bitbake',
+  ['.*/meta/conf/.*%.conf'] = 'bitbake',
+  ['.*/meta%-.*/conf/.*%.conf'] = 'bitbake',
   ['.*bsd'] = 'bsdl',
   ['bzr_log%..*'] = 'bzr',
   ['.*enlightenment/.*%.cfg'] = 'c',
+  ['cabal%.project%..*'] = starsetf('cabalproject'),
   ['.*/%.calendar/.*'] = starsetf('calendar'),
   ['.*/share/calendar/.*/calendar%..*'] = starsetf('calendar'),
   ['.*/share/calendar/calendar%..*'] = starsetf('calendar'),
+  ['sgml%.catalog.*'] = starsetf('catalog'),
   ['.*/etc/defaults/cdrdao'] = 'cdrdaoconf',
   ['.*/etc/cdrdao%.conf'] = 'cdrdaoconf',
   ['.*/etc/default/cdrdao'] = 'cdrdaoconf',
@@ -1681,10 +1684,13 @@ local pattern = {
     function(path, bufnr)
       return require('vim.filetype.detect').cfg(bufnr)
     end,
-    -- Decrease the priority to avoid conflicts with more specific patterns
+    -- Decrease priority to avoid conflicts with more specific patterns
     -- such as '.*/etc/a2ps/.*%.cfg', '.*enlightenment/.*%.cfg', etc.
     { priority = -1 },
   },
+  ['[cC]hange[lL]og.*'] = starsetf(function(path, bufnr)
+    require('vim.filetype.detect').changelog(bufnr)
+  end),
   ['.*%.%.ch'] = 'chill',
   ['.*%.cmake%.in'] = 'cmake',
   -- */cmus/rc and */.cmus/rc
@@ -1693,6 +1699,9 @@ local pattern = {
   ['.*/%.?cmus/.*%.theme'] = 'cmusrc',
   ['.*/%.cmus/autosave'] = 'cmusrc',
   ['.*/%.cmus/command%-history'] = 'cmusrc',
+  ['.*/etc/hostname%..*'] = starsetf('config'),
+  ['crontab%..*'] = starsetf('crontab'),
+  ['.*/etc/cron%.d/.*'] = starsetf('crontab'),
   ['%.cshrc.*'] = function(path, bufnr)
     return require('vim.filetype.detect').csh(path, bufnr)
   end,
@@ -1703,9 +1712,9 @@ local pattern = {
   ['.*%.[Dd][Aa][Tt]'] = function(path, bufnr)
     return require('vim.filetype.detect').dat(path, bufnr)
   end,
-  ['[cC]hange[lL]og.*'] = starsetf(function(path, bufnr)
-    require('vim.filetype.detect').changelog(bufnr)
-  end),
+  ['.*/debian/patches/.*'] = function(path, bufnr)
+    return require('vim.filetype.detect').dep3patch(path, bufnr)
+  end,
   ['.*/etc/dnsmasq%.d/.*'] = starsetf('dnsmasq'),
   ['Containerfile%..*'] = starsetf('dockerfile'),
   ['Dockerfile%..*'] = starsetf('dockerfile'),
@@ -1716,6 +1725,8 @@ local pattern = {
   ['.*/debian/copyright'] = 'debcopyright',
   ['.*/etc/apt/sources%.list%.d/.*%.list'] = 'debsources',
   ['.*/etc/apt/sources%.list'] = 'debsources',
+  ['.*%.directory'] = 'desktop',
+  ['.*%.desktop'] = 'desktop',
   ['dictd.*%.conf'] = 'dictdconf',
   ['.*/etc/DIR_COLORS'] = 'dircolors',
   ['.*/etc/dnsmasq%.conf'] = 'dnsmasq',
@@ -1766,14 +1777,19 @@ local pattern = {
     return require('vim.filetype.detect').fvwm(path)
   end),
   ['.*/tmp/lltmp.*'] = starsetf('gedcom'),
-  ['/etc/gitconfig%.d/.*'] = starsetf('gitconfig'),
+  ['.*/etc/gitconfig%.d/.*'] = starsetf('gitconfig'),
   ['.*/gitolite%-admin/conf/.*'] = starsetf('gitolite'),
   ['tmac%..*'] = starsetf('nroff'),
   ['.*/%.gitconfig%.d/.*'] = starsetf('gitconfig'),
-  ['.*%.git/.*'] = function(path, bufnr)
-    require('vim.filetype.detect').git(bufnr)
-  end,
+  ['.*%.git/.*'] = {
+    function(path, bufnr)
+      return require('vim.filetype.detect').git(bufnr)
+    end,
+    -- Decrease priority to run after simple pattern checks
+    { priority = -1 },
+  },
   ['.*%.git/modules/.*/config'] = 'gitconfig',
+  ['.*%.git/modules/config'] = 'gitconfig',
   ['.*%.git/config'] = 'gitconfig',
   ['.*/etc/gitconfig'] = 'gitconfig',
   ['.*/%.config/git/config'] = 'gitconfig',
@@ -1859,6 +1875,83 @@ local pattern = {
   ['.*[mM]akefile'] = 'make',
   ['[mM]akefile.*'] = starsetf('make'),
   ['.*/etc/man%.conf'] = 'manconf',
+  ['.*/log/auth'] = 'messages',
+  ['.*/log/cron'] = 'messages',
+  ['.*/log/daemon'] = 'messages',
+  ['.*/log/debug'] = 'messages',
+  ['.*/log/kern'] = 'messages',
+  ['.*/log/lpr'] = 'messages',
+  ['.*/log/mail'] = 'messages',
+  ['.*/log/messages'] = 'messages',
+  ['.*/log/news/news'] = 'messages',
+  ['.*/log/syslog'] = 'messages',
+  ['.*/log/user'] = 'messages',
+  ['.*/log/auth%.log'] = 'messages',
+  ['.*/log/cron%.log'] = 'messages',
+  ['.*/log/daemon%.log'] = 'messages',
+  ['.*/log/debug%.log'] = 'messages',
+  ['.*/log/kern%.log'] = 'messages',
+  ['.*/log/lpr%.log'] = 'messages',
+  ['.*/log/mail%.log'] = 'messages',
+  ['.*/log/messages%.log'] = 'messages',
+  ['.*/log/news/news%.log'] = 'messages',
+  ['.*/log/syslog%.log'] = 'messages',
+  ['.*/log/user%.log'] = 'messages',
+  ['.*/log/auth%.err'] = 'messages',
+  ['.*/log/cron%.err'] = 'messages',
+  ['.*/log/daemon%.err'] = 'messages',
+  ['.*/log/debug%.err'] = 'messages',
+  ['.*/log/kern%.err'] = 'messages',
+  ['.*/log/lpr%.err'] = 'messages',
+  ['.*/log/mail%.err'] = 'messages',
+  ['.*/log/messages%.err'] = 'messages',
+  ['.*/log/news/news%.err'] = 'messages',
+  ['.*/log/syslog%.err'] = 'messages',
+  ['.*/log/user%.err'] = 'messages',
+  ['.*/log/auth%.info'] = 'messages',
+  ['.*/log/cron%.info'] = 'messages',
+  ['.*/log/daemon%.info'] = 'messages',
+  ['.*/log/debug%.info'] = 'messages',
+  ['.*/log/kern%.info'] = 'messages',
+  ['.*/log/lpr%.info'] = 'messages',
+  ['.*/log/mail%.info'] = 'messages',
+  ['.*/log/messages%.info'] = 'messages',
+  ['.*/log/news/news%.info'] = 'messages',
+  ['.*/log/syslog%.info'] = 'messages',
+  ['.*/log/user%.info'] = 'messages',
+  ['.*/log/auth%.warn'] = 'messages',
+  ['.*/log/cron%.warn'] = 'messages',
+  ['.*/log/daemon%.warn'] = 'messages',
+  ['.*/log/debug%.warn'] = 'messages',
+  ['.*/log/kern%.warn'] = 'messages',
+  ['.*/log/lpr%.warn'] = 'messages',
+  ['.*/log/mail%.warn'] = 'messages',
+  ['.*/log/messages%.warn'] = 'messages',
+  ['.*/log/news/news%.warn'] = 'messages',
+  ['.*/log/syslog%.warn'] = 'messages',
+  ['.*/log/user%.warn'] = 'messages',
+  ['.*/log/auth%.crit'] = 'messages',
+  ['.*/log/cron%.crit'] = 'messages',
+  ['.*/log/daemon%.crit'] = 'messages',
+  ['.*/log/debug%.crit'] = 'messages',
+  ['.*/log/kern%.crit'] = 'messages',
+  ['.*/log/lpr%.crit'] = 'messages',
+  ['.*/log/mail%.crit'] = 'messages',
+  ['.*/log/messages%.crit'] = 'messages',
+  ['.*/log/news/news%.crit'] = 'messages',
+  ['.*/log/syslog%.crit'] = 'messages',
+  ['.*/log/user%.crit'] = 'messages',
+  ['.*/log/auth%.notice'] = 'messages',
+  ['.*/log/cron%.notice'] = 'messages',
+  ['.*/log/daemon%.notice'] = 'messages',
+  ['.*/log/debug%.notice'] = 'messages',
+  ['.*/log/kern%.notice'] = 'messages',
+  ['.*/log/lpr%.notice'] = 'messages',
+  ['.*/log/mail%.notice'] = 'messages',
+  ['.*/log/messages%.notice'] = 'messages',
+  ['.*/log/news/news%.notice'] = 'messages',
+  ['.*/log/syslog%.notice'] = 'messages',
+  ['.*/log/user%.notice'] = 'messages',
   ['.*%.[Mm][Oo][Dd]'] = function(path, bufnr)
     return require('vim.filetype.detect').mod(path, bufnr)
   end,
@@ -1937,6 +2030,7 @@ local pattern = {
   ['[rR]akefile.*'] = starsetf('ruby'),
   ['[rR]antfile'] = 'ruby',
   ['[rR]akefile'] = 'ruby',
+  ['.*/etc/sensors%.d/[^.].*'] = starsetf('sensors'),
   ['.*/etc/sensors%.conf'] = 'sensors',
   ['.*/etc/sensors3%.conf'] = 'sensors',
   ['.*/etc/services'] = 'services',
@@ -1975,6 +2069,7 @@ local pattern = {
   ['.*/etc/slp%.spi'] = 'slpspi',
   ['.*/etc/ssh/ssh_config%.d/.*%.conf'] = 'sshconfig',
   ['.*/%.ssh/config'] = 'sshconfig',
+  ['.*/%.ssh/.*%.conf'] = 'sshconfig',
   ['.*/etc/ssh/sshd_config%.d/.*%.conf'] = 'sshdconfig',
   ['.*%.[Ss][Rr][Cc]'] = function(path, bufnr)
     return require('vim.filetype.detect').src(bufnr)
@@ -2083,7 +2178,10 @@ local function sort_by_priority(t)
   local sorted = {}
   for k, v in pairs(t) do
     local ft = type(v) == 'table' and v[1] or v
-    assert(type(ft) == 'string' or type(ft) == 'function', 'Expected string or function for filetype')
+    assert(
+      type(ft) == 'string' or type(ft) == 'function',
+      'Expected string or function for filetype'
+    )
 
     local opts = (type(v) == 'table' and type(v[2]) == 'table') and v[2] or {}
     if not opts.priority then
@@ -2137,8 +2235,7 @@ end
 ---
 --- See $VIMRUNTIME/lua/vim/filetype.lua for more examples.
 ---
---- Note that Lua filetype detection is only enabled when |g:do_filetype_lua| is
---- set to 1.
+--- Note that Lua filetype detection is disabled when |g:do_legacy_filetype| is set.
 ---
 --- Example:
 --- <pre>
@@ -2322,7 +2419,7 @@ function M.match(args)
   local ft, on_detect
 
   -- First check for the simple case where the full path exists as a key
-  local path = vim.fn.resolve(vim.fn.fnamemodify(name, ':p'))
+  local path = vim.fn.fnamemodify(name, ':p')
   ft, on_detect = dispatch(filename[path], path, bufnr)
   if ft then
     return ft, on_detect

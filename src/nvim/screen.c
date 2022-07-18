@@ -1869,7 +1869,7 @@ static int line_putchar(buf_T *buf, LineState *s, schar_T *dest, int maxcells, b
     schar_from_ascii(dest[0], *p);
     s->prev_c = u8c;
   } else {
-    if (p_arshape && !p_tbidi && arabic_char(u8c)) {
+    if (p_arshape && !p_tbidi && ARABIC_CHAR(u8c)) {
       // Do Arabic shaping.
       int pc, pc1, nc;
       int pcc[MAX_MCO];
@@ -3157,7 +3157,7 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
         }
       } else if (mb_l == 0) {        // at the NUL at end-of-line
         mb_l = 1;
-      } else if (p_arshape && !p_tbidi && arabic_char(mb_c)) {
+      } else if (p_arshape && !p_tbidi && ARABIC_CHAR(mb_c)) {
         // Do Arabic shaping.
         int pc, pc1, nc;
         int pcc[MAX_MCO];
@@ -5316,7 +5316,7 @@ static void win_redr_custom(win_T *wp, bool draw_winbar, bool draw_ruler)
     }
 
     fillchar = wp->w_p_fcs_chars.wbr;
-    attr = (wp == curwin) ? HL_ATTR(HLF_WBR) : HL_ATTR(HLF_WBRNC);
+    attr = (wp == curwin) ? win_hl_attr(wp, HLF_WBR) : win_hl_attr(wp, HLF_WBRNC);
     maxwidth = wp->w_width_inner;
     use_sandbox = was_set_insecurely(wp, "winbar", 0);
 
@@ -5493,7 +5493,7 @@ static void win_redr_border(win_T *wp)
   int *attrs = wp->w_float_config.border_attr;
 
   int *adj = wp->w_border_adj;
-  int irow = wp->w_height_inner, icol = wp->w_width_inner;
+  int irow = wp->w_height_inner + wp->w_winbar_height, icol = wp->w_width_inner;
 
   if (adj[0]) {
     grid_puts_line_start(grid, 0);
@@ -6533,13 +6533,11 @@ static void win_redr_ruler(win_T *wp, bool always)
   }
 
   if (*p_ruf && p_ch > 0 && !ui_has(kUIMessages)) {
-    int save_called_emsg = called_emsg;
-    called_emsg = false;
+    const int called_emsg_before = called_emsg;
     win_redr_custom(wp, false, true);
-    if (called_emsg) {
+    if (called_emsg > called_emsg_before) {
       set_string_option_direct("rulerformat", -1, "", OPT_FREE, SID_ERROR);
     }
-    called_emsg |= save_called_emsg;
     return;
   }
 

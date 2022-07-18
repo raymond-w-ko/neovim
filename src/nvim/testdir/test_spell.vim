@@ -2,9 +2,7 @@
 " Note: this file uses latin1 encoding, but is used with utf-8 encoding.
 
 source check.vim
-if !has('spell')
-  finish
-endif
+CheckFeature spell
 
 source screendump.vim
 
@@ -825,6 +823,16 @@ func Test_spell_good_word_invalid()
   2
   sil! norm VzGprzzW
   sil! norm z=
+
+  bwipe!
+endfunc
+
+func Test_spell_good_word_slash()
+  " This caused E1280.
+  new
+  norm afoo /
+  1
+  norm zG
 
   bwipe!
 endfunc

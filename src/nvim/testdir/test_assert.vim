@@ -50,6 +50,26 @@ func Test_assert_equal()
   call remove(v:errors, 0)
 endfunc
 
+func Test_assert_equal_dict()
+  call assert_equal(0, assert_equal(#{one: 1, two: 2}, #{two: 2, one: 1}))
+
+  call assert_equal(1, assert_equal(#{one: 1, two: 2}, #{two: 2, one: 3}))
+  call assert_match("Expected {'one': 1} but got {'one': 3} - 1 equal item omitted", v:errors[0])
+  call remove(v:errors, 0)
+
+  call assert_equal(1, assert_equal(#{one: 1, two: 2}, #{two: 22, one: 11}))
+  call assert_match("Expected {'one': 1, 'two': 2} but got {'one': 11, 'two': 22}", v:errors[0])
+  call remove(v:errors, 0)
+
+  call assert_equal(1, assert_equal(#{}, #{two: 2, one: 1}))
+  call assert_match("Expected {} but got {'one': 1, 'two': 2}", v:errors[0])
+  call remove(v:errors, 0)
+
+  call assert_equal(1, assert_equal(#{two: 2, one: 1}, #{}))
+  call assert_match("Expected {'one': 1, 'two': 2} but got {}", v:errors[0])
+  call remove(v:errors, 0)
+endfunc
+
 func Test_assert_equalfile()
   call assert_equal(1, assert_equalfile('abcabc', 'xyzxyz'))
   call assert_match("E485: Can't read file abcabc", v:errors[0])
@@ -255,6 +275,26 @@ func Test_assert_with_msg()
   call assert_equal('foo', 'bar', 'testing')
   call assert_match("testing: Expected 'foo' but got 'bar'", v:errors[0])
   call remove(v:errors, 0)
+endfunc
+
+func Test_mouse_position()
+  throw 'Skipped: Nvim does not have test_setmouse()'
+  let save_mouse = &mouse
+  set mouse=a
+  new
+  call setline(1, ['line one', 'line two'])
+  call assert_equal([0, 1, 1, 0], getpos('.'))
+  call test_setmouse(1, 5)
+  call feedkeys("\<LeftMouse>", "xt")
+  call assert_equal([0, 1, 5, 0], getpos('.'))
+  call test_setmouse(2, 20)
+  call feedkeys("\<LeftMouse>", "xt")
+  call assert_equal([0, 2, 8, 0], getpos('.'))
+  call test_setmouse(5, 1)
+  call feedkeys("\<LeftMouse>", "xt")
+  call assert_equal([0, 2, 1, 0], getpos('.'))
+  bwipe!
+  let &mouse = save_mouse
 endfunc
 
 " Must be last.

@@ -229,7 +229,7 @@ EXTERN bool did_emsg;                       // set by emsg() when the message
 EXTERN bool called_vim_beep;                // set if vim_beep() is called
 EXTERN bool did_emsg_syntax;                // did_emsg set because of a
                                             // syntax error
-EXTERN int called_emsg;                     // always set by emsg()
+EXTERN int called_emsg;                     // always incremented by emsg()
 EXTERN int ex_exitval INIT(= 0);            // exit value for ex mode
 EXTERN bool emsg_on_display INIT(= false);  // there is an error message
 EXTERN bool rc_did_emsg INIT(= false);      // vim_regcomp() called emsg()
@@ -509,7 +509,7 @@ EXTERN int full_screen INIT(= false);
 /// .vimrc in current directory.
 EXTERN int secure INIT(= 0);
 
-/// Non-zero when changing text and jumping to another window/buffer is not
+/// Non-zero when changing text and jumping to another window or editing another buffer is not
 /// allowed.
 EXTERN int textlock INIT(= 0);
 
@@ -636,6 +636,10 @@ EXTERN int motion_force INIT(=0);       // motion force for pending operator
 
 // Ex Mode (Q) state
 EXTERN bool exmode_active INIT(= false);  // true if Ex mode is active
+
+/// Flag set when normal_check() should return 0 when entering Ex mode.
+EXTERN bool pending_exmode_active INIT(= false);
+
 EXTERN bool ex_no_reprint INIT(=false);   // No need to print after z or p.
 
 // 'inccommand' command preview state
@@ -955,6 +959,7 @@ EXTERN char e_listdictblobarg[] INIT(= N_("E896: Argument of %s must be a List, 
 EXTERN char e_readerrf[] INIT(= N_("E47: Error while reading errorfile"));
 EXTERN char e_sandbox[] INIT(= N_("E48: Not allowed in sandbox"));
 EXTERN char e_secure[] INIT(= N_("E523: Not allowed here"));
+EXTERN char e_textlock[] INIT(= N_("E565: Not allowed to change text or change window"));
 EXTERN char e_screenmode[] INIT(= N_("E359: Screen mode setting not supported"));
 EXTERN char e_scroll[] INIT(= N_("E49: Invalid scroll size"));
 EXTERN char e_shellempty[] INIT(= N_("E91: 'shell' option is empty"));

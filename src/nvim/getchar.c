@@ -1545,12 +1545,16 @@ int vgetc(void)
         }
         break;
 
+      case K_KUP:
       case K_XUP:
         c = K_UP; break;
+      case K_KDOWN:
       case K_XDOWN:
         c = K_DOWN; break;
+      case K_KLEFT:
       case K_XLEFT:
         c = K_LEFT; break;
+      case K_KRIGHT:
       case K_XRIGHT:
         c = K_RIGHT; break;
       }
@@ -2470,6 +2474,11 @@ static int vgetorpeek(bool advance)
             c = ESC;
           }
           tc = c;
+
+          // return 0 in normal_check()
+          if (pending_exmode_active) {
+            exmode_active = true;
+          }
 
           // no chars to block abbreviations for
           typebuf.tb_no_abbr_cnt = 0;

@@ -2646,7 +2646,7 @@ char_u *getcmdline(int firstc, long count, int indent, bool do_concat FUNC_ATTR_
 /// @param[in]  highlight_callback  Callback used for highlighting user input.
 ///
 /// @return [allocated] Command line or NULL.
-char *getcmdline_prompt(const char firstc, const char *const prompt, const int attr,
+char *getcmdline_prompt(const int firstc, const char *const prompt, const int attr,
                         const int xp_context, const char *const xp_arg,
                         const Callback highlight_callback)
   FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_MALLOC
@@ -2696,14 +2696,12 @@ char_u *get_cmdprompt(void)
   return ccline.cmdprompt;
 }
 
-/*
- * Return TRUE when the text must not be changed and we can't switch to
- * another window or buffer.  Used when editing the command line etc.
- */
-int text_locked(void)
+/// Return true when the text must not be changed and we can't switch to
+/// another window or buffer.  True when editing the command line etc.
+bool text_locked(void)
 {
   if (cmdwin_type != 0) {
-    return TRUE;
+    return true;
   }
   return textlock != 0;
 }
@@ -2722,8 +2720,19 @@ char *get_text_locked_msg(void)
   if (cmdwin_type != 0) {
     return e_cmdwin;
   } else {
-    return e_secure;
+    return e_textlock;
   }
+}
+
+/// Check for text, window or buffer locked.
+/// Give an error message and return true if something is locked.
+bool text_or_buf_locked(void)
+{
+  if (text_locked()) {
+    text_locked_msg();
+    return true;
+  }
+  return curbuf_locked();
 }
 
 /// Check if "curbuf->b_ro_locked" or "allbuf_lock" is set and
@@ -3213,7 +3222,7 @@ static void draw_cmdline(int start, int len)
       int u8cc[MAX_MCO];
       int u8c = utfc_ptr2char_len(p, u8cc, start + len - i);
       mb_l = utfc_ptr2len_len(p, start + len - i);
-      if (arabic_char(u8c)) {
+      if (ARABIC_CHAR(u8c)) {
         do_arabicshape = true;
         break;
       }
@@ -3249,7 +3258,7 @@ static void draw_cmdline(int start, int len)
       int u8cc[MAX_MCO];
       int u8c = utfc_ptr2char_len(p, u8cc, start + len - i);
       mb_l = utfc_ptr2len_len(p, start + len - i);
-      if (arabic_char(u8c)) {
+      if (ARABIC_CHAR(u8c)) {
         int pc;
         int pc1 = 0;
         int nc = 0;
@@ -4323,6 +4332,7 @@ void ExpandEscape(expand_T *xp, char_u *str, int numfiles, char_u **files, int o
 {
   int i;
   char_u *p;
+  const int vse_what = xp->xp_context == EXPAND_BUFFERS ? VSE_BUFFER : VSE_NONE;
 
   /*
    * May change home directory back to "~"
@@ -4354,10 +4364,10 @@ void ExpandEscape(expand_T *xp, char_u *str, int numfiles, char_u **files, int o
 #endif
         }
 #ifdef BACKSLASH_IN_FILENAME
-        p = (char_u *)vim_strsave_fnameescape((const char *)files[i], false);
+        p = (char_u *)vim_strsave_fnameescape((const char *)files[i], vse_what);
 #else
         p = (char_u *)vim_strsave_fnameescape((const char *)files[i],
-                                              xp->xp_shell);
+                                              xp->xp_shell ? VSE_SHELL : vse_what);
 #endif
         xfree(files[i]);
         files[i] = p;
@@ -4389,25 +4399,30 @@ void ExpandEscape(expand_T *xp, char_u *str, int numfiles, char_u **files, int o
   }
 }
 
-/// Escape special characters in a file name for use as a command argument
+/// Escape special characters in "fname", depending on "what":
 ///
 /// @param[in]  fname  File name to escape.
-/// @param[in]  shell  What to escape for: if false, escapes for VimL command,
-///                    if true then it escapes for a shell command.
+/// @param[in]  what   What to escape for:
+/// - VSE_NONE: for when used as a file name argument after a Vim command.
+/// - VSE_SHELL: for a shell command.
+/// - VSE_BUFFER: for the ":buffer" command.
 ///
 /// @return [allocated] escaped file name.
-char *vim_strsave_fnameescape(const char *const fname, const bool shell FUNC_ATTR_UNUSED)
+char *vim_strsave_fnameescape(const char *const fname, const int what)
   FUNC_ATTR_NONNULL_RET FUNC_ATTR_MALLOC FUNC_ATTR_NONNULL_ALL
 {
 #ifdef BACKSLASH_IN_FILENAME
 # define PATH_ESC_CHARS " \t\n*?[{`%#'\"|!<"
+# define BUFFER_ESC_CHARS ((char_u *)" \t\n*?[`%#'\"|!<")
   char_u buf[sizeof(PATH_ESC_CHARS)];
   int j = 0;
 
-  // Don't escape '[', '{' and '!' if they are in 'isfname'.
-  for (const char *s = PATH_ESC_CHARS; *s != NUL; s++) {
-    if ((*s != '[' && *s != '{' && *s != '!') || !vim_isfilec(*s)) {
-      buf[j++] = *s;
+  // Don't escape '[', '{' and '!' if they are in 'isfname' and for the
+  // ":buffer" command.
+  for (const char *p = what == VSE_BUFFER ? BUFFER_ESC_CHARS : PATH_ESC_CHARS;
+       *p != NUL; p++) {
+    if ((*p != '[' && *p != '{' && *p != '!') || !vim_isfilec(*p)) {
+      buf[j++] = *p;
     }
   }
   buf[j] = NUL;
@@ -4416,9 +4431,12 @@ char *vim_strsave_fnameescape(const char *const fname, const bool shell FUNC_ATT
 #else
 # define PATH_ESC_CHARS ((char_u *)" \t\n*?[{`$\\%#'\"|!<")
 # define SHELL_ESC_CHARS ((char_u *)" \t\n*?[{`$\\%#'\"|!<>();&")
+# define BUFFER_ESC_CHARS ((char_u *)" \t\n*?[`$\\%#'\"|!<")
   char *p =
-    (char *)vim_strsave_escaped((const char_u *)fname, (shell ? SHELL_ESC_CHARS : PATH_ESC_CHARS));
-  if (shell && csh_like_shell()) {
+    (char *)vim_strsave_escaped((const char_u *)fname,
+                                what == VSE_SHELL ? SHELL_ESC_CHARS
+                                : what == VSE_BUFFER ? BUFFER_ESC_CHARS : PATH_ESC_CHARS);
+  if (what == VSE_SHELL && csh_like_shell()) {
     // For csh and similar shells need to put two backslashes before '!'.
     // One is taken by Vim, one by the shell.
     char *s = (char *)vim_strsave_escaped((const char_u *)p,
@@ -6600,9 +6618,9 @@ static int open_cmdwin(void)
   bool save_exmode = exmode_active;
   int save_cmdmsg_rl = cmdmsg_rl;
 
+  // Can't do this when text or buffer is locked.
   // Can't do this recursively.  Can't do it when typing a password.
-  if (cmdwin_type != 0
-      || cmdline_star > 0) {
+  if (text_or_buf_locked() || cmdwin_type != 0 || cmdline_star > 0) {
     beep_flush();
     return K_IGNORE;
   }

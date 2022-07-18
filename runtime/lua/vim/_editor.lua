@@ -614,7 +614,7 @@ function vim._expand_pat(pat, env)
   local function insert_keys(obj)
     for k, _ in pairs(obj) do
       if type(k) == 'string' and string.sub(k, 1, string.len(match_part)) == match_part then
-        table.insert(keys, k)
+        keys[k] = true
       end
     end
   end
@@ -630,6 +630,7 @@ function vim._expand_pat(pat, env)
     insert_keys(vim._submodules)
   end
 
+  keys = vim.tbl_keys(keys)
   table.sort(keys)
 
   return keys, #prefix_match_pat
@@ -739,7 +740,12 @@ function vim._cs_remote(rcid, server_addr, connect_error, args)
     f_tab = true
   elseif subcmd == 'silent' then
     f_silent = true
-  elseif subcmd == 'wait' or subcmd == 'wait-silent' or subcmd == 'tab-wait' or subcmd == 'tab-wait-silent' then
+  elseif
+    subcmd == 'wait'
+    or subcmd == 'wait-silent'
+    or subcmd == 'tab-wait'
+    or subcmd == 'tab-wait-silent'
+  then
     return { errmsg = 'E5600: Wait commands not yet implemented in nvim' }
   elseif subcmd == 'tab-silent' then
     f_tab = true
@@ -795,10 +801,52 @@ function vim.deprecate(name, alternative, version, plugin, backtrace)
   local message = name .. ' is deprecated'
   plugin = plugin or 'Nvim'
   message = alternative and (message .. ', use ' .. alternative .. ' instead.') or message
-  message = message .. ' See :h deprecated\nThis function will be removed in ' .. plugin .. ' version ' .. version
+  message = message
+    .. ' See :h deprecated\nThis function will be removed in '
+    .. plugin
+    .. ' version '
+    .. version
   if vim.notify_once(message, vim.log.levels.WARN) and backtrace ~= false then
     vim.notify(debug.traceback('', 2):sub(2), vim.log.levels.WARN)
   end
+end
+
+--- Create builtin mappings (incl. menus).
+--- Called once on startup.
+function vim._init_default_mappings()
+  -- mappings
+
+  --@private
+  local function map(mode, lhs, rhs)
+    vim.api.nvim_set_keymap(mode, lhs, rhs, { noremap = true, desc = 'Nvim builtin' })
+  end
+
+  map('n', 'Y', 'y$')
+  -- Use normal! <C-L> to prevent inserting raw <C-L> when using i_<C-O>. #17473
+  map('n', '<C-L>', '<Cmd>nohlsearch<Bar>diffupdate<Bar>normal! <C-L><CR>')
+  map('i', '<C-U>', '<C-G>u<C-U>')
+  map('i', '<C-W>', '<C-G>u<C-W>')
+  map('x', '*', 'y/\\V<C-R>"<CR>')
+  map('x', '#', 'y?\\V<C-R>"<CR>')
+  -- Use : instead of <Cmd> so that ranges are supported. #19365
+  map('n', '&', ':&&<CR>')
+
+  -- menus
+
+  -- TODO VimScript, no l10n
+  vim.cmd([[
+    aunmenu *
+    vnoremenu PopUp.Cut                     "+x
+    vnoremenu PopUp.Copy                    "+y
+    anoremenu PopUp.Paste                   "+gP
+    vnoremenu PopUp.Paste                   "+P
+    vnoremenu PopUp.Delete                  "_x
+    nnoremenu PopUp.Select\ All             ggVG
+    vnoremenu PopUp.Select\ All             gg0oG$
+    inoremenu PopUp.Select\ All             <C-Home><C-O>VG
+    anoremenu PopUp.-1-                     <Nop>
+    anoremenu PopUp.How-to\ disable\ mouse  <Cmd>help disable-mouse<CR>
+  ]])
 end
 
 require('vim._meta')
