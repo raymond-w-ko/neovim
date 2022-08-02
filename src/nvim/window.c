@@ -2150,12 +2150,11 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       } else {
         next_curwin_size = -1;
         FOR_ALL_FRAMES(fr, topfr->fr_child) {
-          // If 'winfixwidth' set keep the window width if
-          // possible.
-          // Watch out for this window being the next_curwin.
           if (!frame_fixed_width(fr)) {
             continue;
           }
+          // If 'winfixwidth' set keep the window width if possible.
+          // Watch out for this window being the next_curwin.
           n = frame_minwidth(fr, NOWIN);
           new_size = fr->fr_width;
           if (frame_has_win(fr, next_curwin)) {
@@ -2281,12 +2280,11 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       } else {
         next_curwin_size = -1;
         FOR_ALL_FRAMES(fr, topfr->fr_child) {
-          // If 'winfixheight' set keep the window height if
-          // possible.
-          // Watch out for this window being the next_curwin.
           if (!frame_fixed_height(fr)) {
             continue;
           }
+          // If 'winfixheight' set keep the window height if possible.
+          // Watch out for this window being the next_curwin.
           n = frame_minheight(fr, NOWIN);
           new_size = fr->fr_height;
           if (frame_has_win(fr, next_curwin)) {
@@ -3898,9 +3896,7 @@ void close_others(int message, int forceit)
         continue;
       }
     }
-    win_close(wp,
-              !buf_hide(wp->w_buffer) && !bufIsChanged(wp->w_buffer),
-              false);
+    win_close(wp, !buf_hide(wp->w_buffer) && !bufIsChanged(wp->w_buffer), false);
   }
 
   if (message && !ONE_WINDOW) {
@@ -4297,7 +4293,7 @@ static int leave_tabpage(buf_T *new_curbuf, bool trigger_leave_autocmds)
   tp->tp_prevwin = prevwin;
   tp->tp_firstwin = firstwin;
   tp->tp_lastwin = lastwin;
-  tp->tp_old_Rows = Rows;
+  tp->tp_old_Rows_avail = ROWS_AVAIL;
   tp->tp_old_Columns = Columns;
   firstwin = NULL;
   lastwin = NULL;
@@ -4337,10 +4333,7 @@ static void enter_tabpage(tabpage_T *tp, buf_T *old_curbuf, bool trigger_enter_a
   const int row = win_comp_pos();  // recompute w_winrow for all windows
   diff_need_scrollbind = true;
 
-  // The tabpage line may have appeared or disappeared, may need to resize
-  // the frames for that.  When the Vim window was resized need to update
-  // frame sizes too.  Use the stored value of p_ch, so that it can be
-  // different for each tab page.
+  // Use the stored value of p_ch, so that it can be different for each tab page.
   if (p_ch != curtab->tp_ch_used) {
     clear_cmdline = true;
   }
@@ -4353,7 +4346,9 @@ static void enter_tabpage(tabpage_T *tp, buf_T *old_curbuf, bool trigger_enter_a
     clear_cmdline = true;
   }
 
-  if (curtab->tp_old_Rows != Rows || (old_off != firstwin->w_winrow)) {
+  // The tabpage line may have appeared or disappeared, may need to resize the frames for that.
+  // When the Vim window was resized or ROWS_AVAIL changed need to update frame sizes too.
+  if (curtab->tp_old_Rows_avail != ROWS_AVAIL || (old_off != firstwin->w_winrow)) {
     win_new_screen_rows();
   }
   if (curtab->tp_old_Columns != Columns && starting == 0) {
@@ -5877,7 +5872,7 @@ void win_setminheight(void)
   // loop until there is a 'winminheight' that is possible
   while (p_wmh > 0) {
     const int room = Rows - (int)p_ch;
-    const int needed = min_rows() - 1;  // 1 was added for the cmdline
+    const int needed = min_rows();
     if (room >= needed) {
       break;
     }
@@ -6307,7 +6302,8 @@ void win_set_inner_size(win_T *wp)
 
     // There is no point in adjusting the scroll position when exiting.  Some
     // values might be invalid.
-    if (!exiting) {
+    // Skip scroll_to_fraction() when 'cmdheight' was set to one from zero.
+    if (!exiting && !made_cmdheight_nonzero) {
       scroll_to_fraction(wp, prev_height);
     }
     redraw_later(wp, NOT_VALID);  // SOME_VALID??
@@ -6474,7 +6470,7 @@ char_u *grab_file_name(long count, linenr_T *file_lnum)
     }
     // Only recognize ":123" here
     if (file_lnum != NULL && ptr[len] == ':' && isdigit(ptr[len + 1])) {
-      char_u *p = ptr + len + 1;
+      char *p = (char *)ptr + len + 1;
 
       *file_lnum = (linenr_T)getdigits_long(&p, false, 0);
     }
@@ -6600,7 +6596,7 @@ char_u *file_name_in_line(char_u *line, int col, int options, long count, char_u
       }
       p = skipwhite(p);
       if (isdigit(*p)) {
-        *file_lnum = (linenr_T)getdigits_long((char_u **)&p, false, 0);
+        *file_lnum = (linenr_T)getdigits_long(&p, false, 0);
       }
     }
   }
@@ -6830,7 +6826,9 @@ int min_rows(void)
     }
   }
   total += tabline_height() + global_stl_height();
-  total += 1;           // count the room for the command line
+  if (p_ch > 0) {
+    total += 1;           // count the room for the command line
+  }
   return total;
 }
 

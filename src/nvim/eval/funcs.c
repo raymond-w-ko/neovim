@@ -2130,11 +2130,11 @@ static void f_expandcmd(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   char *errormsg = NULL;
 
   rettv->v_type = VAR_STRING;
-  char_u *cmdstr = (char_u *)xstrdup(tv_get_string(&argvars[0]));
+  char *cmdstr = xstrdup(tv_get_string(&argvars[0]));
 
   exarg_T eap = {
-    .cmd = (char *)cmdstr,
-    .arg = (char *)cmdstr,
+    .cmd = cmdstr,
+    .arg = cmdstr,
     .usefilter = false,
     .nextcmd = NULL,
     .cmdidx = CMD_USER,
@@ -2145,7 +2145,7 @@ static void f_expandcmd(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   if (errormsg != NULL && *errormsg != NUL) {
     emsg(errormsg);
   }
-  rettv->vval.v_string = (char *)cmdstr;
+  rettv->vval.v_string = cmdstr;
 }
 
 /// "flatten(list[, {maxdepth}])" function
@@ -2898,6 +2898,11 @@ static void getchar_common(typval_T *argvars, typval_T *rettv)
   }
   no_mapping--;
   allow_keys--;
+
+  if (!ui_has_messages()) {
+    // redraw the screen after getchar()
+    update_screen(CLEAR);
+  }
 
   set_vim_var_nr(VV_MOUSE_WIN, 0);
   set_vim_var_nr(VV_MOUSE_WINID, 0);
@@ -8342,7 +8347,7 @@ static void f_setqflist(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 static int get_yank_type(char_u **const pp, MotionType *const yank_type, long *const block_len)
   FUNC_ATTR_NONNULL_ALL
 {
-  char_u *stropt = *pp;
+  char *stropt = (char *)(*pp);
   switch (*stropt) {
   case 'v':
   case 'c':  // character-wise selection
@@ -8364,7 +8369,7 @@ static int get_yank_type(char_u **const pp, MotionType *const yank_type, long *c
   default:
     return FAIL;
   }
-  *pp = stropt;
+  *pp = (char_u *)stropt;
   return OK;
 }
 
@@ -9498,8 +9503,12 @@ static void f_synIDattr(typval_T *argvars, typval_T *rettv, FunPtr fptr)
       p = highlight_has_attr(id, HL_ITALIC, modec);
     }
     break;
-  case 'n':    // name
-    p = get_highlight_name_ext(NULL, id - 1, false);
+  case 'n':
+    if (TOLOWER_ASC(what[1]) == 'o') {  // nocombine
+      p = highlight_has_attr(id, HL_NOCOMBINE, modec);
+    } else {  // name
+      p = get_highlight_name_ext(NULL, id - 1, false);
+    }
     break;
   case 'r':    // reverse
     p = highlight_has_attr(id, HL_INVERSE, modec);

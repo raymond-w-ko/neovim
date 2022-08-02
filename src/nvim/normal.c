@@ -2810,7 +2810,7 @@ void pop_showcmd(void)
 
 static void display_showcmd(void)
 {
-  if (p_ch < 1 && !ui_has(kUIMessages)) {
+  if (!ui_has_messages()) {
     return;
   }
 
@@ -2922,10 +2922,11 @@ void check_scrollbind(linenr_T topline_diff, long leftcol_diff)
   FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
     curwin = wp;
     curbuf = curwin->w_buffer;
-    // skip original window  and windows with 'noscrollbind'
+    // skip original window and windows with 'noscrollbind'
     if (curwin == old_curwin || !curwin->w_p_scb) {
       continue;
     }
+
     // do the vertical scroll
     if (want_ver) {
       if (old_curwin->w_p_diff && curwin->w_p_diff) {
