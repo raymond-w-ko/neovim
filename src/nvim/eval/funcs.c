@@ -13,6 +13,7 @@
 #include "nvim/change.h"
 #include "nvim/channel.h"
 #include "nvim/charset.h"
+#include "nvim/cmdhist.h"
 #include "nvim/context.h"
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
@@ -2639,7 +2640,7 @@ static void f_get(typval_T *argvars, typval_T *rettv, FunPtr fptr)
     if (argvars[0].v_type == VAR_PARTIAL) {
       pt = argvars[0].vval.v_partial;
     } else {
-      memset(&fref_pt, 0, sizeof(fref_pt));
+      CLEAR_FIELD(fref_pt);
       fref_pt.pt_name = (char_u *)argvars[0].vval.v_string;
       pt = &fref_pt;
     }
@@ -4301,87 +4302,6 @@ static void f_haslocaldir(typval_T *argvars, typval_T *rettv, FunPtr fptr)
     // We should never get here
     abort();
   }
-}
-
-/// "histadd()" function
-static void f_histadd(typval_T *argvars, typval_T *rettv, FunPtr fptr)
-{
-  HistoryType histype;
-
-  rettv->vval.v_number = false;
-  if (check_secure()) {
-    return;
-  }
-  const char *str = tv_get_string_chk(&argvars[0]);  // NULL on type error
-  histype = str != NULL ? get_histtype(str, strlen(str), false) : HIST_INVALID;
-  if (histype != HIST_INVALID) {
-    char buf[NUMBUFLEN];
-    str = tv_get_string_buf(&argvars[1], buf);
-    if (*str != NUL) {
-      init_history();
-      add_to_history(histype, (char_u *)str, false, NUL);
-      rettv->vval.v_number = true;
-      return;
-    }
-  }
-}
-
-/// "histdel()" function
-static void f_histdel(typval_T *argvars, typval_T *rettv, FunPtr fptr)
-{
-  int n;
-  const char *const str = tv_get_string_chk(&argvars[0]);  // NULL on type error
-  if (str == NULL) {
-    n = 0;
-  } else if (argvars[1].v_type == VAR_UNKNOWN) {
-    // only one argument: clear entire history
-    n = clr_history(get_histtype(str, strlen(str), false));
-  } else if (argvars[1].v_type == VAR_NUMBER) {
-    // index given: remove that entry
-    n = del_history_idx(get_histtype(str, strlen(str), false),
-                        (int)tv_get_number(&argvars[1]));
-  } else {
-    // string given: remove all matching entries
-    char buf[NUMBUFLEN];
-    n = del_history_entry(get_histtype(str, strlen(str), false),
-                          (char_u *)tv_get_string_buf(&argvars[1], buf));
-  }
-  rettv->vval.v_number = n;
-}
-
-/// "histget()" function
-static void f_histget(typval_T *argvars, typval_T *rettv, FunPtr fptr)
-{
-  HistoryType type;
-  int idx;
-
-  const char *const str = tv_get_string_chk(&argvars[0]);  // NULL on type error
-  if (str == NULL) {
-    rettv->vval.v_string = NULL;
-  } else {
-    type = get_histtype(str, strlen(str), false);
-    if (argvars[1].v_type == VAR_UNKNOWN) {
-      idx = get_history_idx(type);
-    } else {
-      idx = (int)tv_get_number_chk(&argvars[1], NULL);
-    }
-    // -1 on type error
-    rettv->vval.v_string = (char *)vim_strsave(get_history_entry(type, idx));
-  }
-  rettv->v_type = VAR_STRING;
-}
-
-/// "histnr()" function
-static void f_histnr(typval_T *argvars, typval_T *rettv, FunPtr fptr)
-{
-  const char *const history = tv_get_string_chk(&argvars[0]);
-  HistoryType i = history == NULL
-    ? HIST_INVALID
-    : get_histtype(history, strlen(history), false);
-  if (i != HIST_INVALID) {
-    i = get_history_idx(i);
-  }
-  rettv->vval.v_number = i;
 }
 
 /// "highlightID(name)" function
@@ -7207,7 +7127,6 @@ static int search_cmn(typval_T *argvars, pos_T *match_pos, int *flagsp)
   long time_limit = 0;
   int options = SEARCH_KEEP;
   int subpatnum;
-  searchit_arg_T sia;
   bool use_skip = false;
 
   const char *const pat = tv_get_string(&argvars[0]);
@@ -7258,9 +7177,10 @@ static int search_cmn(typval_T *argvars, pos_T *match_pos, int *flagsp)
 
   pos = save_cursor = curwin->w_cursor;
   pos_T firstpos = { 0 };
-  memset(&sia, 0, sizeof(sia));
-  sia.sa_stop_lnum = (linenr_T)lnum_stop;
-  sia.sa_tm = &tm;
+  searchit_arg_T sia = {
+    .sa_stop_lnum = (linenr_T)lnum_stop,
+    .sa_tm = &tm,
+  };
 
   // Repeat until {skip} returns false.
   for (;;) {
@@ -7879,10 +7799,10 @@ long do_searchpair(const char *spat, const char *mpat, const char *epat, int dir
   clearpos(&foundpos);
   pat = pat3;
   for (;;) {
-    searchit_arg_T sia;
-    memset(&sia, 0, sizeof(sia));
-    sia.sa_stop_lnum = lnum_stop;
-    sia.sa_tm = &tm;
+    searchit_arg_T sia = {
+      .sa_stop_lnum = lnum_stop,
+      .sa_tm = &tm,
+    };
 
     n = searchit(curwin, curbuf, &pos, NULL, dir, pat, 1L,
                  options, RE_SEARCH, &sia);
@@ -9580,7 +9500,7 @@ static void f_synconcealed(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   const linenr_T lnum = tv_get_lnum(argvars);
   const colnr_T col = (colnr_T)tv_get_number(&argvars[1]) - 1;
 
-  memset(str, NUL, sizeof(str));
+  CLEAR_FIELD(str);
 
   if (lnum >= 1 && lnum <= curbuf->b_ml.ml_line_count && col >= 0
       && (size_t)col <= STRLEN(ml_get(lnum)) && curwin->w_p_cole > 0) {
