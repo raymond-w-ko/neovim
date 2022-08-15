@@ -8,6 +8,11 @@ include(CheckCCompilerFlag)
 # Point CMake at any custom modules we may ship
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" "${PROJECT_SOURCE_DIR}/../cmake")
 
+get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT isMultiConfig)
+  set(BUILD_TYPE_STRING -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
+endif()
+
 # In Windows/MSVC CMAKE_BUILD_TYPE changes the paths/linking of the build
 # recipes (libuv, msgpack), make sure it is set
 if(NOT CMAKE_BUILD_TYPE)
@@ -63,11 +68,9 @@ endif()
 
 option(USE_EXISTING_SRC_DIR "Skip download of deps sources in case of existing source directory." OFF)
 
-if(WIN32)
-  find_package(Git)
-  if(NOT Git_FOUND)
-    message(FATAL_ERROR "Git is required to apply patches for Windows.")
-  endif()
+find_package(Git)
+if(NOT Git_FOUND)
+  message(FATAL_ERROR "Git is required to apply patches.")
 endif()
 
 if(UNIX)

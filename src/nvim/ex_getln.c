@@ -65,6 +65,7 @@
 #include "nvim/os_unix.h"
 #include "nvim/path.h"
 #include "nvim/popupmnu.h"
+#include "nvim/profile.h"
 #include "nvim/regexp.h"
 #include "nvim/screen.h"
 #include "nvim/search.h"
@@ -3664,7 +3665,7 @@ static void restore_cmdline(struct cmdline_info *ccp)
 /// @returns FAIL for failure, OK otherwise
 static bool cmdline_paste(int regname, bool literally, bool remcr)
 {
-  char_u *arg;
+  char *arg;
   char_u *p;
   bool allocated;
 
@@ -3697,7 +3698,7 @@ static bool cmdline_paste(int regname, bool literally, bool remcr)
 
     // When 'incsearch' is set and CTRL-R CTRL-W used: skip the duplicate
     // part of the word.
-    p = arg;
+    p = (char_u *)arg;
     if (p_is && regname == Ctrl_W) {
       char_u *w;
       int len;
@@ -5284,8 +5285,8 @@ static int ExpandFromContext(expand_T *xp, char_u *pat, int *num_file, char ***f
       { EXPAND_SYNTAX, get_syntax_name, true, true },
       { EXPAND_SYNTIME, get_syntime_arg, true, true },
       { EXPAND_HIGHLIGHT, (ExpandFunc)get_highlight_name, true, true },
-      { EXPAND_EVENTS, expand_get_event_name, true, true },
-      { EXPAND_AUGROUP, expand_get_augroup_name, true, true },
+      { EXPAND_EVENTS, expand_get_event_name, true, false },
+      { EXPAND_AUGROUP, expand_get_augroup_name, true, false },
       { EXPAND_CSCOPE, get_cscope_name, true, true },
       { EXPAND_SIGN, get_sign_name, true, true },
       { EXPAND_PROFILE, get_profile_name, true, true },
@@ -5669,163 +5670,9 @@ static int ExpandUserLua(expand_T *xp, int *num_file, char ***file)
   return OK;
 }
 
-/// Expand color scheme, compiler or filetype names.
-/// Search from 'runtimepath':
-///   'runtimepath'/{dirnames}/{pat}.vim
-/// When "flags" has DIP_START: search also from 'start' of 'packpath':
-///   'packpath'/pack/ * /start/ * /{dirnames}/{pat}.vim
-/// When "flags" has DIP_OPT: search also from 'opt' of 'packpath':
-///   'packpath'/pack/ * /opt/ * /{dirnames}/{pat}.vim
-/// When "flags" has DIP_LUA: search also performed for .lua files
-/// "dirnames" is an array with one or more directory names.
-static int ExpandRTDir(char_u *pat, int flags, int *num_file, char ***file, char *dirnames[])
-{
-  *num_file = 0;
-  *file = NULL;
-  size_t pat_len = STRLEN(pat);
-
-  garray_T ga;
-  ga_init(&ga, (int)sizeof(char *), 10);
-
-  // TODO(bfredl): this is bullshit, exandpath should not reinvent path logic.
-  for (int i = 0; dirnames[i] != NULL; i++) {
-    size_t size = STRLEN(dirnames[i]) + pat_len + 7;
-    char_u *s = xmalloc(size);
-    snprintf((char *)s, size, "%s/%s*.vim", dirnames[i], pat);
-    globpath(p_rtp, s, &ga, 0);
-    if (flags & DIP_LUA) {
-      snprintf((char *)s, size, "%s/%s*.lua", dirnames[i], pat);
-      globpath(p_rtp, s, &ga, 0);
-    }
-    xfree(s);
-  }
-
-  if (flags & DIP_START) {
-    for (int i = 0; dirnames[i] != NULL; i++) {
-      size_t size = STRLEN(dirnames[i]) + pat_len + 22;
-      char_u *s = xmalloc(size);
-      snprintf((char *)s, size, "pack/*/start/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
-      globpath(p_pp, s, &ga, 0);
-      if (flags & DIP_LUA) {
-        snprintf((char *)s, size, "pack/*/start/*/%s/%s*.lua", dirnames[i], pat);  // NOLINT
-        globpath(p_pp, s, &ga, 0);
-      }
-      xfree(s);
-    }
-
-    for (int i = 0; dirnames[i] != NULL; i++) {
-      size_t size = STRLEN(dirnames[i]) + pat_len + 22;
-      char_u *s = xmalloc(size);
-      snprintf((char *)s, size, "start/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
-      globpath(p_pp, s, &ga, 0);
-      if (flags & DIP_LUA) {
-        snprintf((char *)s, size, "start/*/%s/%s*.lua", dirnames[i], pat);  // NOLINT
-        globpath(p_pp, s, &ga, 0);
-      }
-      xfree(s);
-    }
-  }
-
-  if (flags & DIP_OPT) {
-    for (int i = 0; dirnames[i] != NULL; i++) {
-      size_t size = STRLEN(dirnames[i]) + pat_len + 20;
-      char_u *s = xmalloc(size);
-      snprintf((char *)s, size, "pack/*/opt/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
-      globpath(p_pp, s, &ga, 0);
-      if (flags & DIP_LUA) {
-        snprintf((char *)s, size, "pack/*/opt/*/%s/%s*.lua", dirnames[i], pat);  // NOLINT
-        globpath(p_pp, s, &ga, 0);
-      }
-      xfree(s);
-    }
-
-    for (int i = 0; dirnames[i] != NULL; i++) {
-      size_t size = STRLEN(dirnames[i]) + pat_len + 20;
-      char_u *s = xmalloc(size);
-      snprintf((char *)s, size, "opt/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
-      globpath(p_pp, s, &ga, 0);
-      if (flags & DIP_LUA) {
-        snprintf((char *)s, size, "opt/*/%s/%s*.lua", dirnames[i], pat);  // NOLINT
-        globpath(p_pp, s, &ga, 0);
-      }
-      xfree(s);
-    }
-  }
-
-  for (int i = 0; i < ga.ga_len; i++) {
-    char_u *match = ((char_u **)ga.ga_data)[i];
-    char_u *s = match;
-    char_u *e = s + STRLEN(s);
-    if (e - s > 4 && (STRNICMP(e - 4, ".vim", 4) == 0
-                      || ((flags & DIP_LUA)
-                          && STRNICMP(e - 4, ".lua", 4) == 0))) {
-      e -= 4;
-      for (s = e; s > match; MB_PTR_BACK(match, s)) {
-        if (vim_ispathsep(*s)) {
-          break;
-        }
-      }
-      s++;
-      *e = NUL;
-      assert((e - s) + 1 >= 0);
-      memmove(match, s, (size_t)(e - s) + 1);
-    }
-  }
-
-  if (GA_EMPTY(&ga)) {
-    return FAIL;
-  }
-
-  /* Sort and remove duplicates which can happen when specifying multiple
-   * directories in dirnames. */
-  ga_remove_duplicate_strings(&ga);
-
-  *file = ga.ga_data;
-  *num_file = ga.ga_len;
-  return OK;
-}
-
-/// Expand loadplugin names:
-/// 'packpath'/pack/ * /opt/{pat}
-static int ExpandPackAddDir(char_u *pat, int *num_file, char ***file)
-{
-  garray_T ga;
-
-  *num_file = 0;
-  *file = NULL;
-  size_t pat_len = STRLEN(pat);
-  ga_init(&ga, (int)sizeof(char *), 10);
-
-  size_t buflen = pat_len + 26;
-  char_u *s = xmalloc(buflen);
-  snprintf((char *)s, buflen, "pack/*/opt/%s*", pat);  // NOLINT
-  globpath(p_pp, s, &ga, 0);
-  snprintf((char *)s, buflen, "opt/%s*", pat);  // NOLINT
-  globpath(p_pp, s, &ga, 0);
-  xfree(s);
-
-  for (int i = 0; i < ga.ga_len; i++) {
-    char_u *match = ((char_u **)ga.ga_data)[i];
-    s = (char_u *)path_tail((char *)match);
-    memmove(match, s, STRLEN(s) + 1);
-  }
-
-  if (GA_EMPTY(&ga)) {
-    return FAIL;
-  }
-
-  // Sort and remove duplicates which can happen when specifying multiple
-  // directories in dirnames.
-  ga_remove_duplicate_strings(&ga);
-
-  *file = ga.ga_data;
-  *num_file = ga.ga_len;
-  return OK;
-}
-
 /// Expand `file` for all comma-separated directories in `path`.
 /// Adds matches to `ga`.
-void globpath(char_u *path, char_u *file, garray_T *ga, int expand_options)
+void globpath(char *path, char_u *file, garray_T *ga, int expand_options)
 {
   expand_T xpc;
   ExpandInit(&xpc);
@@ -5836,7 +5683,7 @@ void globpath(char_u *path, char_u *file, garray_T *ga, int expand_options)
   // Loop over all entries in {path}.
   while (*path != NUL) {
     // Copy one item of the path to buf[] and concatenate the file name.
-    copy_option_part((char **)&path, (char *)buf, MAXPATHL, ",");
+    copy_option_part(&path, (char *)buf, MAXPATHL, ",");
     if (STRLEN(buf) + STRLEN(file) + 2 < MAXPATHL) {
       add_pathsep((char *)buf);
       STRCAT(buf, file);  // NOLINT
@@ -5998,26 +5845,26 @@ int get_cmdline_firstc(void)
 /// @param num2 to
 ///
 /// @return OK if parsed successfully, otherwise FAIL.
-int get_list_range(char_u **str, int *num1, int *num2)
+int get_list_range(char **str, int *num1, int *num2)
 {
   int len;
   int first = false;
   varnumber_T num;
 
-  *str = (char_u *)skipwhite((char *)(*str));
+  *str = skipwhite((*str));
   if (**str == '-' || ascii_isdigit(**str)) {  // parse "from" part of range
-    vim_str2nr(*str, NULL, &len, 0, &num, NULL, 0, false);
+    vim_str2nr((char_u *)(*str), NULL, &len, 0, &num, NULL, 0, false);
     *str += len;
     *num1 = (int)num;
     first = true;
   }
-  *str = (char_u *)skipwhite((char *)(*str));
+  *str = skipwhite((*str));
   if (**str == ',') {                   // parse "to" part of range
-    *str = (char_u *)skipwhite((char *)(*str) + 1);
-    vim_str2nr(*str, NULL, &len, 0, &num, NULL, 0, false);
+    *str = skipwhite((*str) + 1);
+    vim_str2nr((char_u *)(*str), NULL, &len, 0, &num, NULL, 0, false);
     if (len > 0) {
       *num2 = (int)num;
-      *str = (char_u *)skipwhite((char *)(*str) + len);
+      *str = skipwhite((*str) + len);
     } else if (!first) {                  // no number given at all
       return FAIL;
     }
