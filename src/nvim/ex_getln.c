@@ -15,6 +15,7 @@
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/vim.h"
 #include "nvim/arabic.h"
+#include "nvim/arglist.h"
 #include "nvim/ascii.h"
 #include "nvim/assert.h"
 #include "nvim/buffer.h"
@@ -2155,14 +2156,14 @@ static int command_line_handle_key(CommandLineState *s)
                 if (i > 0) {
                   ccline.cmdbuff[len] = '\\';
                 }
-                ++len;
+                len++;
               }
 
               if (i > 0) {
                 ccline.cmdbuff[len] = p[j];
               }
             }
-            ++len;
+            len++;
           }
 
           if (i == 0) {
@@ -3588,7 +3589,7 @@ void put_on_cmdline(char_u *str, int len, int redraw)
       msg_col -= i;
       if (msg_col < 0) {
         msg_col += Columns;
-        --msg_row;
+        msg_row--;
       }
     }
   }
@@ -4134,9 +4135,9 @@ char_u *ExpandOne(expand_T *xp, char_u *str, char_u *orig, int options, int mode
         if (findex == -1) {
           findex = xp->xp_numfiles;
         }
-        --findex;
+        findex--;
       } else {  // mode == WILD_NEXT
-        ++findex;
+        findex++;
       }
 
       /*
@@ -4876,7 +4877,7 @@ char_u *addstar(char_u *fname, size_t len, int context)
         && vim_strchr((char *)retval, '`') == NULL) {
       retval[len++] = '*';
     } else if (len > 0 && retval[len - 1] == '$') {
-      --len;
+      len--;
     }
     retval[len] = NUL;
   }
@@ -5517,7 +5518,7 @@ static void expand_shellcmd(char_u *filepat, int *num_file, char ***file, int fl
       }
     }
     if (*e != NUL) {
-      ++e;
+      e++;
     }
   }
   *file = ga.ga_data;

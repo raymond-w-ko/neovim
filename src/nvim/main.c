@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "nvim/arglist.h"
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
@@ -1244,8 +1245,8 @@ static void command_line_scan(mparm_T *parmp)
             } else if (argv[0][0] == '-') {
               // "-S" followed by another option: use default session file.
               a = SESSION_FILE;
-              ++argc;
-              --argv;
+              argc++;
+              argv--;
             } else {
               a = argv[0];
             }
@@ -1615,9 +1616,9 @@ static void create_windows(mparm_T *parmp)
     // Watch out for autocommands that delete a window.
     //
     // Don't execute Win/Buf Enter/Leave autocommands here
-    ++autocmd_no_enter;
-    ++autocmd_no_leave;
-    dorewind = TRUE;
+    autocmd_no_enter++;
+    autocmd_no_leave++;
+    dorewind = true;
     while (done++ < 1000) {
       if (dorewind) {
         if (parmp->window_layout == WIN_TABS) {
@@ -1679,8 +1680,8 @@ static void create_windows(mparm_T *parmp)
       curwin = firstwin;
     }
     curbuf = curwin->w_buffer;
-    --autocmd_no_enter;
-    --autocmd_no_leave;
+    autocmd_no_enter--;
+    autocmd_no_leave--;
   }
 }
 
@@ -1697,8 +1698,8 @@ static void edit_buffers(mparm_T *parmp, char_u *cwd)
   /*
    * Don't execute Win/Buf Enter/Leave autocommands here
    */
-  ++autocmd_no_enter;
-  ++autocmd_no_leave;
+  autocmd_no_enter++;
+  autocmd_no_leave++;
 
   // When w_arg_idx is -1 remove the window (see create_windows()).
   if (curwin->w_arg_idx == -1) {
@@ -1784,7 +1785,7 @@ static void edit_buffers(mparm_T *parmp, char_u *cwd)
   if (parmp->window_layout == WIN_TABS) {
     goto_tabpage(1);
   }
-  --autocmd_no_enter;
+  autocmd_no_enter--;
 
   // make the first window the current window
   win = firstwin;
@@ -1798,7 +1799,7 @@ static void edit_buffers(mparm_T *parmp, char_u *cwd)
   }
   win_enter(win, false);
 
-  --autocmd_no_leave;
+  autocmd_no_leave--;
   TIME_MSG("editing files in windows");
   if (parmp->window_count > 1 && parmp->window_layout != WIN_TABS) {
     win_equal(curwin, false, 'b');      // adjust heights
