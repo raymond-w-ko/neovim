@@ -144,25 +144,6 @@ bool os_isdir(const char_u *name)
   return true;
 }
 
-/// Check if the given path is a directory and is executable.
-/// Gives the same results as `os_isdir()` on Windows.
-///
-/// @return `true` if `name` is a directory and executable.
-bool os_isdir_executable(const char *name)
-  FUNC_ATTR_NONNULL_ALL
-{
-  int32_t mode = os_getperm(name);
-  if (mode < 0) {
-    return false;
-  }
-
-#ifdef WIN32
-  return (S_ISDIR(mode));
-#else
-  return (S_ISDIR(mode) && (S_IXUSR & mode));
-#endif
-}
-
 /// Check what `name` is:
 /// @return NODE_NORMAL: file or directory (or doesn't exist)
 ///         NODE_WRITABLE: writable device, socket, fifo, etc.
@@ -930,7 +911,7 @@ int os_mkdir_recurse(const char *const dir, int32_t mode, char **const failed_di
   // We're done when it's "/" or "c:/".
   const size_t dirlen = strlen(dir);
   char *const curdir = xmemdupz(dir, dirlen);
-  char *const past_head = (char *)get_past_head((char_u *)curdir);
+  char *const past_head = get_past_head(curdir);
   char *e = curdir + dirlen;
   const char *const real_end = e;
   const char past_head_save = *past_head;

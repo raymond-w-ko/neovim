@@ -18,6 +18,7 @@
 #include "nvim/change.h"
 #include "nvim/cursor.h"
 #include "nvim/decoration.h"
+#include "nvim/drawscreen.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/extmark.h"
@@ -1020,7 +1021,7 @@ void nvim_buf_del_var(Buffer buffer, String name, Error *err)
 /// @param buffer     Buffer handle, or 0 for current buffer
 /// @param[out] err   Error details, if any
 /// @return Buffer name
-String nvim_buf_get_name(Buffer buffer, Error *err)
+String nvim_buf_get_name(Buffer buffer, Arena *arena, Error *err)
   FUNC_API_SINCE(1)
 {
   String rv = STRING_INIT;
@@ -1030,7 +1031,7 @@ String nvim_buf_get_name(Buffer buffer, Error *err)
     return rv;
   }
 
-  return cstr_to_string((char *)buf->b_ffname);
+  return cstr_as_string(buf->b_ffname);
 }
 
 /// Sets the full file name for a buffer

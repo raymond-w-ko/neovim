@@ -163,6 +163,8 @@ CTRL-W v						*CTRL-W_v*
 		3. 'eadirection' isn't "ver", and
 		4. one of the other windows is wider than the current or new
 		   window.
+		If N was given make the new window N columns wide, if
+		possible.
 		Note: In other places CTRL-Q does the same as CTRL-V, but here
 		it doesn't!
 
@@ -442,6 +444,7 @@ position is set to keep the same Visual area selected.
 These commands can also be executed with ":wincmd":
 
 :[count]winc[md] {arg}
+:winc[md] [count] {arg}
 		Like executing CTRL-W [count] {arg}.  Example: >
 			:wincmd j
 <		Moves to the window below the current one.

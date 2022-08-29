@@ -20,6 +20,7 @@
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
+#include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_docmd.h"
@@ -33,10 +34,10 @@
 #include "nvim/move.h"
 #include "nvim/normal.h"
 #include "nvim/option.h"
+#include "nvim/optionstr.h"
 #include "nvim/os/os.h"
 #include "nvim/os/shell.h"
 #include "nvim/path.h"
-#include "nvim/screen.h"
 #include "nvim/strings.h"
 #include "nvim/ui.h"
 #include "nvim/undo.h"
@@ -119,7 +120,7 @@ void diff_buf_delete(buf_T *buf)
         // don't redraw right away, more might change or buffer state
         // is invalid right now
         need_diff_redraw = true;
-        redraw_later(curwin, VALID);
+        redraw_later(curwin, UPD_VALID);
       }
     }
   }
@@ -572,9 +573,9 @@ static void diff_check_unchanged(tabpage_T *tp, diff_T *dp)
       if (dir == BACKWARD) {
         off_org = dp->df_count[i_org] - 1;
       }
-      char_u *line_org = vim_strsave(ml_get_buf(tp->tp_diffbuf[i_org],
-                                                dp->df_lnum[i_org] + off_org,
-                                                false));
+      char *line_org = (char *)vim_strsave(ml_get_buf(tp->tp_diffbuf[i_org],
+                                                      dp->df_lnum[i_org] + off_org,
+                                                      false));
 
       int i_new;
       for (i_new = i_org + 1; i_new < DB_COUNT; i_new++) {
@@ -591,9 +592,9 @@ static void diff_check_unchanged(tabpage_T *tp, diff_T *dp)
           break;
         }
 
-        if (diff_cmp(line_org, ml_get_buf(tp->tp_diffbuf[i_new],
-                                          dp->df_lnum[i_new] + off_new,
-                                          false)) != 0) {
+        if (diff_cmp((char_u *)line_org, ml_get_buf(tp->tp_diffbuf[i_new],
+                                                    dp->df_lnum[i_new] + off_new,
+                                                    false)) != 0) {
           break;
         }
       }
@@ -658,7 +659,7 @@ void diff_redraw(bool dofold)
       continue;
     }
 
-    redraw_later(wp, SOME_VALID);
+    redraw_later(wp, UPD_SOME_VALID);
     if (wp != curwin) {
       wp_other = wp;
     }
@@ -796,8 +797,8 @@ static int diff_write(buf_T *buf, diffin_T *din)
   }
 
   // Always use 'fileformat' set to "unix".
-  char_u *save_ff = buf->b_p_ff;
-  buf->b_p_ff = vim_strsave((char_u *)FF_UNIX);
+  char *save_ff = buf->b_p_ff;
+  buf->b_p_ff = xstrdup(FF_UNIX);
   const bool save_cmod_flags = cmdmod.cmod_flags;
   // Writing the buffer is an implementation detail of performing the diff,
   // so it shouldn't update the '[ and '] marks.
@@ -1147,7 +1148,7 @@ static int diff_file(diffio_T *dio)
                  (diff_flags & DIFF_IBLANK) ? "-B " : "",
                  (diff_flags & DIFF_ICASE) ? "-i " : "",
                  tmp_orig, tmp_new);
-    append_redir(cmd, len, (char *)p_srr, tmp_diff);
+    append_redir(cmd, len, p_srr, tmp_diff);
     block_autocmds();  // Avoid ShellCmdPost stuff
     (void)call_shell((char_u *)cmd,
                      kShellOptFilter | kShellOptSilent | kShellOptDoOut,
@@ -1373,7 +1374,7 @@ static void set_diff_option(win_T *wp, int value)
   curwin = wp;
   curbuf = curwin->w_buffer;
   curbuf->b_ro_locked++;
-  set_option_value("diff", (long)value, NULL, OPT_LOCAL);
+  set_option_value_give_err("diff", (long)value, NULL, OPT_LOCAL);
   curbuf->b_ro_locked--;
   curwin = old_curwin;
   curbuf = curwin->w_buffer;
@@ -1407,18 +1408,14 @@ void diff_win_options(win_T *wp, int addbuf)
     }
     wp->w_p_wrap = false;
   }
-  curwin = wp;  // -V519
-  curbuf = curwin->w_buffer;
 
   if (!wp->w_p_diff) {
     if (wp->w_p_diff_saved) {
       free_string_option(wp->w_p_fdm_save);
     }
-    wp->w_p_fdm_save = vim_strsave(wp->w_p_fdm);
+    wp->w_p_fdm_save = xstrdup(wp->w_p_fdm);
   }
-  set_string_option_direct("fdm", -1, "diff", OPT_LOCAL | OPT_FREE, 0);
-  curwin = old_curwin;
-  curbuf = curwin->w_buffer;
+  set_string_option_direct_in_win(wp, "fdm", -1, "diff", OPT_LOCAL | OPT_FREE, 0);
 
   if (!wp->w_p_diff) {
     wp->w_p_fen_save = wp->w_p_fen;
@@ -1427,12 +1424,12 @@ void diff_win_options(win_T *wp, int addbuf)
     if (wp->w_p_diff_saved) {
       free_string_option(wp->w_p_fdc_save);
     }
-    wp->w_p_fdc_save = vim_strsave(wp->w_p_fdc);
+    wp->w_p_fdc_save = xstrdup(wp->w_p_fdc);
   }
   free_string_option(wp->w_p_fdc);
-  wp->w_p_fdc = (char_u *)xstrdup("2");
+  wp->w_p_fdc = xstrdup("2");
   assert(diff_foldcolumn >= 0 && diff_foldcolumn <= 9);
-  snprintf((char *)wp->w_p_fdc, STRLEN(wp->w_p_fdc) + 1, "%d", diff_foldcolumn);
+  snprintf(wp->w_p_fdc, STRLEN(wp->w_p_fdc) + 1, "%d", diff_foldcolumn);
   wp->w_p_fen = true;
   wp->w_p_fdl = 0;
   foldUpdateAll(wp);
@@ -1451,7 +1448,7 @@ void diff_win_options(win_T *wp, int addbuf)
   if (addbuf) {
     diff_buf_add(wp->w_buffer);
   }
-  redraw_later(wp, NOT_VALID);
+  redraw_later(wp, UPD_NOT_VALID);
 }
 
 /// Set options not to show diffs.  For the current window or all windows.
@@ -1483,11 +1480,9 @@ void ex_diffoff(exarg_T *eap)
           }
         }
         free_string_option(wp->w_p_fdm);
-        wp->w_p_fdm = vim_strsave(*wp->w_p_fdm_save
-                                  ? wp->w_p_fdm_save
-                                  : (char_u *)"manual");
+        wp->w_p_fdm = xstrdup(*wp->w_p_fdm_save ? wp->w_p_fdm_save : "manual");
         free_string_option(wp->w_p_fdc);
-        wp->w_p_fdc = vim_strsave(wp->w_p_fdc_save);
+        wp->w_p_fdc = xstrdup(wp->w_p_fdc_save);
 
         if (wp->w_p_fdl == 0) {
           wp->w_p_fdl = wp->w_p_fdl_save;
@@ -1544,8 +1539,8 @@ static void diff_read(int idx_orig, int idx_new, diffio_T *dio)
   diff_T *dp = curtab->tp_first_diff;
   diff_T *dn, *dpl;
   diffout_T *dout = &dio->dio_diff;
-  char_u linebuf[LBUFLEN];  // only need to hold the diff line
-  char_u *line;
+  char linebuf[LBUFLEN];  // only need to hold the diff line
+  char *line;
   linenr_T off;
   int i;
   int notset = true;  // block "*dp" not set yet
@@ -1581,9 +1576,9 @@ static void diff_read(int idx_orig, int idx_new, diffio_T *dio)
         if (line_idx >= dout->dout_ga.ga_len) {
           break;      // did last line
         }
-        line = ((char_u **)dout->dout_ga.ga_data)[line_idx++];
+        line = ((char **)dout->dout_ga.ga_data)[line_idx++];
       } else {
-        if (vim_fgets(linebuf, LBUFLEN, fd)) {
+        if (vim_fgets((char_u *)linebuf, LBUFLEN, fd)) {
           break;      // end of file
         }
         line = linebuf;
@@ -1605,9 +1600,9 @@ static void diff_read(int idx_orig, int idx_new, diffio_T *dio)
         } else if ((STRNCMP(line, "@@ ", 3) == 0)) {
           diffstyle = DIFF_UNIFIED;
         } else if ((STRNCMP(line, "--- ", 4) == 0)  // -V501
-                   && (vim_fgets(linebuf, LBUFLEN, fd) == 0)  // -V501
+                   && (vim_fgets((char_u *)linebuf, LBUFLEN, fd) == 0)  // -V501
                    && (STRNCMP(line, "+++ ", 4) == 0)
-                   && (vim_fgets(linebuf, LBUFLEN, fd) == 0)  // -V501
+                   && (vim_fgets((char_u *)linebuf, LBUFLEN, fd) == 0)  // -V501
                    && (STRNCMP(line, "@@ ", 3) == 0)) {
           diffstyle = DIFF_UNIFIED;
         } else {
@@ -1621,7 +1616,7 @@ static void diff_read(int idx_orig, int idx_new, diffio_T *dio)
         if (!isdigit(*line)) {
           continue;   // not the start of a diff block
         }
-        if (parse_diff_ed(line, hunk) == FAIL) {
+        if (parse_diff_ed((char_u *)line, hunk) == FAIL) {
           continue;
         }
       } else {
@@ -1629,7 +1624,7 @@ static void diff_read(int idx_orig, int idx_new, diffio_T *dio)
         if (STRNCMP(line, "@@ ", 3) != 0) {
           continue;   // not the start of a diff block
         }
-        if (parse_diff_unified(line, hunk) == FAIL) {
+        if (parse_diff_unified((char_u *)line, hunk) == FAIL) {
           continue;
         }
       }
@@ -1925,11 +1920,11 @@ static bool diff_equal_entry(diff_T *dp, int idx1, int idx2)
   }
 
   for (int i = 0; i < dp->df_count[idx1]; i++) {
-    char_u *line = vim_strsave(ml_get_buf(curtab->tp_diffbuf[idx1],
-                                          dp->df_lnum[idx1] + i, false));
+    char *line = (char *)vim_strsave(ml_get_buf(curtab->tp_diffbuf[idx1],
+                                                dp->df_lnum[idx1] + i, false));
 
-    int cmp = diff_cmp(line, ml_get_buf(curtab->tp_diffbuf[idx2],
-                                        dp->df_lnum[idx2] + i, false));
+    int cmp = diff_cmp((char_u *)line, ml_get_buf(curtab->tp_diffbuf[idx2],
+                                                  dp->df_lnum[idx2] + i, false));
     xfree(line);
 
     if (cmp != 0) {
@@ -2144,7 +2139,7 @@ int diffopt_changed(void)
   long diff_algorithm_new = 0;
   long diff_indent_heuristic = 0;
 
-  char *p = (char *)p_dip;
+  char *p = p_dip;
   while (*p != NUL) {
     if (STRNCMP(p, "filler", 6) == 0) {
       p += 6;
@@ -2286,7 +2281,7 @@ bool diffopt_filler(void)
 bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
   FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  char_u *line_new;
+  char *line_new;
   int si_org;
   int si_new;
   int ei_org;
@@ -2295,7 +2290,7 @@ bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
   int l;
 
   // Make a copy of the line, the next ml_get() will invalidate it.
-  char_u *line_org = vim_strsave(ml_get_buf(wp->w_buffer, lnum, false));
+  char *line_org = (char *)vim_strsave(ml_get_buf(wp->w_buffer, lnum, false));
 
   int idx = diff_buf_idx(wp->w_buffer);
   if (idx == DB_COUNT) {
@@ -2327,8 +2322,8 @@ bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
         continue;
       }
       added = false;
-      line_new = ml_get_buf(curtab->tp_diffbuf[i],
-                            dp->df_lnum[i] + off, false);
+      line_new = (char *)ml_get_buf(curtab->tp_diffbuf[i],
+                                    dp->df_lnum[i] + off, false);
 
       // Search for start of difference
       si_org = si_new = 0;
@@ -2340,10 +2335,10 @@ bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
             || ((diff_flags & DIFF_IWHITEALL)
                 && (ascii_iswhite(line_org[si_org])
                     || ascii_iswhite(line_new[si_new])))) {
-          si_org = (int)((char_u *)skipwhite((char *)line_org + si_org) - line_org);
-          si_new = (int)((char_u *)skipwhite((char *)line_new + si_new) - line_new);
+          si_org = (int)(skipwhite(line_org + si_org) - line_org);
+          si_new = (int)(skipwhite(line_new + si_new) - line_new);
         } else {
-          if (!diff_equal_char(line_org + si_org, line_new + si_new, &l)) {
+          if (!diff_equal_char((char_u *)line_org + si_org, (char_u *)line_new + si_new, &l)) {
             break;
           }
           si_org += l;
@@ -2353,8 +2348,8 @@ bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
 
       // Move back to first byte of character in both lines (may
       // have "nn^" in line_org and "n^ in line_new).
-      si_org -= utf_head_off(line_org, line_org + si_org);
-      si_new -= utf_head_off(line_new, line_new + si_new);
+      si_org -= utf_head_off((char_u *)line_org, (char_u *)line_org + si_org);
+      si_new -= utf_head_off((char_u *)line_new, (char_u *)line_new + si_new);
 
       if (*startp > si_org) {
         *startp = si_org;
@@ -2383,11 +2378,11 @@ bool diff_find_change(win_T *wp, linenr_T lnum, int *startp, int *endp)
               ei_new--;
             }
           } else {
-            const char_u *p1 = line_org + ei_org;
-            const char_u *p2 = line_new + ei_new;
+            const char_u *p1 = (char_u *)line_org + ei_org;
+            const char_u *p2 = (char_u *)line_new + ei_new;
 
-            p1 -= utf_head_off(line_org, p1);
-            p2 -= utf_head_off(line_new, p2);
+            p1 -= utf_head_off((char_u *)line_org, p1);
+            p2 -= utf_head_off((char_u *)line_new, p2);
 
             if (!diff_equal_char(p1, p2, &l)) {
               break;
@@ -2516,7 +2511,7 @@ void ex_diffgetput(exarg_T *eap)
   diff_T *dfree;
   int i;
   int added;
-  char_u *p;
+  char *p;
   aco_save_T aco;
   buf_T *buf;
   linenr_T start_skip;
@@ -2570,18 +2565,18 @@ void ex_diffgetput(exarg_T *eap)
     }
   } else {
     // Buffer number or pattern given. Ignore trailing white space.
-    p = (char_u *)eap->arg + STRLEN(eap->arg);
-    while (p > (char_u *)eap->arg && ascii_iswhite(p[-1])) {
+    p = eap->arg + STRLEN(eap->arg);
+    while (p > eap->arg && ascii_iswhite(p[-1])) {
       p--;
     }
 
-    for (i = 0; ascii_isdigit(eap->arg[i]) && (char_u *)eap->arg + i < p; i++) {}
+    for (i = 0; ascii_isdigit(eap->arg[i]) && eap->arg + i < p; i++) {}
 
-    if ((char_u *)eap->arg + i == p) {
+    if (eap->arg + i == p) {
       // digits only
       i = (int)atol(eap->arg);
     } else {
-      i = buflist_findpat(eap->arg, (char *)p, false, true, false);
+      i = buflist_findpat(eap->arg, p, false, true, false);
 
       if (i < 0) {
         // error message already given
@@ -2723,8 +2718,8 @@ void ex_diffgetput(exarg_T *eap)
         if (nr > curtab->tp_diffbuf[idx_from]->b_ml.ml_line_count) {
           break;
         }
-        p = vim_strsave(ml_get_buf(curtab->tp_diffbuf[idx_from], nr, false));
-        ml_append(lnum + i - 1, (char *)p, 0, false);
+        p = (char *)vim_strsave(ml_get_buf(curtab->tp_diffbuf[idx_from], nr, false));
+        ml_append(lnum + i - 1, p, 0, false);
         xfree(p);
         added++;
         if (buf_empty && (curbuf->b_ml.ml_line_count == 2)) {

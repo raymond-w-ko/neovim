@@ -23,6 +23,7 @@
 #include "nvim/context.h"
 #include "nvim/decoration.h"
 #include "nvim/decoration_provider.h"
+#include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
@@ -34,6 +35,7 @@
 #include "nvim/fileio.h"
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
+#include "nvim/grid.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
@@ -50,12 +52,13 @@
 #include "nvim/msgpack_rpc/unpacker.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
+#include "nvim/optionstr.h"
 #include "nvim/os/input.h"
 #include "nvim/os/process.h"
-#include "nvim/popupmnu.h"
+#include "nvim/popupmenu.h"
 #include "nvim/runtime.h"
-#include "nvim/screen.h"
 #include "nvim/state.h"
+#include "nvim/statusline.h"
 #include "nvim/types.h"
 #include "nvim/ui.h"
 #include "nvim/vim.h"
@@ -92,7 +95,6 @@ Dictionary nvim_get_hl_by_name(String name, Boolean rgb, Error *err)
 }
 
 /// Gets a highlight definition by id. |hlID()|
-///
 /// @param hl_id Highlight id as returned by |hlID()|
 /// @param rgb Export RGB colors
 /// @param[out] err Error details, if any
@@ -181,35 +183,38 @@ void nvim_set_hl(Integer ns_id, String name, Dict(highlight) *val, Error *err)
   }
 }
 
-/// Set active namespace for highlights.
+/// Set active namespace for highlights. This can be set for a single window,
+/// see |nvim_win_set_hl_ns|.
 ///
-/// NB: this function can be called from async contexts, but the
-/// semantics are not yet well-defined. To start with
-/// |nvim_set_decoration_provider| on_win and on_line callbacks
-/// are explicitly allowed to change the namespace during a redraw cycle.
+/// @param ns_id the namespace to use
+/// @param[out] err Error details, if any
+void nvim_set_hl_ns(Integer ns_id, Error *err)
+  FUNC_API_SINCE(10)
+{
+  if (ns_id < 0) {
+    api_set_error(err, kErrorTypeValidation, "no such namespace");
+    return;
+  }
+
+  ns_hl_global = (NS)ns_id;
+  hl_check_ns();
+  redraw_all_later(UPD_NOT_VALID);
+}
+
+/// Set active namespace for highlights while redrawing.
+///
+/// This function meant to be called while redrawing, primarily from
+/// |nvim_set_decoration_provider| on_win and on_line callbacks, which
+/// are allowed to change the namespace during a redraw cycle.
 ///
 /// @param ns_id the namespace to activate
 /// @param[out] err Error details, if any
-void nvim__set_hl_ns(Integer ns_id, Error *err)
+void nvim_set_hl_ns_fast(Integer ns_id, Error *err)
+  FUNC_API_SINCE(10)
   FUNC_API_FAST
 {
-  if (ns_id >= 0) {
-    ns_hl_active = (NS)ns_id;
-  }
-
-  // TODO(bfredl): this is a little bit hackish.  Eventually we want a standard
-  // event path for redraws caused by "fast" events. This could tie in with
-  // better throttling of async events causing redraws, such as non-batched
-  // nvim_buf_set_extmark calls from async contexts.
-  if (!provider_active && !ns_hl_changed && must_redraw < NOT_VALID) {
-    multiqueue_put(main_loop.events, on_redraw_event, 0);
-  }
-  ns_hl_changed = true;
-}
-
-static void on_redraw_event(void **argv)
-{
-  redraw_all_later(NOT_VALID);
+  ns_hl_fast = (NS)ns_id;
+  hl_check_ns();
 }
 
 /// Sends input-keys to Nvim, subject to various quirks controlled by `mode`
@@ -479,7 +484,7 @@ Object nvim_notify(String msg, Integer log_level, Dictionary opts, Error *err)
   ADD_C(args, INTEGER_OBJ(log_level));
   ADD_C(args, DICTIONARY_OBJ(opts));
 
-  return nlua_exec(STATIC_CSTR_AS_STRING("return vim.notify(...)"), args, err);
+  return NLUA_EXEC_STATIC("return vim.notify(...)", args, err);
 }
 
 /// Calculates the number of display cells occupied by `text`.
@@ -1474,14 +1479,14 @@ void nvim_del_keymap(uint64_t channel_id, String mode, String lhs, Error *err)
 /// 1 is the |api-metadata| map (Dictionary).
 ///
 /// @returns 2-tuple [{channel-id}, {api-metadata}]
-Array nvim_get_api_info(uint64_t channel_id)
+Array nvim_get_api_info(uint64_t channel_id, Arena *arena)
   FUNC_API_SINCE(1) FUNC_API_FAST FUNC_API_REMOTE_ONLY
 {
-  Array rv = ARRAY_DICT_INIT;
+  Array rv = arena_array(arena, 2);
 
   assert(channel_id <= INT64_MAX);
-  ADD(rv, INTEGER_OBJ((int64_t)channel_id));
-  ADD(rv, DICTIONARY_OBJ(api_metadata()));
+  ADD_C(rv, INTEGER_OBJ((int64_t)channel_id));
+  ADD_C(rv, DICTIONARY_OBJ(api_metadata()));
 
   return rv;
 }
@@ -1540,9 +1545,9 @@ void nvim_set_client_info(uint64_t channel_id, String name, Dictionary version, 
   FUNC_API_SINCE(4) FUNC_API_REMOTE_ONLY
 {
   Dictionary info = ARRAY_DICT_INIT;
-  PUT(info, "name", copy_object(STRING_OBJ(name)));
+  PUT(info, "name", copy_object(STRING_OBJ(name), NULL));
 
-  version = copy_dictionary(version);
+  version = copy_dictionary(version, NULL);
   bool has_major = false;
   for (size_t i = 0; i < version.size; i++) {
     if (strequal(version.items[i].key.data, "major")) {
@@ -1555,9 +1560,9 @@ void nvim_set_client_info(uint64_t channel_id, String name, Dictionary version, 
   }
   PUT(info, "version", DICTIONARY_OBJ(version));
 
-  PUT(info, "type", copy_object(STRING_OBJ(type)));
-  PUT(info, "methods", DICTIONARY_OBJ(copy_dictionary(methods)));
-  PUT(info, "attributes", DICTIONARY_OBJ(copy_dictionary(attributes)));
+  PUT(info, "type", copy_object(STRING_OBJ(type), NULL));
+  PUT(info, "methods", DICTIONARY_OBJ(copy_dictionary(methods, NULL)));
+  PUT(info, "attributes", DICTIONARY_OBJ(copy_dictionary(attributes, NULL)));
 
   rpc_set_client_info(channel_id, info);
 }
@@ -1624,11 +1629,11 @@ Array nvim_list_chans(void)
 /// an error, it is a three-element array with the zero-based index of the call
 /// which resulted in an error, the error type and the error message. If an
 /// error occurred, the values from all preceding calls will still be returned.
-Array nvim_call_atomic(uint64_t channel_id, Array calls, Error *err)
+Array nvim_call_atomic(uint64_t channel_id, Array calls, Arena *arena, Error *err)
   FUNC_API_SINCE(1) FUNC_API_REMOTE_ONLY
 {
-  Array rv = ARRAY_DICT_INIT;
-  Array results = ARRAY_DICT_INIT;
+  Array rv = arena_array(arena, 2);
+  Array results = arena_array(arena, calls.size);
   Error nested_error = ERROR_INIT;
 
   size_t i;  // also used for freeing the variables
@@ -1637,21 +1642,21 @@ Array nvim_call_atomic(uint64_t channel_id, Array calls, Error *err)
       api_set_error(err,
                     kErrorTypeValidation,
                     "Items in calls array must be arrays");
-      goto validation_error;
+      goto theend;
     }
     Array call = calls.items[i].data.array;
     if (call.size != 2) {
       api_set_error(err,
                     kErrorTypeValidation,
                     "Items in calls array must be arrays of size 2");
-      goto validation_error;
+      goto theend;
     }
 
     if (call.items[0].type != kObjectTypeString) {
       api_set_error(err,
                     kErrorTypeValidation,
                     "Name must be String");
-      goto validation_error;
+      goto theend;
     }
     String name = call.items[0].data.string;
 
@@ -1659,7 +1664,7 @@ Array nvim_call_atomic(uint64_t channel_id, Array calls, Error *err)
       api_set_error(err,
                     kErrorTypeValidation,
                     "Args must be Array");
-      goto validation_error;
+      goto theend;
     }
     Array args = call.items[1].data.array;
 
@@ -1671,29 +1676,32 @@ Array nvim_call_atomic(uint64_t channel_id, Array calls, Error *err)
     if (ERROR_SET(&nested_error)) {
       break;
     }
-    Object result = handler.fn(channel_id, args, &nested_error);
+
+    Object result = handler.fn(channel_id, args, arena, &nested_error);
     if (ERROR_SET(&nested_error)) {
       // error handled after loop
       break;
     }
-
-    ADD(results, result);
+    // TODO(bfredl): wastefull copy. It could be avoided to encoding to msgpack
+    // directly here. But `result` might become invalid when next api function
+    // is called in the loop.
+    ADD_C(results, copy_object(result, arena));
+    if (!handler.arena_return) {
+      api_free_object(result);
+    }
   }
 
-  ADD(rv, ARRAY_OBJ(results));
+  ADD_C(rv, ARRAY_OBJ(results));
   if (ERROR_SET(&nested_error)) {
-    Array errval = ARRAY_DICT_INIT;
-    ADD(errval, INTEGER_OBJ((Integer)i));
-    ADD(errval, INTEGER_OBJ(nested_error.type));
-    ADD(errval, STRING_OBJ(cstr_to_string(nested_error.msg)));
-    ADD(rv, ARRAY_OBJ(errval));
+    Array errval = arena_array(arena, 3);
+    ADD_C(errval, INTEGER_OBJ((Integer)i));
+    ADD_C(errval, INTEGER_OBJ(nested_error.type));
+    ADD_C(errval, STRING_OBJ(copy_string(cstr_as_string(nested_error.msg), arena)));
+    ADD_C(rv, ARRAY_OBJ(errval));
   } else {
-    ADD(rv, NIL);
+    ADD_C(rv, NIL);
   }
-  goto theend;
 
-validation_error:
-  api_free_array(results);
 theend:
   api_clear_error(&nested_error);
   return rv;
@@ -1746,7 +1754,7 @@ static void write_msg(String message, bool to_err)
 /// @return its argument.
 Object nvim__id(Object obj)
 {
-  return copy_object(obj);
+  return copy_object(obj, NULL);
 }
 
 /// Returns array given as argument.
@@ -1759,7 +1767,7 @@ Object nvim__id(Object obj)
 /// @return its argument.
 Array nvim__id_array(Array arr)
 {
-  return copy_object(ARRAY_OBJ(arr)).data.array;
+  return copy_array(arr, NULL);
 }
 
 /// Returns dictionary given as argument.
@@ -1772,7 +1780,7 @@ Array nvim__id_array(Array arr)
 /// @return its argument.
 Dictionary nvim__id_dictionary(Dictionary dct)
 {
-  return copy_object(DICTIONARY_OBJ(dct)).data.dictionary;
+  return copy_dictionary(dct, NULL);
 }
 
 /// Returns floating-point value given as argument.
@@ -1798,6 +1806,7 @@ Dictionary nvim__stats(void)
   PUT(rv, "log_skip", INTEGER_OBJ(g_stats.log_skip));
   PUT(rv, "lua_refcount", INTEGER_OBJ(nlua_get_global_ref_count()));
   PUT(rv, "redraw", INTEGER_OBJ(g_stats.redraw));
+  PUT(rv, "arena_alloc_count", INTEGER_OBJ((Integer)arena_alloc_count));
   return rv;
 }
 
@@ -1834,11 +1843,9 @@ Array nvim_get_proc_children(Integer pid, Error *err)
   if (rv == 2) {
     // syscall failed (possibly because of kernel options), try shelling out.
     DLOG("fallback to vim._os_proc_children()");
-    Array a = ARRAY_DICT_INIT;
+    MAXSIZE_TEMP_ARRAY(a, 1);
     ADD(a, INTEGER_OBJ(pid));
-    String s = STATIC_CSTR_AS_STRING("return vim._os_proc_children(...)");
-    Object o = nlua_exec(s, a, err);
-    api_free_array(a);
+    Object o = NLUA_EXEC_STATIC("return vim._os_proc_children(...)", a, err);
     if (o.type == kObjectTypeArray) {
       rvobj = o.data.array;
     } else if (!ERROR_SET(err)) {
@@ -1879,12 +1886,9 @@ Object nvim_get_proc(Integer pid, Error *err)
   }
 #else
   // Cross-platform process info APIs are miserable, so use `ps` instead.
-  Array a = ARRAY_DICT_INIT;
+  MAXSIZE_TEMP_ARRAY(a, 1);
   ADD(a, INTEGER_OBJ(pid));
-  String s = cstr_to_string("return vim._os_proc_info(select(1, ...))");
-  Object o = nlua_exec(s, a, err);
-  api_free_string(s);
-  api_free_array(a);
+  Object o = NLUA_EXEC_STATIC("return vim._os_proc_info(...)", a, err);
   if (o.type == kObjectTypeArray && o.data.array.size == 0) {
     return NIL;  // Process not found.
   } else if (o.type == kObjectTypeDictionary) {
@@ -2040,7 +2044,7 @@ Array nvim_get_mark(String name, Dictionary opts, Error *err)
   // Marks are from an open buffer it fnum is non zero
   if (mark->fmark.fnum != 0) {
     bufnr = mark->fmark.fnum;
-    filename = (char *)buflist_nr2name(bufnr, true, true);
+    filename = buflist_nr2name(bufnr, true, true);
     allocated = true;
     // Marks comes from shada
   } else {
@@ -2088,7 +2092,7 @@ Array nvim_get_mark(String name, Dictionary opts, Error *err)
 ///                                'fillchars'). Treated as single-width even if it isn't.
 ///           - highlights: (boolean) Return highlight information.
 ///           - use_winbar: (boolean) Evaluate winbar instead of statusline.
-///           - use_tabline: (boolean) Evaluate tabline instead of statusline. When |TRUE|, {winid}
+///           - use_tabline: (boolean) Evaluate tabline instead of statusline. When true, {winid}
 ///                                    is ignored. Mutually exclusive with {use_winbar}.
 ///
 /// @param[out] err Error details, if any.
@@ -2096,7 +2100,7 @@ Array nvim_get_mark(String name, Dictionary opts, Error *err)
 ///       - str: (string) Characters that will be displayed on the statusline.
 ///       - width: (number) Display width of the statusline.
 ///       - highlights: Array containing highlight information of the statusline. Only included when
-///                     the "highlights" key in {opts} is |TRUE|. Each element of the array is a
+///                     the "highlights" key in {opts} is true. Each element of the array is a
 ///                     |Dictionary| with these keys:
 ///           - start: (number) Byte index (0-based) of first character that uses the highlight.
 ///           - group: (string) Name of highlight group.
@@ -2228,7 +2232,7 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
 
     // If first character doesn't have a defined highlight,
     // add the default highlight at the beginning of the highlight list
-    if (hltab->start == NULL || ((char *)hltab->start - buf) != 0) {
+    if (hltab->start == NULL || (hltab->start - buf) != 0) {
       Dictionary hl_info = ARRAY_DICT_INIT;
       grpname = get_default_stl_hl(wp, use_winbar);
 

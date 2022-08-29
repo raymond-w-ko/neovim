@@ -167,15 +167,6 @@ enum {
 #define MIN_SWAP_PAGE_SIZE 1048
 #define MAX_SWAP_PAGE_SIZE 50000
 
-// Boolean constants
-
-#ifndef TRUE
-# define FALSE  0           // note: this is an int, not a long!
-# define TRUE   1
-#endif
-
-#define MAYBE   2           // sometimes used for a variant on TRUE
-
 #define STATUS_HEIGHT   1       // height of a status line under a window
 #define QF_WINHEIGHT    10      // default height for quickfix window
 
@@ -275,8 +266,8 @@ enum { FOLD_TEXT_LEN = 51, };  //!< buffer size for get_foldtext()
                                           (const char *)(y), \
                                           (size_t)(n))
 
-// Enums need a typecast to be used as array index (for Ultrix).
-#define HL_ATTR(n)      highlight_attr[(int)(n)]
+// Enums need a typecast to be used as array index.
+#define HL_ATTR(n)      hl_attr_active[(int)(n)]
 
 /// Maximum number of bytes in a multi-byte character.  It can be one 32-bit
 /// character of up to 6 bytes, or one 16-bit character of up to three bytes

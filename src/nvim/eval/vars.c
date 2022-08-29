@@ -7,6 +7,7 @@
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
 #include "nvim/charset.h"
+#include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/encode.h"
 #include "nvim/eval/funcs.h"
@@ -18,6 +19,7 @@
 #include "nvim/ex_eval.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
+#include "nvim/screen.h"
 #include "nvim/search.h"
 #include "nvim/window.h"
 
@@ -411,7 +413,7 @@ void list_hashtable_vars(hashtab_T *ht, const char *prefix, int empty, int *firs
       // apply :filter /pat/ to variable name
       xstrlcpy(buf, prefix, IOSIZE);
       xstrlcat(buf, (char *)di->di_key, IOSIZE);
-      if (message_filtered((char_u *)buf)) {
+      if (message_filtered(buf)) {
         continue;
       }
 
@@ -591,15 +593,7 @@ static char *ex_let_one(char *arg, typval_T *const tv, const bool copy, const bo
           }
         }
         if (p != NULL) {
-          os_setenv(name, p, 1);
-          if (STRICMP(name, "HOME") == 0) {
-            init_homedir();
-          } else if (didset_vim && STRICMP(name, "VIM") == 0) {
-            didset_vim = false;
-          } else if (didset_vimruntime
-                     && STRICMP(name, "VIMRUNTIME") == 0) {
-            didset_vimruntime = false;
-          }
+          vim_setenv_ext(name, p);
           arg_end = arg;
         }
         name[len] = c1;
@@ -797,6 +791,7 @@ static void ex_unletlock(exarg_T *eap, char *argstart, int deep, ex_unletlock_ca
         semsg(_(e_invarg2), arg - 1);
         return;
       }
+      assert(*lv.ll_name == '$');  // suppress clang "Uninitialized argument value"
       if (!error && !eap->skip && callback(&lv, arg, eap, deep) == FAIL) {
         error = true;
       }
@@ -857,7 +852,7 @@ static int do_unlet_var(lval_T *lp, char *name_end, exarg_T *eap, int deep FUNC_
 
     // Environment variable, normal name or expanded name.
     if (*lp->ll_name == '$') {
-      os_unsetenv(lp->ll_name + 1);
+      vim_unsetenv_ext(lp->ll_name + 1);
     } else if (do_unlet(lp->ll_name, lp->ll_name_len, forceit) == FAIL) {
       ret = FAIL;
     }
@@ -1124,7 +1119,7 @@ void vars_clear(hashtab_T *ht)
   vars_clear_ext(ht, true);
 }
 
-/// Like vars_clear(), but only free the value if "free_val" is TRUE.
+/// Like vars_clear(), but only free the value if "free_val" is true.
 void vars_clear_ext(hashtab_T *ht, int free_val)
 {
   int todo;
@@ -1306,7 +1301,7 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
           set_search_direction(v->di_tv.vval.v_number ? '/' : '?');
         } else if (strcmp(varname, "hlsearch") == 0) {
           no_hlsearch = !v->di_tv.vval.v_number;
-          redraw_all_later(SOME_VALID);
+          redraw_all_later(UPD_SOME_VALID);
         }
         return;
       } else if (v->di_tv.v_type != tv->v_type) {
@@ -1633,7 +1628,7 @@ static void set_option_from_tv(const char *varname, typval_T *varp)
     strval = tv_get_string_buf_chk(varp, nbuf);
   }
   if (!error && strval != NULL) {
-    set_option_value(varname, numval, strval, OPT_LOCAL);
+    set_option_value_give_err(varname, numval, strval, OPT_LOCAL);
   }
 }
 
@@ -1708,7 +1703,7 @@ bool var_exists(const char *var)
 }
 
 /// "gettabvar()" function
-void f_gettabvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_gettabvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   const char *const varname = tv_get_string_chk(&argvars[1]);
   tabpage_T *const tp = find_tabpage((int)tv_get_number_chk(&argvars[0], NULL));
@@ -1722,19 +1717,19 @@ void f_gettabvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "gettabwinvar()" function
-void f_gettabwinvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_gettabwinvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   getwinvar(argvars, rettv, 1);
 }
 
 /// "getwinvar()" function
-void f_getwinvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_getwinvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   getwinvar(argvars, rettv, 0);
 }
 
 /// "getbufvar()" function
-void f_getbufvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_getbufvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   const char *const varname = tv_get_string_chk(&argvars[1]);
   buf_T *const buf = tv_get_buf_from_arg(&argvars[0]);
@@ -1743,7 +1738,7 @@ void f_getbufvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "settabvar()" function
-void f_settabvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_settabvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   rettv->vval.v_number = 0;
 
@@ -1774,19 +1769,19 @@ void f_settabvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "settabwinvar()" function
-void f_settabwinvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_settabwinvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   setwinvar(argvars, rettv, 1);
 }
 
 /// "setwinvar()" function
-void f_setwinvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_setwinvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   setwinvar(argvars, rettv, 0);
 }
 
 /// "setbufvar()" function
-void f_setbufvar(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_setbufvar(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   if (check_secure()
       || !tv_check_str_or_nr(&argvars[0])) {

@@ -8,13 +8,14 @@
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
+#include "nvim/drawscreen.h"
 #include "nvim/fold.h"
+#include "nvim/grid.h"
 #include "nvim/memline.h"
 #include "nvim/mouse.h"
 #include "nvim/move.h"
 #include "nvim/os_unix.h"
 #include "nvim/plines.h"
-#include "nvim/screen.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
 #include "nvim/syntax.h"
@@ -178,7 +179,7 @@ retnomove:
     }
     if (flags & MOUSE_MAY_STOP_VIS) {
       end_visual_mode();
-      redraw_curbuf_later(INVERTED);            // delete the inversion
+      redraw_curbuf_later(UPD_INVERTED);  // delete the inversion
     }
     return IN_BUFFER;
   }
@@ -278,7 +279,7 @@ retnomove:
                     : col >= fdc + (cmdwin_type == 0 && wp == curwin ? 0 : 1))
                 && (flags & MOUSE_MAY_STOP_VIS)))) {
       end_visual_mode();
-      redraw_curbuf_later(INVERTED);            // delete the inversion
+      redraw_curbuf_later(UPD_INVERTED);  // delete the inversion
     }
     if (cmdwin_type != 0 && wp != curwin) {
       // A click outside the command-line window: Use modeless
@@ -344,7 +345,7 @@ retnomove:
     // before moving the cursor for a left click, stop Visual mode
     if (flags & MOUSE_MAY_STOP_VIS) {
       end_visual_mode();
-      redraw_curbuf_later(INVERTED);            // delete the inversion
+      redraw_curbuf_later(UPD_INVERTED);  // delete the inversion
     }
 
     if (grid == 0) {
@@ -373,14 +374,14 @@ retnomove:
         if (curwin->w_topfill < win_get_fill(curwin, curwin->w_topline)) {
           curwin->w_topfill++;
         } else {
-          --curwin->w_topline;
+          curwin->w_topline--;
           curwin->w_topfill = 0;
         }
       }
       check_topfill(curwin, false);
       curwin->w_valid &=
         ~(VALID_WROW|VALID_CROW|VALID_BOTLINE|VALID_BOTLINE_AP);
-      redraw_later(curwin, VALID);
+      redraw_later(curwin, UPD_VALID);
       row = 0;
     } else if (row >= curwin->w_height_inner) {
       count = 0;
@@ -409,7 +410,7 @@ retnomove:
         }
       }
       check_topfill(curwin, false);
-      redraw_later(curwin, VALID);
+      redraw_later(curwin, UPD_VALID);
       curwin->w_valid &=
         ~(VALID_WROW|VALID_CROW|VALID_BOTLINE|VALID_BOTLINE_AP);
       row = curwin->w_height_inner - 1;
@@ -630,14 +631,16 @@ colnr_T vcol2col(win_T *const wp, const linenr_T lnum, const colnr_T vcol)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
 {
   // try to advance to the specified column
-  char_u *ptr = ml_get_buf(wp->w_buffer, lnum, false);
-  char_u *const line = ptr;
-  colnr_T count = 0;
-  while (count < vcol && *ptr != NUL) {
-    count += win_lbr_chartabsize(wp, line, ptr, count, NULL);
-    MB_PTR_ADV(ptr);
+  char_u *line = ml_get_buf(wp->w_buffer, lnum, false);
+  chartabsize_T cts;
+  init_chartabsize_arg(&cts, wp, lnum, 0, line, line);
+  while (cts.cts_vcol < vcol && *cts.cts_ptr != NUL) {
+    cts.cts_vcol += win_lbr_chartabsize(&cts, NULL);
+    MB_PTR_ADV(cts.cts_ptr);
   }
-  return (colnr_T)(ptr - line);
+  clear_chartabsize_arg(&cts);
+
+  return (colnr_T)((char_u *)cts.cts_ptr - line);
 }
 
 /// Set UI mouse depending on current mode and 'mouse'.
@@ -666,7 +669,7 @@ static colnr_T scroll_line_len(linenr_T lnum)
   char_u *line = ml_get(lnum);
   if (*line != NUL) {
     for (;;) {
-      int numchar = win_chartabsize(curwin, line, col);
+      int numchar = win_chartabsize(curwin, (char *)line, col);
       MB_PTR_ADV(line);
       if (*line == NUL) {    // don't count the last character
         break;
@@ -701,8 +704,8 @@ static linenr_T find_longest_lnum(void)
         max = len;
         ret = lnum;
       } else if (len == (colnr_T)max
-                 && abs((int)(lnum - curwin->w_cursor.lnum))
-                 < abs((int)(ret - curwin->w_cursor.lnum))) {
+                 && abs(lnum - curwin->w_cursor.lnum)
+                 < abs(ret - curwin->w_cursor.lnum)) {
         ret = lnum;
       }
     }
@@ -789,7 +792,7 @@ static int mouse_adjust_click(win_T *wp, int row, int col)
     // checked for concealed characters.
     vcol = 0;
     while (vcol < offset && *ptr != NUL) {
-      vcol += win_chartabsize(curwin, ptr, vcol);
+      vcol += win_chartabsize(curwin, (char *)ptr, vcol);
       ptr += utfc_ptr2len((char *)ptr);
     }
 
@@ -800,7 +803,7 @@ static int mouse_adjust_click(win_T *wp, int row, int col)
   vcol = offset;
   ptr_end = ptr_row_offset;
   while (vcol < col && *ptr_end != NUL) {
-    vcol += win_chartabsize(curwin, ptr_end, vcol);
+    vcol += win_chartabsize(curwin, (char *)ptr_end, vcol);
     ptr_end += utfc_ptr2len((char *)ptr_end);
   }
 
@@ -815,7 +818,7 @@ static int mouse_adjust_click(win_T *wp, int row, int col)
 #define DECR() nudge--; ptr_end -= utfc_ptr2len((char *)ptr_end)
 
   while (ptr < ptr_end && *ptr != NUL) {
-    cwidth = win_chartabsize(curwin, ptr, vcol);
+    cwidth = win_chartabsize(curwin, (char *)ptr, vcol);
     vcol += cwidth;
     if (cwidth > 1 && *ptr == '\t' && nudge > 0) {
       // A tab will "absorb" any previous adjustments.

@@ -10,11 +10,11 @@
 #include "nvim/api/private/helpers.h"
 #include "nvim/charset.h"
 #include "nvim/decoration_provider.h"
+#include "nvim/drawscreen.h"
 #include "nvim/extmark.h"
 #include "nvim/highlight_group.h"
 #include "nvim/lua/executor.h"
 #include "nvim/memline.h"
-#include "nvim/screen.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/extmark.c.generated.h"
@@ -51,7 +51,7 @@ Integer nvim_create_namespace(String name)
   }
   id = next_namespace_id++;
   if (name.size > 0) {
-    String name_alloc = copy_string(name);
+    String name_alloc = copy_string(name, NULL);
     map_put(String, handle_T)(&namespace_ids, name_alloc, id);
   }
   return (Integer)id;
@@ -993,7 +993,7 @@ void nvim_set_decoration_provider(Integer ns_id, DictionaryOf(LuaRef) opts, Erro
   decor_provider_clear(p);
 
   // regardless of what happens, it seems good idea to redraw
-  redraw_all_later(NOT_VALID);  // TODO(bfredl): too soon?
+  redraw_all_later(UPD_NOT_VALID);  // TODO(bfredl): too soon?
 
   struct {
     const char *name;
@@ -1031,6 +1031,8 @@ void nvim_set_decoration_provider(Integer ns_id, DictionaryOf(LuaRef) opts, Erro
   }
 
   p->active = true;
+  p->hl_valid++;
+  p->hl_cached = false;
   return;
 error:
   decor_provider_clear(p);

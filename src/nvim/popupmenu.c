@@ -1,7 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
-/// @file popupmnu.c
+/// @file popupmenu.c
 ///
 /// Popup menu (PUM)
 
@@ -13,17 +13,19 @@
 #include "nvim/ascii.h"
 #include "nvim/buffer.h"
 #include "nvim/charset.h"
+#include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/eval/typval.h"
 #include "nvim/ex_cmds.h"
+#include "nvim/grid.h"
+#include "nvim/highlight.h"
 #include "nvim/insexpand.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/menu.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
-#include "nvim/popupmnu.h"
-#include "nvim/screen.h"
+#include "nvim/popupmenu.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
 #include "nvim/ui.h"
@@ -55,7 +57,7 @@ static bool pum_external = false;
 static bool pum_invalid = false;  // the screen was just cleared
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "popupmnu.c.generated.h"
+# include "popupmenu.c.generated.h"
 #endif
 #define PUM_DEF_HEIGHT 10
 
@@ -154,7 +156,6 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
     if (pum_external) {
       if (array_changed) {
         Arena arena = ARENA_EMPTY;
-        arena_start(&arena, &ui_ext_fixblk);
         Array arr = arena_array(&arena, (size_t)size);
         for (int i = 0; i < size; i++) {
           Array item = arena_array(&arena, 4);
@@ -166,7 +167,7 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
         }
         ui_call_popupmenu_show(arr, selected, pum_win_row, cursor_col,
                                pum_anchor_grid);
-        arena_mem_free(arena_finish(&arena), &ui_ext_fixblk);
+        arena_mem_free(arena_finish(&arena));
       } else {
         ui_call_popupmenu_select(selected);
         return;
@@ -463,7 +464,7 @@ void pum_redraw(void)
                 / (pum_size - pum_height);
   }
 
-  for (i = 0; i < pum_height; ++i) {
+  for (i = 0; i < pum_height; i++) {
     idx = i + pum_first;
     attr = (idx == pum_selected) ? attr_select : attr_norm;
 
@@ -483,7 +484,7 @@ void pum_redraw(void)
     grid_col = col_off;
     totwidth = 0;
 
-    for (round = 1; round <= 3; ++round) {
+    for (round = 1; round <= 3; round++) {
       width = 0;
       s = NULL;
 
@@ -541,14 +542,13 @@ void pum_redraw(void)
                   size++;
                 }
               }
-              grid_puts_len(&pum_grid, (char_u *)rt, (int)STRLEN(rt), row,
-                            grid_col - size + 1, attr);
+              grid_puts_len(&pum_grid, rt, (int)STRLEN(rt), row, grid_col - size + 1, attr);
               xfree(rt_start);
               xfree(st);
               grid_col -= width;
             } else {
               // use grid_puts_len() to truncate the text
-              grid_puts(&pum_grid, st, row, grid_col, attr);
+              grid_puts(&pum_grid, (char *)st, row, grid_col, attr);
               xfree(st);
               grid_col += width;
             }
@@ -559,11 +559,11 @@ void pum_redraw(void)
 
             // Display two spaces for a Tab.
             if (pum_rl) {
-              grid_puts_len(&pum_grid, (char_u *)"  ", 2, row, grid_col - 1,
+              grid_puts_len(&pum_grid, "  ", 2, row, grid_col - 1,
                             attr);
               grid_col -= 2;
             } else {
-              grid_puts_len(&pum_grid, (char_u *)"  ", 2, row, grid_col, attr);
+              grid_puts_len(&pum_grid, "  ", 2, row, grid_col, attr);
               grid_col += 2;
             }
             totwidth += 2;
@@ -639,11 +639,11 @@ void pum_redraw(void)
 /// @param n
 /// @param repeat
 ///
-/// @returns TRUE when the window was resized and the location of the popup
+/// @returns true when the window was resized and the location of the popup
 /// menu must be recomputed.
-static int pum_set_selected(int n, int repeat)
+static bool pum_set_selected(int n, int repeat)
 {
-  int resized = FALSE;
+  int resized = false;
   int context = pum_height / 2;
 
   pum_selected = n;
@@ -702,7 +702,7 @@ static int pum_set_selected(int n, int repeat)
     if ((pum_array[pum_selected].pum_info != NULL)
         && (Rows > 10)
         && (repeat <= 1)
-        && (vim_strchr((char *)p_cot, 'p') != NULL)) {
+        && (vim_strchr(p_cot, 'p') != NULL)) {
       win_T *curwin_save = curwin;
       tabpage_T *curtab_save = curtab;
       int res = OK;
@@ -742,11 +742,11 @@ static int pum_set_selected(int n, int repeat)
           if (res == OK) {
             // Edit a new, empty buffer. Set options for a "wipeout"
             // buffer.
-            set_option_value("swf", 0L, NULL, OPT_LOCAL);
-            set_option_value("bl", 0L, NULL, OPT_LOCAL);
-            set_option_value("bt", 0L, "nofile", OPT_LOCAL);
-            set_option_value("bh", 0L, "wipe", OPT_LOCAL);
-            set_option_value("diff", 0L, NULL, OPT_LOCAL);
+            set_option_value_give_err("swf", 0L, NULL, OPT_LOCAL);
+            set_option_value_give_err("bl", 0L, NULL, OPT_LOCAL);
+            set_option_value_give_err("bt", 0L, "nofile", OPT_LOCAL);
+            set_option_value_give_err("bh", 0L, "wipe", OPT_LOCAL);
+            set_option_value_give_err("diff", 0L, NULL, OPT_LOCAL);
           }
         }
 
@@ -776,12 +776,12 @@ static int pum_set_selected(int n, int repeat)
 
             if (curwin->w_height < lnum) {
               win_setheight((int)lnum);
-              resized = TRUE;
+              resized = true;
             }
           }
 
           curbuf->b_changed = false;
-          curbuf->b_p_ma = FALSE;
+          curbuf->b_p_ma = false;
           curwin->w_cursor.lnum = 1;
           curwin->w_cursor.col = 0;
 
@@ -795,12 +795,12 @@ static int pum_set_selected(int n, int repeat)
             // window is not resized, skip the preview window's
             // status line redrawing.
             if (ins_compl_active() && !resized) {
-              curwin->w_redr_status = FALSE;
+              curwin->w_redr_status = false;
             }
 
             // Return cursor to where we were
             validate_cursor();
-            redraw_later(curwin, SOME_VALID);
+            redraw_later(curwin, UPD_SOME_VALID);
 
             // When the preview window was resized we need to
             // update the view on the buffer.  Only go back to
@@ -904,7 +904,7 @@ void pum_recompose(void)
 /// Gets the height of the menu.
 ///
 /// @return the height of the popup menu, the number of entries visible.
-/// Only valid when pum_visible() returns TRUE!
+/// Only valid when pum_visible() returns true!
 int pum_get_height(void)
 {
   if (pum_external) {

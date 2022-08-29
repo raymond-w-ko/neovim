@@ -39,6 +39,7 @@
 #include "nvim/arabic.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
+#include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/fileio.h"
 #include "nvim/func_attr.h"
@@ -49,7 +50,6 @@
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/option.h"
 #include "nvim/os/os.h"
 #include "nvim/path.h"
 #include "nvim/screen.h"
@@ -754,21 +754,19 @@ bool utf_composinglike(const char_u *p1, const char_u *p2)
 ///                   space at least for #MAX_MCO + 1 elements.
 ///
 /// @return leading character.
-int utfc_ptr2char(const char_u *p, int *pcc)
+int utfc_ptr2char(const char *p_in, int *pcc)
 {
-  int len;
-  int c;
-  int cc;
+  uint8_t *p = (uint8_t *)p_in;
   int i = 0;
 
-  c = utf_ptr2char((char *)p);
-  len = utf_ptr2len((char *)p);
+  int c = utf_ptr2char((char *)p);
+  int len = utf_ptr2len((char *)p);
 
   // Only accept a composing char when the first char isn't illegal.
   if ((len > 1 || *p < 0x80)
       && p[len] >= 0x80
       && utf_composinglike(p, p + len)) {
-    cc = utf_ptr2char((char *)p + len);
+    int cc = utf_ptr2char((char *)p + len);
     for (;;) {
       pcc[i++] = cc;
       if (i == MAX_MCO) {
@@ -882,7 +880,7 @@ int utf_ptr2len_len(const char_u *p, int size)
   } else {
     m = len;
   }
-  for (i = 1; i < m; ++i) {
+  for (i = 1; i < m; i++) {
     if ((p[i] & 0xc0) != 0x80) {
       return 1;
     }
@@ -890,9 +888,9 @@ int utf_ptr2len_len(const char_u *p, int size)
   return len;
 }
 
-/// Return the number of bytes occupied by a UTF-8 character in a string
-///
+/// Return the number of bytes occupied by a UTF-8 character in a string.
 /// This includes following composing characters.
+/// Returns zero for NUL.
 int utfc_ptr2len(const char *const p_in)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
@@ -1006,8 +1004,9 @@ int utf_char2len(const int c)
 
 /// Convert Unicode character to UTF-8 string
 ///
-/// @param c character to convert to \p buf
-/// @param[out] buf UTF-8 string generated from \p c, does not add \0
+/// @param c         character to convert to UTF-8 string in \p buf
+/// @param[out] buf  UTF-8 string generated from \p c, does not add \0
+///                  must have room for at least 6 bytes
 /// @return Number of bytes (1-6).
 int utf_char2bytes(const int c, char *const buf)
 {
@@ -1594,7 +1593,7 @@ void show_utf8(void)
   }
 
   clen = 0;
-  for (i = 0; i < len; ++i) {
+  for (i = 0; i < len; i++) {
     if (clen == 0) {
       // start of (composing) character, get its length
       if (i > 0) {
@@ -1631,10 +1630,10 @@ int utf_head_off(const char_u *base, const char_u *p)
   // Skip backwards over trailing bytes: 10xx.xxxx
   // Skip backwards again if on a composing char.
   const char_u *q;
-  for (q = p;; --q) {
+  for (q = p;; q--) {
     // Move s to the last byte of this char.
     const char_u *s;
-    for (s = q; (s[1] & 0xc0) == 0x80; ++s) {}
+    for (s = q; (s[1] & 0xc0) == 0x80; s++) {}
 
     // Move q to the first byte of this char.
     while (q > base && (*q & 0xc0) == 0x80) {
@@ -1931,7 +1930,7 @@ void utf_find_illegal(void)
   char_u *tofree = NULL;
 
   vimconv.vc_type = CONV_NONE;
-  if (enc_canon_props(curbuf->b_p_fenc) & ENC_8BIT) {
+  if (enc_canon_props((char_u *)curbuf->b_p_fenc) & ENC_8BIT) {
     // 'encoding' is "utf-8" but we are editing a 8-bit encoded file,
     // possibly a utf-8 file with illegal bytes.  Setup for conversion
     // from utf-8 to 'fileencoding'.
@@ -1974,7 +1973,7 @@ void utf_find_illegal(void)
     if (curwin->w_cursor.lnum == curbuf->b_ml.ml_line_count) {
       break;
     }
-    ++curwin->w_cursor.lnum;
+    curwin->w_cursor.lnum++;
     curwin->w_cursor.col = 0;
   }
 
@@ -1988,8 +1987,7 @@ theend:
 }
 
 /// @return  true if string "s" is a valid utf-8 string.
-/// When "end" is NULL stop at the first NUL.
-/// When "end" is positive stop there.
+/// When "end" is NULL stop at the first NUL.  Otherwise stop at "end".
 bool utf_valid_string(const char_u *s, const char_u *end)
 {
   const char_u *p = s;
@@ -2146,10 +2144,8 @@ const char *mb_unescape(const char **const pp)
   return NULL;
 }
 
-/*
- * Skip the Vim specific head of a 'encoding' name.
- */
-char_u *enc_skip(char_u *p)
+/// Skip the Vim specific head of a 'encoding' name.
+char *enc_skip(char *p)
 {
   if (STRNCMP(p, "2byte-", 6) == 0) {
     return p + 6;
@@ -2160,27 +2156,25 @@ char_u *enc_skip(char_u *p)
   return p;
 }
 
-/*
- * Find the canonical name for encoding "enc".
- * When the name isn't recognized, returns "enc" itself, but with all lower
- * case characters and '_' replaced with '-'.
- * Returns an allocated string.
- */
-char_u *enc_canonize(char_u *enc) FUNC_ATTR_NONNULL_RET
+/// Find the canonical name for encoding "enc".
+/// When the name isn't recognized, returns "enc" itself, but with all lower
+/// case characters and '_' replaced with '-'.
+///
+/// @return  an allocated string.
+char *enc_canonize(char *enc)
+  FUNC_ATTR_NONNULL_RET
 {
   char_u *p, *s;
-  int i;
-
   if (STRCMP(enc, "default") == 0) {
     // Use the default encoding as found by set_init_1().
-    return vim_strsave(fenc_default);
+    return (char *)vim_strsave(fenc_default);
   }
 
   // copy "enc" to allocated memory, with room for two '-'
   char_u *r = xmalloc(STRLEN(enc) + 3);
   // Make it all lower case and replace '_' with '-'.
   p = r;
-  for (s = enc; *s != NUL; ++s) {
+  for (s = (char_u *)enc; *s != NUL; s++) {
     if (*s == '_') {
       *p++ = '-';
     } else {
@@ -2190,7 +2184,7 @@ char_u *enc_canonize(char_u *enc) FUNC_ATTR_NONNULL_RET
   *p = NUL;
 
   // Skip "2byte-" and "8bit-".
-  p = enc_skip(r);
+  p = (char_u *)enc_skip((char *)r);
 
   // Change "microsoft-cp" to "cp".  Used in some spell files.
   if (STRNCMP(p, "microsoft-cp", 12) == 0) {
@@ -2214,6 +2208,7 @@ char_u *enc_canonize(char_u *enc) FUNC_ATTR_NONNULL_RET
     STRMOVE(p + 5, p + 6);
   }
 
+  int i;
   if (enc_canon_search(p) >= 0) {
     // canonical name can be used unmodified
     if (p != r) {
@@ -2224,7 +2219,7 @@ char_u *enc_canonize(char_u *enc) FUNC_ATTR_NONNULL_RET
     xfree(r);
     r = vim_strsave((char_u *)enc_canon_table[i].name);
   }
-  return r;
+  return (char *)r;
 }
 
 /// Search for an encoding alias of "name".
@@ -2233,7 +2228,7 @@ static int enc_alias_search(const char_u *name)
 {
   int i;
 
-  for (i = 0; enc_alias_table[i].name != NULL; ++i) {
+  for (i = 0; enc_alias_table[i].name != NULL; i++) {
     if (STRCMP(name, enc_alias_table[i].name) == 0) {
       return enc_alias_table[i].canon;
     }
@@ -2309,7 +2304,7 @@ enc_locale_copy_enc:
     buf[i] = NUL;
   }
 
-  return enc_canonize((char_u *)buf);
+  return (char_u *)enc_canonize(buf);
 }
 
 #if defined(HAVE_ICONV)
@@ -2332,7 +2327,7 @@ void *my_iconv_open(char_u *to, char_u *from)
   if (iconv_working == kBroken) {
     return (void *)-1;          // detected a broken iconv() previously
   }
-  fd = iconv_open((char *)enc_skip(to), (char *)enc_skip(from));
+  fd = iconv_open(enc_skip((char *)to), enc_skip((char *)from));
 
   if (fd != (iconv_t)-1 && iconv_working == kUnknown) {
     /*
@@ -2443,18 +2438,17 @@ static char_u *iconv_string(const vimconv_T *const vcp, char_u *str, size_t slen
 
 #endif  // HAVE_ICONV
 
-/*
- * Setup "vcp" for conversion from "from" to "to".
- * The names must have been made canonical with enc_canonize().
- * vcp->vc_type must have been initialized to CONV_NONE.
- * Note: cannot be used for conversion from/to ucs-2 and ucs-4 (will use utf-8
- * instead).
- * Afterwards invoke with "from" and "to" equal to NULL to cleanup.
- * Return FAIL when conversion is not supported, OK otherwise.
- */
-int convert_setup(vimconv_T *vcp, char_u *from, char_u *to)
+/// Setup "vcp" for conversion from "from" to "to".
+/// The names must have been made canonical with enc_canonize().
+/// vcp->vc_type must have been initialized to CONV_NONE.
+/// Note: cannot be used for conversion from/to ucs-2 and ucs-4 (will use utf-8
+/// instead).
+/// Afterwards invoke with "from" and "to" equal to NULL to cleanup.
+///
+/// @return  FAIL when conversion is not supported, OK otherwise.
+int convert_setup(vimconv_T *vcp, char *from, char *to)
 {
-  return convert_setup_ext(vcp, from, true, to, true);
+  return convert_setup_ext(vcp, (char_u *)from, true, (char_u *)to, true);
 }
 
 /// As convert_setup(), but only when from_unicode_is_utf8 is true will all
@@ -2566,7 +2560,7 @@ char_u *string_convert_ext(const vimconv_T *const vcp, char_u *ptr, size_t *lenp
   case CONV_TO_UTF8:            // latin1 to utf-8 conversion
     retval = xmalloc(len * 2 + 1);
     d = retval;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; i++) {
       c = ptr[i];
       if (c < 0x80) {
         *d++ = (char_u)c;
@@ -2584,7 +2578,7 @@ char_u *string_convert_ext(const vimconv_T *const vcp, char_u *ptr, size_t *lenp
   case CONV_9_TO_UTF8:          // latin9 to utf-8 conversion
     retval = xmalloc(len * 3 + 1);
     d = retval;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; i++) {
       c = ptr[i];
       switch (c) {
       case 0xa4:
@@ -2747,7 +2741,7 @@ static int tv_nr_compare(const void *a1, const void *a2)
 }
 
 /// "setcellwidths()" function
-void f_setcellwidths(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_setcellwidths(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   if (argvars[0].v_type != VAR_LIST || argvars[0].vval.v_list == NULL) {
     emsg(_(e_listreq));
@@ -2856,10 +2850,10 @@ void f_setcellwidths(typval_T *argvars, typval_T *rettv, FunPtr fptr)
   }
 
   xfree(cw_table_save);
-  redraw_all_later(NOT_VALID);
+  redraw_all_later(UPD_NOT_VALID);
 }
 
-void f_charclass(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_charclass(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   if (tv_check_for_string(&argvars[0]) == FAIL
       || argvars[0].vval.v_string == NULL) {

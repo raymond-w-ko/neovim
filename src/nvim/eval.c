@@ -6,12 +6,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "auto/config.h"
-
-#ifdef HAVE_LOCALE_H
-# include <locale.h>
-#endif
-
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
@@ -28,6 +22,7 @@
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/eval/vars.h"
+#include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds2.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
@@ -35,12 +30,14 @@
 #include "nvim/ex_session.h"
 #include "nvim/getchar.h"
 #include "nvim/highlight_group.h"
+#include "nvim/locale.h"
 #include "nvim/lua/executor.h"
 #include "nvim/mark.h"
 #include "nvim/memline.h"
 #include "nvim/move.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
+#include "nvim/optionstr.h"
 #include "nvim/os/input.h"
 #include "nvim/os/shell.h"
 #include "nvim/path.h"
@@ -99,7 +96,7 @@ static garray_T ga_loaded = { 0, 0, sizeof(char *), 4, NULL };
 
 /// Info used by a ":for" loop.
 typedef struct {
-  int fi_semicolon;             // TRUE if ending in '; var]'
+  int fi_semicolon;             // true if ending in '; var]'
   int fi_varcount;              // nr of variables in the list
   listwatch_T fi_lw;            // keep an eye on the item used.
   list_T *fi_list;              // list being used
@@ -629,7 +626,7 @@ int eval_charconvert(const char *const enc_from, const char *const enc_to,
   set_vim_var_string(VV_CC_TO, enc_to, -1);
   set_vim_var_string(VV_FNAME_IN, fname_from, -1);
   set_vim_var_string(VV_FNAME_OUT, fname_to, -1);
-  if (eval_to_bool((char *)p_ccv, &err, NULL, false)) {
+  if (eval_to_bool(p_ccv, &err, NULL, false)) {
     err = true;
   }
   set_vim_var_string(VV_CC_FROM, NULL, -1);
@@ -649,7 +646,7 @@ int eval_printexpr(const char *const fname, const char *const args)
 
   set_vim_var_string(VV_FNAME_IN, fname, -1);
   set_vim_var_string(VV_CMDARG, args, -1);
-  if (eval_to_bool((char *)p_pexpr, &err, NULL, false)) {
+  if (eval_to_bool(p_pexpr, &err, NULL, false)) {
     err = true;
   }
   set_vim_var_string(VV_FNAME_IN, NULL, -1);
@@ -669,7 +666,7 @@ void eval_diff(const char *const origfile, const char *const newfile, const char
   set_vim_var_string(VV_FNAME_IN, origfile, -1);
   set_vim_var_string(VV_FNAME_NEW, newfile, -1);
   set_vim_var_string(VV_FNAME_OUT, outfile, -1);
-  (void)eval_to_bool((char *)p_dex, &err, NULL, false);
+  (void)eval_to_bool(p_dex, &err, NULL, false);
   set_vim_var_string(VV_FNAME_IN, NULL, -1);
   set_vim_var_string(VV_FNAME_NEW, NULL, -1);
   set_vim_var_string(VV_FNAME_OUT, NULL, -1);
@@ -689,11 +686,11 @@ void eval_patch(const char *const origfile, const char *const difffile, const ch
 }
 
 /// Top level evaluation function, returning a boolean.
-/// Sets "error" to TRUE if there was an error.
+/// Sets "error" to true if there was an error.
 ///
 /// @param skip  only parse, don't execute
 ///
-/// @return  TRUE or FALSE.
+/// @return  true or false.
 int eval_to_bool(char *arg, bool *error, char **nextcmd, int skip)
 {
   typval_T tv;
@@ -893,7 +890,7 @@ char *eval_to_string(char *arg, char **nextcmd, bool convert)
 /// Call eval_to_string() without using current local variables and using
 /// textlock.
 ///
-/// @param use_sandbox  when TRUE, use the sandbox.
+/// @param use_sandbox  when true, use the sandbox.
 char *eval_to_string_safe(char *arg, char **nextcmd, int use_sandbox)
 {
   char *retval;
@@ -1810,7 +1807,7 @@ notify:
 /// Evaluate the expression used in a ":for var in expr" command.
 /// "arg" points to "var".
 ///
-/// @param[out] *errp  set to TRUE for an error, FALSE otherwise;
+/// @param[out] *errp  set to true for an error, false otherwise;
 ///
 /// @return  a pointer that holds the info.  Null when there is an error.
 void *eval_for_line(const char *arg, bool *errp, char **nextcmdp, int skip)
@@ -2182,7 +2179,7 @@ char *get_user_var_name(expand_T *xp, int idx)
 
 /// Does not use 'cpo' and always uses 'magic'.
 ///
-/// @return  TRUE if "pat" matches "text".
+/// @return  true if "pat" matches "text".
 int pattern_match(char *pat, char *text, bool ic)
 {
   int matches = 0;
@@ -2190,7 +2187,7 @@ int pattern_match(char *pat, char *text, bool ic)
 
   // avoid 'l' flag in 'cpoptions'
   char *save_cpo = p_cpo;
-  p_cpo = "";
+  p_cpo = empty_option;
   regmatch.regprog = vim_regcomp(pat, RE_MAGIC + RE_STRING);
   if (regmatch.regprog != NULL) {
     regmatch.rm_ic = ic;
@@ -2261,13 +2258,13 @@ static int eval_func(char **const arg, char *const name, const int name_len, typ
 
 // TODO(ZyX-I): move to eval/expressions
 
-/// The "evaluate" argument: When FALSE, the argument is only parsed but not
+/// The "evaluate" argument: When false, the argument is only parsed but not
 /// executed.  The function may return OK, but the rettv will be of type
 /// VAR_UNKNOWN.  The function still returns FAIL for a syntax error.
 
 /// Handle zero level expression.
 /// This calls eval1() and handles error message and nextcmd.
-/// Put the result in "rettv" when returning OK and "evaluate" is TRUE.
+/// Put the result in "rettv" when returning OK and "evaluate" is true.
 /// Note: "rettv.v_lock" is not set.
 ///
 /// @return OK or FAIL.
@@ -4966,7 +4963,7 @@ theend:
   return retval;
 }
 
-void common_function(typval_T *argvars, typval_T *rettv, bool is_funcref, FunPtr fptr)
+void common_function(typval_T *argvars, typval_T *rettv, bool is_funcref)
 {
   char *s;
   char *name;
@@ -5195,29 +5192,6 @@ linenr_T tv_get_lnum_buf(const typval_T *const tv, const buf_T *const buf)
   return (linenr_T)tv_get_number_chk(tv, NULL);
 }
 
-void get_qf_loc_list(int is_qf, win_T *wp, typval_T *what_arg, typval_T *rettv)
-{
-  if (what_arg->v_type == VAR_UNKNOWN) {
-    tv_list_alloc_ret(rettv, kListLenMayKnow);
-    if (is_qf || wp != NULL) {
-      (void)get_errorlist(NULL, wp, -1, 0, rettv->vval.v_list);
-    }
-  } else {
-    tv_dict_alloc_ret(rettv);
-    if (is_qf || wp != NULL) {
-      if (what_arg->v_type == VAR_DICT) {
-        dict_T *d = what_arg->vval.v_dict;
-
-        if (d != NULL) {
-          qf_get_properties(wp, d, rettv->vval.v_dict);
-        }
-      } else {
-        emsg(_(e_dictreq));
-      }
-    }
-  }
-}
-
 /// @return  information (variables, options, etc.) about a tab page
 ///          as a dictionary.
 dict_T *get_tabpage_info(tabpage_T *tp, int tp_idx)
@@ -5249,12 +5223,12 @@ dict_T *get_win_info(win_T *wp, int16_t tpnr, int16_t winnr)
   tv_dict_add_nr(dict, S_LEN("tabnr"), tpnr);
   tv_dict_add_nr(dict, S_LEN("winnr"), winnr);
   tv_dict_add_nr(dict, S_LEN("winid"), wp->handle);
-  tv_dict_add_nr(dict, S_LEN("height"), wp->w_height);
+  tv_dict_add_nr(dict, S_LEN("height"), wp->w_height_inner);
   tv_dict_add_nr(dict, S_LEN("winrow"), wp->w_winrow + 1);
   tv_dict_add_nr(dict, S_LEN("topline"), wp->w_topline);
   tv_dict_add_nr(dict, S_LEN("botline"), wp->w_botline - 1);
   tv_dict_add_nr(dict, S_LEN("winbar"), wp->w_winbar_height);
-  tv_dict_add_nr(dict, S_LEN("width"), wp->w_width);
+  tv_dict_add_nr(dict, S_LEN("width"), wp->w_width_inner);
   tv_dict_add_nr(dict, S_LEN("bufnr"), wp->w_buffer->b_fnum);
   tv_dict_add_nr(dict, S_LEN("wincol"), wp->w_wincol + 1);
   tv_dict_add_nr(dict, S_LEN("textoff"), win_col_off(wp));
@@ -5865,7 +5839,17 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
   switch (callback->type) {
   case kCallbackFuncref:
     name = callback->data.funcref;
-    partial = NULL;
+    int len = (int)STRLEN(name);
+    if (len >= 6 && !memcmp(name, "v:lua.", 6)) {
+      name += 6;
+      len = check_luafunc_name(name, false);
+      if (len == 0) {
+        return false;
+      }
+      partial = vvlua_partial;
+    } else {
+      partial = NULL;
+    }
     break;
 
   case kCallbackPartial:
@@ -6797,14 +6781,14 @@ static char *make_expanded_name(const char *in_start, char *expr_start, char *ex
   return retval;
 }
 
-/// @return  TRUE if character "c" can be used in a variable or function name.
+/// @return  true if character "c" can be used in a variable or function name.
 ///          Does not include '{' or '}' for magic braces.
 int eval_isnamec(int c)
 {
   return ASCII_ISALNUM(c) || c == '_' || c == ':' || c == AUTOLOAD_CHAR;
 }
 
-/// @return  TRUE if character "c" can be used as the first character in a
+/// @return  true if character "c" can be used as the first character in a
 ///          variable or function name (excluding '{' and '}').
 int eval_isnamec1(int c)
 {
@@ -6857,7 +6841,7 @@ void set_vim_var_char(int c)
 
 /// Set v:count to "count" and v:count1 to "count1".
 ///
-/// @param set_prevcount  if TRUE, first set v:prevcount from v:count.
+/// @param set_prevcount  if true, first set v:prevcount from v:count.
 void set_vcount(long count, long count1, int set_prevcount)
 {
   if (set_prevcount) {
@@ -8159,6 +8143,7 @@ repeat:
         // Only replace it when it starts with '~'
         if (*dirname == '~') {
           s = xstrdup(dirname);
+          assert(s != NULL);  // suppress clang "Argument with 'nonnull' attribute passed null"
           *fnamep = s;
           xfree(*bufp);
           *bufp = s;
@@ -8177,7 +8162,7 @@ repeat:
   while (src[*usedlen] == ':' && src[*usedlen + 1] == 'h') {
     valid |= VALID_HEAD;
     *usedlen += 2;
-    s = (char *)get_past_head((char_u *)(*fnamep));
+    s = get_past_head(*fnamep);
     while (tail > s && after_pathsep(s, tail)) {
       MB_PTR_BACK(*fnamep, tail);
     }
@@ -8336,7 +8321,7 @@ char *do_string_sub(char *str, char *pat, char *sub, typval_T *expr, char *flags
 
   // Make 'cpoptions' empty, so that the 'l' flag doesn't work here
   char *save_cpo = p_cpo;
-  p_cpo = (char *)empty_option;
+  p_cpo = empty_option;
 
   ga_init(&ga, 1, 200);
 
@@ -8396,11 +8381,16 @@ char *do_string_sub(char *str, char *pat, char *sub, typval_T *expr, char *flags
 
   char *ret = xstrdup(ga.ga_data == NULL ? str : ga.ga_data);
   ga_clear(&ga);
-  if ((char_u *)p_cpo == empty_option) {
+  if (p_cpo == empty_option) {
     p_cpo = save_cpo;
   } else {
     // Darn, evaluating {sub} expression or {expr} changed the value.
-    free_string_option((char_u *)save_cpo);
+    // If it's still empty it was changed and restored, need to restore in
+    // the complicated way.
+    if (*p_cpo == NUL) {
+      set_option_value_give_err("cpo", 0L, save_cpo, 0);
+    }
+    free_string_option(save_cpo);
   }
 
   return ret;
@@ -8606,7 +8596,7 @@ void ex_checkhealth(exarg_T *eap)
     if (vimruntime_env == NULL) {
       emsg(_("E5009: $VIMRUNTIME is empty or unset"));
     } else {
-      bool rtp_ok = NULL != strstr((char *)p_rtp, vimruntime_env);
+      bool rtp_ok = NULL != strstr(p_rtp, vimruntime_env);
       if (rtp_ok) {
         semsg(_("E5009: Invalid $VIMRUNTIME: %s"), vimruntime_env);
       } else {

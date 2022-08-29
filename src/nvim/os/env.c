@@ -8,8 +8,8 @@
 
 #include "nvim/ascii.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand.h"
 #include "nvim/eval.h"
-#include "nvim/ex_getln.h"
 #include "nvim/macros.h"
 #include "nvim/map.h"
 #include "nvim/memory.h"
@@ -553,9 +553,9 @@ char_u *expand_env_save_opt(char_u *src, bool one)
 /// @param src        Input string e.g. "$HOME/vim.hlp"
 /// @param dst[out]   Where to put the result
 /// @param dstlen     Maximum length of the result
-void expand_env(char_u *src, char_u *dst, int dstlen)
+void expand_env(char *src, char *dst, int dstlen)
 {
-  expand_env_esc(src, dst, dstlen, false, false, NULL);
+  expand_env_esc((char_u *)src, (char_u *)dst, dstlen, false, false, NULL);
 }
 
 /// Expand environment variable with path name and escaping.
@@ -937,8 +937,8 @@ char *vim_getenv(const char *name)
   // - the directory name from 'helpfile' (unless it contains '$')
   // - the executable name from argv[0]
   if (vim_path == NULL) {
-    if (p_hf != NULL && vim_strchr((char *)p_hf, '$') == NULL) {
-      vim_path = (char *)p_hf;
+    if (p_hf != NULL && vim_strchr(p_hf, '$') == NULL) {
+      vim_path = p_hf;
     }
 
     char exe_name[MAXPATHL];
@@ -957,7 +957,7 @@ char *vim_getenv(const char *name)
       char *vim_path_end = path_tail(vim_path);
 
       // remove "doc/" from 'helpfile', if present
-      if (vim_path == (char *)p_hf) {
+      if (vim_path == p_hf) {
         vim_path_end = remove_tail(vim_path, vim_path_end, "doc");
       }
 
@@ -1156,15 +1156,12 @@ char *home_replace_save(buf_T *buf, const char *src)
 /// Function given to ExpandGeneric() to obtain an environment variable name.
 char *get_env_name(expand_T *xp, int idx)
 {
-#define ENVNAMELEN 100
-  // this static buffer is needed to avoid a memory leak in ExpandGeneric
-  static char_u name[ENVNAMELEN];
   assert(idx >= 0);
   char *envname = os_getenvname_at_index((size_t)idx);
   if (envname) {
-    STRLCPY(name, envname, ENVNAMELEN);
+    STRLCPY(xp->xp_buf, envname, EXPAND_BUF_LEN);
     xfree(envname);
-    return (char *)name;
+    return xp->xp_buf;
   }
   return NULL;
 }
@@ -1228,4 +1225,30 @@ bool os_shell_is_cmdexe(const char *sh)
     return true;
   }
   return striequal("cmd.exe", path_tail(sh));
+}
+
+/// Removes environment variable "name" and take care of side effects.
+void vim_unsetenv_ext(const char *var)
+{
+  os_unsetenv(var);
+
+  // "homedir" is not cleared, keep using the old value until $HOME is set.
+  if (STRICMP(var, "VIM") == 0) {
+    didset_vim = false;
+  } else if (STRICMP(var, "VIMRUNTIME") == 0) {
+    didset_vimruntime = false;
+  }
+}
+
+/// Set environment variable "name" and take care of side effects.
+void vim_setenv_ext(const char *name, const char *val)
+{
+  os_setenv(name, val, 1);
+  if (STRICMP(name, "HOME") == 0) {
+    init_homedir();
+  } else if (didset_vim && STRICMP(name, "VIM") == 0) {
+    didset_vim = false;
+  } else if (didset_vimruntime && STRICMP(name, "VIMRUNTIME") == 0) {
+    didset_vimruntime = false;
+  }
 }

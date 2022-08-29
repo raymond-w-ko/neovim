@@ -15,12 +15,14 @@
 #include "nvim/buffer_defs.h"
 #include "nvim/change.h"
 #include "nvim/cursor.h"
+#include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/funcs.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/time.h"
+#include "nvim/ex_cmds.h"
 #include "nvim/ex_getln.h"
 #include "nvim/extmark.h"
 #include "nvim/func_attr.h"
@@ -38,7 +40,6 @@
 #include "nvim/os/os.h"
 #include "nvim/profile.h"
 #include "nvim/runtime.h"
-#include "nvim/screen.h"
 #include "nvim/undo.h"
 #include "nvim/usercmd.h"
 #include "nvim/version.h"
@@ -989,7 +990,7 @@ int nlua_in_fast_event(lua_State *lstate)
 
 static bool viml_func_is_fast(const char *name)
 {
-  const EvalFuncDef *const fdef = find_internal_func((const char *)name);
+  const EvalFuncDef *const fdef = find_internal_func(name);
   if (fdef) {
     return fdef->fast;
   }
@@ -1092,7 +1093,7 @@ static int nlua_rpc(lua_State *lstate, bool request)
     Object result = rpc_send_call(chan_id, name, args, &res_mem, &err);
     if (!ERROR_SET(&err)) {
       nlua_push_Object(lstate, result, false);
-      arena_mem_free(res_mem, NULL);
+      arena_mem_free(res_mem);
     }
   } else {
     if (!rpc_send_event(chan_id, name, args)) {
@@ -1577,7 +1578,7 @@ void ex_luado(exarg_T *const eap)
   }
   lua_pop(lstate, 1);
   check_cursor();
-  update_screen(NOT_VALID);
+  update_screen(UPD_NOT_VALID);
 }
 
 /// Run lua file
@@ -1660,6 +1661,9 @@ static void nlua_add_treesitter(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
 
   lua_pushcfunction(lstate, tslua_has_language);
   lua_setfield(lstate, -2, "_ts_has_language");
+
+  lua_pushcfunction(lstate, tslua_remove_lang);
+  lua_setfield(lstate, -2, "_ts_remove_language");
 
   lua_pushcfunction(lstate, tslua_inspect_lang);
   lua_setfield(lstate, -2, "_ts_inspect_language");
@@ -1939,8 +1943,13 @@ int nlua_do_ucmd(ucmd_T *cmd, exarg_T *eap, bool preview)
 
   // Split args by unescaped whitespace |<f-args>| (nargs dependent)
   if (cmd->uc_argt & EX_NOSPC) {
-    // Commands where nargs = 1 or "?" fargs is the same as args
-    lua_rawseti(lstate, -2, 1);
+    if ((cmd->uc_argt & EX_NEEDARG) || STRLEN(eap->arg)) {
+      // For commands where nargs is 1 or "?" and argument is passed, fargs = { args }
+      lua_rawseti(lstate, -2, 1);
+    } else {
+      // if nargs = "?" and no argument is passed, fargs = {}
+      lua_pop(lstate, 1);  // Pop the reference of opts.args
+    }
   } else if (eap->args == NULL) {
     // For commands with more than one possible argument, split if argument list isn't available.
     lua_pop(lstate, 1);  // Pop the reference of opts.args

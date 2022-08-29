@@ -1477,7 +1477,7 @@ static char *shada_filename(const char *file)
       //     because various expansions must have already be done by the shell.
       //     If shell is not performing them then they should be done in main.c
       //     where arguments are parsed, *not here*.
-      expand_env((char_u *)file, &(NameBuff[0]), MAXPATHL);
+      expand_env((char *)file, &(NameBuff[0]), MAXPATHL);
       file = (const char *)&(NameBuff[0]);
     }
   }
@@ -3996,7 +3996,7 @@ static bool shada_removable(const char *name)
   bool retval = false;
 
   char *new_name = home_replace_save(NULL, (char *)name);
-  for (p = (char *)p_shada; *p;) {
+  for (p = p_shada; *p;) {
     (void)copy_option_part(&p, part, ARRAY_SIZE(part), ", ");
     if (part[0] == 'r') {
       home_replace(NULL, part + 1, (char *)NameBuff, MAXPATHL, true);

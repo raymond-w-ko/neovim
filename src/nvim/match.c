@@ -7,17 +7,18 @@
 
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/funcs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/fold.h"
+#include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/match.h"
 #include "nvim/memline.h"
 #include "nvim/profile.h"
 #include "nvim/regexp.h"
 #include "nvim/runtime.h"
-#include "nvim/screen.h"
 #include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -46,7 +47,7 @@ static int match_add(win_T *wp, const char *const grp, const char *const pat, in
   matchitem_T *m;
   int hlg_id;
   regprog_T *regprog = NULL;
-  int rtype = SOME_VALID;
+  int rtype = UPD_SOME_VALID;
 
   if (*grp == NUL || (pat != NULL && *pat == NUL)) {
     return -1;
@@ -192,7 +193,7 @@ static int match_add(win_T *wp, const char *const grp, const char *const pat, in
       }
       m->pos.toplnum = toplnum;
       m->pos.botlnum = botlnum;
-      rtype = VALID;
+      rtype = UPD_VALID;
     }
   }
 
@@ -226,7 +227,7 @@ static int match_delete(win_T *wp, int id, bool perr)
 {
   matchitem_T *cur = wp->w_match_head;
   matchitem_T *prev = cur;
-  int rtype = SOME_VALID;
+  int rtype = UPD_SOME_VALID;
 
   if (id < 1) {
     if (perr) {
@@ -267,7 +268,7 @@ static int match_delete(win_T *wp, int id, bool perr)
       wp->w_buffer->b_mod_bot = cur->pos.botlnum;
       wp->w_buffer->b_mod_xlines = 0;
     }
-    rtype = VALID;
+    rtype = UPD_VALID;
   }
   xfree(cur);
   redraw_later(wp, rtype);
@@ -286,7 +287,7 @@ void clear_matches(win_T *wp)
     xfree(wp->w_match_head);
     wp->w_match_head = m;
   }
-  redraw_later(wp, SOME_VALID);
+  redraw_later(wp, UPD_SOME_VALID);
 }
 
 /// Get match from ID 'id' in window 'wp'.
@@ -696,7 +697,7 @@ int update_search_hl(win_T *wp, linenr_T lnum, colnr_T col, char_u **line, match
         }
         // Highlight the match were the cursor is using the CurSearch
         // group.
-        if (shl == search_hl && shl->has_cursor && (HL_ATTR(HLF_LC) || wp->w_hl_ids[HLF_LC])) {
+        if (shl == search_hl && shl->has_cursor && (HL_ATTR(HLF_LC) || win_hl_attr(wp, HLF_LC))) {
           shl->attr_cur = win_hl_attr(wp, HLF_LC) ? win_hl_attr(wp, HLF_LC) : HL_ATTR(HLF_LC);
         } else {
           shl->attr_cur = shl->attr;
@@ -858,7 +859,7 @@ static int matchadd_dict_arg(typval_T *tv, const char **conceal_char, win_T **wi
 }
 
 /// "clearmatches()" function
-void f_clearmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_clearmatches(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   win_T *win = get_optional_window(argvars, 0);
 
@@ -868,7 +869,7 @@ void f_clearmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "getmatches()" function
-void f_getmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_getmatches(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   matchitem_T *cur;
   int i;
@@ -923,7 +924,7 @@ void f_getmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "setmatches()" function
-void f_setmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_setmatches(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   dict_T *d;
   list_T *s = NULL;
@@ -1026,7 +1027,7 @@ void f_setmatches(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "matchadd()" function
-void f_matchadd(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_matchadd(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   char grpbuf[NUMBUFLEN];
   char patbuf[NUMBUFLEN];
@@ -1068,7 +1069,7 @@ void f_matchadd(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "matchaddpo()" function
-void f_matchaddpos(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_matchaddpos(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   rettv->vval.v_number = -1;
 
@@ -1119,7 +1120,7 @@ void f_matchaddpos(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "matcharg()" function
-void f_matcharg(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_matcharg(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   const int id = (int)tv_get_number(&argvars[0]);
 
@@ -1142,7 +1143,7 @@ void f_matcharg(typval_T *argvars, typval_T *rettv, FunPtr fptr)
 }
 
 /// "matchdelete()" function
-void f_matchdelete(typval_T *argvars, typval_T *rettv, FunPtr fptr)
+void f_matchdelete(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   win_T *win = get_optional_window(argvars, 1);
   if (win == NULL) {
@@ -1193,7 +1194,7 @@ void ex_match(exarg_T *eap)
       semsg(_(e_invarg2), eap->arg);
       return;
     }
-    end = skip_regexp(p + 1, *p, true, NULL);
+    end = (char_u *)skip_regexp((char *)p + 1, *p, true, NULL);
     if (!eap->skip) {
       if (*end != NUL && !ends_excmd(*skipwhite((char *)end + 1))) {
         xfree(g);
@@ -1214,5 +1215,5 @@ void ex_match(exarg_T *eap)
       *end = (char_u)c;
     }
   }
-  eap->nextcmd = (char *)find_nextcmd(end);
+  eap->nextcmd = find_nextcmd((char *)end);
 }
