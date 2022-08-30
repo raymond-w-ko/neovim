@@ -55,7 +55,7 @@ static void save_patterns(int num_pat, char **pat, int *num_file, char ***file)
     char_u *s = vim_strsave((char_u *)pat[i]);
     // Be compatible with expand_filename(): halve the number of
     // backslashes.
-    backslash_halve(s);
+    backslash_halve((char *)s);
     (*file)[i] = (char *)s;
   }
   *num_file = num_pat;
@@ -508,7 +508,7 @@ int os_expand_wildcards(int num_pat, char **pat, int *num_file, char ***file, in
     }
 
     // check if this entry should be included
-    dir = (os_isdir((char_u *)(*file)[i]));
+    dir = (os_isdir((*file)[i]));
     if ((dir && !(flags & EW_DIR)) || (!dir && !(flags & EW_FILE))) {
       continue;
     }
@@ -911,7 +911,7 @@ static int do_os_system(char **argv, const char *input, size_t len, char **outpu
     out_data_ring(NULL, SIZE_MAX);
   }
   if (forward_output) {
-    // caller should decide if wait_return is invoked
+    // caller should decide if wait_return() is invoked
     no_wait_return++;
     msg_end();
     no_wait_return--;
