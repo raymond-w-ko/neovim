@@ -3010,7 +3010,7 @@ void ex_call(exarg_T *eap)
 
   // When inside :try we need to check for following "| catch" or "| endtry".
   // Not when there was an error, but do check if an exception was thrown.
-  if ((!aborting() || current_exception != NULL) && (!failed || eap->cstack->cs_trylevel > 0)) {
+  if ((!aborting() || did_throw) && (!failed || eap->cstack->cs_trylevel > 0)) {
     // Check for trailing illegal characters and a following command.
     if (!ends_excmd(*arg)) {
       if (!failed && !aborting()) {
@@ -3111,8 +3111,7 @@ char *get_return_cmd(void *rettv)
   char *tofree = NULL;
 
   if (rettv != NULL) {
-    tofree = encode_tv2echo((typval_T *)rettv, NULL);
-    s = encode_tv2echo((typval_T *)rettv, NULL);
+    tofree = s = encode_tv2echo((typval_T *)rettv, NULL);
   }
   if (s == NULL) {
     s = "";
