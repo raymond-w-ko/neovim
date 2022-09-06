@@ -1045,6 +1045,10 @@ void pum_show_popupmenu(vimmenu_T *menu)
 
   pum_selected = -1;
   pum_first = 0;
+  if (!p_mousemev) {
+    // Pretend 'mousemoveevent' is set.
+    ui_call_option_set(STATIC_CSTR_AS_STRING("mousemoveevent"), BOOLEAN_OBJ(true));
+  }
 
   for (;;) {
     pum_is_visible = true;
@@ -1102,6 +1106,9 @@ void pum_show_popupmenu(vimmenu_T *menu)
 
   xfree(array);
   pum_undisplay(true);
+  if (!p_mousemev) {
+    ui_call_option_set(STATIC_CSTR_AS_STRING("mousemoveevent"), BOOLEAN_OBJ(false));
+  }
 }
 
 void pum_make_popup(const char *path_name, int use_mouse_pos)

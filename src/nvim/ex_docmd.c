@@ -535,7 +535,7 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
       if (flags & DOCMD_KEEPLINE) {
         xfree(repeat_cmdline);
         if (count == 0) {
-          repeat_cmdline = (char *)vim_strsave((char_u *)next_cmdline);
+          repeat_cmdline = xstrdup(next_cmdline);
         } else {
           repeat_cmdline = NULL;
         }
@@ -642,7 +642,7 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
 
           // Check for the next breakpoint at or after the ":while"
           // or ":for".
-          if (breakpoint != NULL) {
+          if (breakpoint != NULL && lines_ga.ga_len > current_line) {
             *breakpoint = dbg_find_breakpoint(getline_equal(fgetline, cookie, getsourceline), fname,
                                               ((wcmd_T *)lines_ga.ga_data)[current_line].lnum - 1);
             *dbg_tick = debug_tick;
@@ -1757,6 +1757,7 @@ static bool skip_cmd(const exarg_T *eap)
     case CMD_filter:
     case CMD_help:
     case CMD_hide:
+    case CMD_horizontal:
     case CMD_ijump:
     case CMD_ilist:
     case CMD_isearch:
@@ -1929,7 +1930,7 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   // If we got a line, but no command, then go to the line.
   // If we find a '|' or '\n' we set ea.nextcmd.
   if (*ea.cmd == NUL || *ea.cmd == '"'
-      || (ea.nextcmd = (char *)check_nextcmd((char_u *)ea.cmd)) != NULL) {
+      || (ea.nextcmd = check_nextcmd(ea.cmd)) != NULL) {
     // strange vi behaviour:
     // ":3"     jumps to line 3
     // ":3|..." prints line 3
@@ -2438,8 +2439,12 @@ int parse_command_modifiers(exarg_T *eap, char **errormsg, cmdmod_T *cmod, bool 
       continue;
     }
 
-    // ":hide" and ":hide | cmd" are not modifiers
     case 'h':
+      if (checkforcmd(&eap->cmd, "horizontal", 3)) {
+        cmod->cmod_split |= WSP_HOR;
+        continue;
+      }
+      // ":hide" and ":hide | cmd" are not modifiers
       if (p != eap->cmd || !checkforcmd(&p, "hide", 3)
           || *p == NUL || ends_excmd(*p)) {
         break;
@@ -2826,7 +2831,7 @@ static void append_command(char *cmd)
   if (len > IOSIZE - 100) {
     // Not enough space, truncate and put in "...".
     d = (char *)IObuff + IOSIZE - 100;
-    d -= utf_head_off(IObuff, (const char_u *)d);
+    d -= utf_head_off((char *)IObuff, d);
     STRCPY(d, "...");
   }
   STRCAT(IObuff, ": ");
@@ -3081,10 +3086,9 @@ void f_fullcommand(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     return;
   }
 
-  rettv->vval.v_string = (char *)vim_strsave(IS_USER_CMDIDX(ea.cmdidx)
-                                             ? (char_u *)get_user_command_name(ea.useridx,
-                                                                               ea.cmdidx)
-                                             : (char_u *)cmdnames[ea.cmdidx].cmd_name);
+  rettv->vval.v_string = xstrdup(IS_USER_CMDIDX(ea.cmdidx)
+                                 ? get_user_command_name(ea.useridx, ea.cmdidx)
+                                 : cmdnames[ea.cmdidx].cmd_name);
 }
 
 cmdidx_T excmd_get_cmdidx(const char *cmd, size_t len)
@@ -3690,7 +3694,7 @@ int expand_filename(exarg_T *eap, char **cmdlinep, char **errormsgp)
   // Decide to expand wildcards *before* replacing '%', '#', etc.  If
   // the file name contains a wildcard it should not cause expanding.
   // (it will be expanded anyway if there is a wildcard before replacing).
-  int has_wildcards = path_has_wildcard((char_u *)p);
+  int has_wildcards = path_has_wildcard(p);
   while (*p != NUL) {
     // Skip over `=expr`, wildcards in it are not expanded.
     if (p[0] == '`' && p[1] == '=') {
@@ -3795,7 +3799,7 @@ int expand_filename(exarg_T *eap, char **cmdlinep, char **errormsgp)
       if (vim_strchr(eap->arg, '$') != NULL
           || vim_strchr(eap->arg, '~') != NULL) {
         expand_env_esc((char_u *)eap->arg, (char_u *)NameBuff, MAXPATHL, true, true, NULL);
-        has_wildcards = path_has_wildcard((char_u *)NameBuff);
+        has_wildcards = path_has_wildcard(NameBuff);
         p = (char *)NameBuff;
       } else {
         p = NULL;
@@ -3935,7 +3939,7 @@ void separate_nextcmd(exarg_T *eap)
         STRMOVE(p - 1, p);  // remove the '\'
         p--;
       } else {
-        eap->nextcmd = (char *)check_nextcmd((char_u *)p);
+        eap->nextcmd = check_nextcmd(p);
         *p = NUL;
         break;
       }
@@ -4312,12 +4316,12 @@ char *find_nextcmd(const char *p)
 /// Check if *p is a separator between Ex commands, skipping over white space.
 ///
 /// @return  NULL if it isn't, the following character if it is.
-char_u *check_nextcmd(char_u *p)
+char *check_nextcmd(char *p)
 {
-  char *s = skipwhite((char *)p);
+  char *s = skipwhite(p);
 
   if (*s == '|' || *s == '\n') {
-    return (char_u *)(s + 1);
+    return s + 1;
   } else {
     return NULL;
   }
@@ -4344,7 +4348,7 @@ static int check_more(int message, bool forceit)
         vim_snprintf((char *)buff, DIALOG_MSG_SIZE,
                      NGETTEXT("%d more file to edit.  Quit anyway?",
                               "%d more files to edit.  Quit anyway?", (unsigned long)n), n);
-        if (vim_dialog_yesno(VIM_QUESTION, NULL, (char_u *)buff, 1) == VIM_YES) {
+        if (vim_dialog_yesno(VIM_QUESTION, NULL, buff, 1) == VIM_YES) {
           return OK;
         }
         return FAIL;
@@ -4834,7 +4838,6 @@ static void ex_print(exarg_T *eap)
       if (++eap->line1 > eap->line2) {
         break;
       }
-      ui_flush();                  // show one line at a time
     }
     setpcmark();
     // put cursor at last line
@@ -5036,7 +5039,6 @@ static void ex_tabs(exarg_T *eap)
     msg_putchar('\n');
     vim_snprintf((char *)IObuff, IOSIZE, _("Tab page %d"), tabcount++);
     msg_outtrans_attr((char *)IObuff, HL_ATTR(HLF_T));
-    ui_flush();            // output one line at a time
     os_breakcheck();
 
     FOR_ALL_WINDOWS_IN_TAB(wp, tp) {
@@ -5055,7 +5057,6 @@ static void ex_tabs(exarg_T *eap)
         home_replace(wp->w_buffer, wp->w_buffer->b_fname, (char *)IObuff, IOSIZE, true);
       }
       msg_outtrans((char *)IObuff);
-      ui_flush();                  // output one line at a time
       os_breakcheck();
     }
   }
@@ -5543,27 +5544,26 @@ void ex_cd(exarg_T *eap)
   // for non-UNIX ":cd" means: print current directory unless 'cdhome' is set
   if (*new_dir == NUL && !p_cdh) {
     ex_pwd(NULL);
-  } else
+    return;
+  }
 #endif
-  {
-    CdScope scope = kCdScopeGlobal;
-    switch (eap->cmdidx) {
-    case CMD_tcd:
-    case CMD_tchdir:
-      scope = kCdScopeTabpage;
-      break;
-    case CMD_lcd:
-    case CMD_lchdir:
-      scope = kCdScopeWindow;
-      break;
-    default:
-      break;
-    }
-    if (changedir_func(new_dir, scope)) {
-      // Echo the new current directory if the command was typed.
-      if (KeyTyped || p_verbose >= 5) {
-        ex_pwd(eap);
-      }
+  CdScope scope = kCdScopeGlobal;
+  switch (eap->cmdidx) {
+  case CMD_tcd:
+  case CMD_tchdir:
+    scope = kCdScopeTabpage;
+    break;
+  case CMD_lcd:
+  case CMD_lchdir:
+    scope = kCdScopeWindow;
+    break;
+  default:
+    break;
+  }
+  if (changedir_func(new_dir, scope)) {
+    // Echo the new current directory if the command was typed.
+    if (KeyTyped || p_verbose >= 5) {
+      ex_pwd(eap);
     }
   }
 }
@@ -5675,7 +5675,7 @@ static void ex_wincmd(exarg_T *eap)
     p = eap->arg + 1;
   }
 
-  eap->nextcmd = (char *)check_nextcmd((char_u *)p);
+  eap->nextcmd = check_nextcmd(p);
   p = skipwhite(p);
   if (*p != NUL && *p != '"' && eap->nextcmd == NULL) {
     emsg(_(e_invarg));
@@ -6007,7 +6007,7 @@ static void ex_redir(exarg_T *eap)
           // Make register empty when not using @A-@Z and the
           // command is valid.
           if (*arg == NUL && !isupper(redir_reg)) {
-            write_reg_contents(redir_reg, (char_u *)"", 0, false);
+            write_reg_contents(redir_reg, "", 0, false);
           }
         }
       }
@@ -6162,7 +6162,7 @@ FILE *open_exfile(char_u *fname, int forceit, char *mode)
     return NULL;
   }
 #endif
-  if (!forceit && *mode != 'a' && os_path_exists(fname)) {
+  if (!forceit && *mode != 'a' && os_path_exists((char *)fname)) {
     semsg(_("E189: \"%s\" exists (add ! to override)"), fname);
     return NULL;
   }
@@ -6466,7 +6466,7 @@ static void ex_findpat(exarg_T *eap)
       if (!ends_excmd(*p)) {
         eap->errmsg = ex_errmsg(e_trailing_arg, p);
       } else {
-        eap->nextcmd = (char *)check_nextcmd((char_u *)p);
+        eap->nextcmd = check_nextcmd(p);
       }
     }
   }

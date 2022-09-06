@@ -34,7 +34,7 @@ struct sign_entry {
 
 /// Sign attributes. Used by the screen refresh routines.
 typedef struct {
-  char_u *text;
+  char *text;
   int hl_attr_id;
   int priority;
 } SignTextAttrs;
@@ -51,4 +51,4 @@ typedef enum {
   SIGN_TEXT,
 } SignType;
 
-#endif // NVIM_SIGN_DEFS_H
+#endif  // NVIM_SIGN_DEFS_H

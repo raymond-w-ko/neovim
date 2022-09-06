@@ -531,7 +531,7 @@ static void uc_list(char *name, size_t name_len)
         }
       }
 
-      msg_outtrans_special((char_u *)cmd->uc_rep, false,
+      msg_outtrans_special(cmd->uc_rep, false,
                            name_len == 0 ? Columns - 47 : 0);
       if (p_verbose > 0) {
         last_set_msg(cmd->uc_script_ctx);
@@ -1246,6 +1246,10 @@ size_t add_win_cmd_modifers(char *buf, const cmdmod_T *cmod, bool *multi_mods)
   // :vertical
   if (cmod->cmod_split & WSP_VERT) {
     result += add_cmd_modifier(buf, "vertical", multi_mods);
+  }
+  // :horizontal
+  if (cmod->cmod_split & WSP_HOR) {
+    result += add_cmd_modifier(buf, "horizontal", multi_mods);
   }
   return result;
 }

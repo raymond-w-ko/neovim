@@ -379,9 +379,7 @@ enum {
 #define LISPWORD_VALUE \
   "defun,define,defmacro,set!,lambda,if,case,let,flet,let*,letrec,do,do*,define-syntax,let-syntax,letrec-syntax,destructuring-bind,defpackage,defparameter,defstruct,deftype,defvar,do-all-symbols,do-external-symbols,do-symbols,dolist,dotimes,ecase,etypecase,eval-when,labels,macrolet,multiple-value-bind,multiple-value-call,multiple-value-prog1,multiple-value-setq,prog1,progv,typecase,unless,unwind-protect,when,with-input-from-string,with-open-file,with-open-stream,with-output-to-string,with-package-iterator,define-condition,handler-bind,handler-case,restart-bind,restart-case,with-simple-restart,store-value,use-value,muffle-warning,abort,continue,with-slots,with-slots*,with-accessors,with-accessors*,defclass,defmethod,print-unreadable-object"
 
-/*
- * The following are actual variables for the options
- */
+// The following are actual variables for the options
 
 EXTERN long p_aleph;            // 'aleph'
 EXTERN char *p_ambw;            ///< 'ambiwidth'
@@ -618,6 +616,7 @@ EXTERN int p_ma;                ///< 'modifiable'
 EXTERN int p_mod;               ///< 'modified'
 EXTERN char *p_mouse;           // 'mouse'
 EXTERN char *p_mousem;          // 'mousemodel'
+EXTERN int p_mousemev;          ///< 'mousemoveevent'
 EXTERN int p_mousef;            // 'mousefocus'
 EXTERN char *p_mousescroll;     // 'mousescroll'
 EXTERN long p_mousescroll_vert INIT(= MOUSESCROLL_VERT_DFLT);
@@ -732,6 +731,7 @@ EXTERN char *p_spc;             ///< 'spellcapcheck'
 EXTERN char *p_spf;             ///< 'spellfile'
 EXTERN char *p_spl;             ///< 'spelllang'
 EXTERN char *p_spo;             // 'spelloptions'
+EXTERN unsigned int spo_flags;
 EXTERN char *p_sps;             // 'spellsuggest'
 EXTERN int p_spr;               // 'splitright'
 EXTERN int p_sol;               // 'startofline'
@@ -924,11 +924,9 @@ enum {
   BV_COUNT,  // must be the last one
 };
 
-/*
- * "indir" values for window-local options.
- * These need to be defined globally, so that the WV_COUNT can be used in the
- * window structure.
- */
+// "indir" values for window-local options.
+// These need to be defined globally, so that the WV_COUNT can be used in the
+// window structure.
 enum {
   WV_LIST = 0,
   WV_ARAB,
@@ -992,4 +990,4 @@ typedef struct {
   uint64_t channel_id;     /// Only used when script_id is SID_API_CLIENT.
 } LastSet;
 
-#endif // NVIM_OPTION_DEFS_H
+#endif  // NVIM_OPTION_DEFS_H

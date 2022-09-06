@@ -2292,7 +2292,7 @@ int eval0(char *arg, typval_T *rettv, char **nextcmd, int evaluate)
     ret = FAIL;
   }
   if (nextcmd != NULL) {
-    *nextcmd = (char *)check_nextcmd((char_u *)p);
+    *nextcmd = check_nextcmd(p);
   }
 
   return ret;
@@ -2995,7 +2995,7 @@ static int eval7(char **arg, typval_T *rettv, int evaluate, int want_string)
       *arg = bp;
     } else {
       // decimal, hex or octal number
-      vim_str2nr((char_u *)(*arg), NULL, &len, STR2NR_ALL, &n, NULL, 0, true);
+      vim_str2nr(*arg, NULL, &len, STR2NR_ALL, &n, NULL, 0, true);
       if (len == 0) {
         semsg(_(e_invexpr2), *arg);
         ret = FAIL;
@@ -5858,13 +5858,8 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
     break;
 
   case kCallbackLua:
-    rv = nlua_call_ref(callback->data.luaref, NULL, args, true, NULL);
-    switch (rv.type) {
-    case kObjectTypeBoolean:
-      return rv.data.boolean;
-    default:
-      return false;
-    }
+    rv = nlua_call_ref(callback->data.luaref, NULL, args, false, NULL);
+    return (rv.type == kObjectTypeBoolean && rv.data.boolean == true);
 
   case kCallbackNone:
     return false;
@@ -6369,7 +6364,7 @@ pos_T *var2fpos(const typval_T *const tv, const bool dollar_lnum, int *const ret
     }
     int len;
     if (charcol) {
-      len = mb_charlen(ml_get(pos.lnum));
+      len = mb_charlen((char_u *)ml_get(pos.lnum));
     } else {
       len = (int)STRLEN(ml_get(pos.lnum));
     }
@@ -6455,7 +6450,7 @@ pos_T *var2fpos(const typval_T *const tv, const bool dollar_lnum, int *const ret
     } else {
       pos.lnum = curwin->w_cursor.lnum;
       if (charcol) {
-        pos.col = (colnr_T)mb_charlen(get_cursor_line_ptr());
+        pos.col = (colnr_T)mb_charlen((char_u *)get_cursor_line_ptr());
       } else {
         pos.col = (colnr_T)STRLEN(get_cursor_line_ptr());
       }
@@ -7639,7 +7634,7 @@ void ex_echo(exarg_T *eap)
     tv_clear(&rettv);
     arg = skipwhite(arg);
   }
-  eap->nextcmd = (char *)check_nextcmd((char_u *)arg);
+  eap->nextcmd = check_nextcmd(arg);
 
   if (eap->skip) {
     emsg_skip--;
@@ -7736,7 +7731,7 @@ void ex_execute(exarg_T *eap)
     emsg_skip--;
   }
 
-  eap->nextcmd = (char *)check_nextcmd((char_u *)arg);
+  eap->nextcmd = check_nextcmd(arg);
 }
 
 /// Skip over the name of an option: "&option", "&g:option" or "&l:option".
@@ -8630,7 +8625,7 @@ void invoke_prompt_callback(void)
   if (curbuf->b_prompt_callback.type == kCallbackNone) {
     return;
   }
-  char *text = (char *)ml_get(lnum);
+  char *text = ml_get(lnum);
   char *prompt = (char *)prompt_text();
   if (STRLEN(text) >= STRLEN(prompt)) {
     text += STRLEN(prompt);

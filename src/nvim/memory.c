@@ -23,6 +23,7 @@
 #include "nvim/message.h"
 #include "nvim/sign.h"
 #include "nvim/ui.h"
+#include "nvim/ui_compositor.h"
 #include "nvim/vim.h"
 
 #ifdef UNIT_TESTING
@@ -501,22 +502,22 @@ bool striequal(const char *a, const char *b)
   return (a == NULL && b == NULL) || (a && b && STRICMP(a, b) == 0);
 }
 
-/*
- * Avoid repeating the error message many times (they take 1 second each).
- * Did_outofmem_msg is reset when a character is read.
- */
+// Avoid repeating the error message many times (they take 1 second each).
+// Did_outofmem_msg is reset when a character is read.
 void do_outofmem_msg(size_t size)
 {
-  if (!did_outofmem_msg) {
-    // Don't hide this message
-    emsg_silent = 0;
-
-    /* Must come first to avoid coming back here when printing the error
-     * message fails, e.g. when setting v:errmsg. */
-    did_outofmem_msg = true;
-
-    semsg(_("E342: Out of memory!  (allocating %" PRIu64 " bytes)"), (uint64_t)size);
+  if (did_outofmem_msg) {
+    return;
   }
+
+  // Don't hide this message
+  emsg_silent = 0;
+
+  // Must come first to avoid coming back here when printing the error
+  // message fails, e.g. when setting v:errmsg.
+  did_outofmem_msg = true;
+
+  semsg(_("E342: Out of memory!  (allocating %" PRIu64 " bytes)"), (uint64_t)size);
 }
 
 /// Writes time_t to "buf[8]".
@@ -674,13 +675,11 @@ char *arena_memdupz(Arena *arena, const char *buf, size_t size)
 # include "nvim/tag.h"
 # include "nvim/window.h"
 
-/*
- * Free everything that we allocated.
- * Can be used to detect memory leaks, e.g., with ccmalloc.
- * NOTE: This is tricky!  Things are freed that functions depend on.  Don't be
- * surprised if Vim crashes...
- * Some things can't be freed, esp. things local to a library function.
- */
+// Free everything that we allocated.
+// Can be used to detect memory leaks, e.g., with ccmalloc.
+// NOTE: This is tricky!  Things are freed that functions depend on.  Don't be
+// surprised if Vim crashes...
+// Some things can't be freed, esp. things local to a library function.
 void free_all_mem(void)
 {
   buf_T *buf, *nextbuf;
@@ -824,6 +823,7 @@ void free_all_mem(void)
 
   nlua_free_all_mem();
   ui_free_all_mem();
+  ui_comp_free_all_mem();
 
   // should be last, in case earlier free functions deallocates arenas
   arena_free_reuse_blks();

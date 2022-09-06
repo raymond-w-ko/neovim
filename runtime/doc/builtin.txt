@@ -6,9 +6,7 @@
 
 Builtin functions				*builtin-functions*
 
-1. Overview				|builtin-function-list|
-2. Details				|builtin-function-details|
-3. Matching a pattern in a String	|string-match|
+				      Type |gO| to see the table of contents.
 
 ==============================================================================
 1. Overview					*builtin-function-list*
@@ -1276,7 +1274,7 @@ complete_info([{what}])				*complete_info()*
 				typed text only, or the last completion after
 				no item is selected when using the <Up> or
 				<Down> keys)
-		   inserted	Inserted string. [NOT IMPLEMENT YET]
+		   inserted	Inserted string. [NOT IMPLEMENTED YET]
 
 							*complete_info_mode*
 		mode values are:
@@ -2507,10 +2505,11 @@ funcref({name} [, {arglist}] [, {dict}])
 		Can also be used as a |method|: >
 			GetFuncname()->funcref([arg])
 <
-				       *function()* *E700* *E922* *E923*
+				*function()* *partial* *E700* *E922* *E923*
 function({name} [, {arglist}] [, {dict}])
 		Return a |Funcref| variable that refers to function {name}.
-		{name} can be a user defined function or an internal function.
+		{name} can be the name of a user defined function or an
+		internal function.
 
 		{name} can also be a Funcref or a partial. When it is a
 		partial the dict stored in it will be used and the {dict}
@@ -2529,10 +2528,31 @@ function({name} [, {arglist}] [, {dict}])
 		The arguments are passed to the function in front of other
 		arguments, but after any argument from |method|.  Example: >
 			func Callback(arg1, arg2, name)
-			...
+			"...
 			let Partial = function('Callback', ['one', 'two'])
-			...
+			"...
 			call Partial('name')
+<		Invokes the function as with: >
+			call Callback('one', 'two', 'name')
+
+<		With a |method|: >
+			func Callback(one, two, three)
+			"...
+			let Partial = function('Callback', ['two'])
+			"...
+			eval 'one'->Partial('three')
+<		Invokes the function as with: >
+			call Callback('one', 'two', 'three')
+
+<		The function() call can be nested to add more arguments to the
+		Funcref.  The extra arguments are appended to the list of
+		arguments.  Example: >
+			func Callback(arg1, arg2, name)
+			"...
+			let Func = function('Callback', ['one'])
+			let Func2 = function(Func, ['two'])
+			"...
+			call Func2('name')
 <		Invokes the function as with: >
 			call Callback('one', 'two', 'name')
 
@@ -2541,18 +2561,23 @@ function({name} [, {arglist}] [, {dict}])
 			function Callback() dict
 			   echo "called for " .. self.name
 			endfunction
-			...
+			"...
 			let context = {"name": "example"}
 			let Func = function('Callback', context)
-			...
+			"...
 			call Func()	" will echo: called for example
+<		The use of function() is not needed when there are no extra
+		arguments, these two are equivalent, if Callback() is defined
+		as context.Callback(): >
+			let Func = function('Callback', context)
+			let Func = context.Callback
 
 <		The argument list and the Dictionary can be combined: >
 			function Callback(arg1, count) dict
-			...
+			"...
 			let context = {"name": "example"}
 			let Func = function('Callback', ['one'], context)
-			...
+			"...
 			call Func(500)
 <		Invokes the function as with: >
 			call context.Callback('one', 500)

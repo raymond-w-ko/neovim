@@ -4231,6 +4231,15 @@ A jump table for the options with a short description can be found at |Q_op|.
 
 	The 'mousemodel' option is set by the |:behave| command.
 
+						*'mousemoveevent'* *'mousemev'*
+'mousemoveevent' 'mousemev'  boolean	(default off)
+			global
+	When on, mouse move events are delivered to the input queue and are
+	available for mapping. The default, off, avoids the mouse movement
+	overhead except when needed.
+	Warning: Setting this option can make pending mappings to be aborted
+	when the mouse is moved.
+
 						*'mousescroll'*
 'mousescroll'		string	(default "ver:3,hor:6")
 			global
@@ -5862,10 +5871,14 @@ A jump table for the options with a short description can be found at |Q_op|.
 'spelloptions' 'spo'	string	(default "")
 			local to buffer
 	A comma-separated list of options for spell checking:
-	   camel	When a word is CamelCased, assume "Cased" is a
+	camel		When a word is CamelCased, assume "Cased" is a
 			separate word: every upper-case character in a word
 			that comes after a lower case character indicates the
 			start of a new word.
+	noplainbuffer	Only spellcheck a buffer when 'syntax' is enabled, or
+			or when extmarks are set within the buffer. Only
+			designated regions of the buffer are spellchecked in
+			this case.
 
 						*'spellsuggest'* *'sps'*
 'spellsuggest' 'sps'	string	(default "best")

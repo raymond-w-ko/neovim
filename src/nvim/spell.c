@@ -71,6 +71,7 @@
 #include "nvim/change.h"          // for changed_bytes
 #include "nvim/charset.h"         // for skipwhite, getwhitecols, skipbin
 #include "nvim/cursor.h"          // for get_cursor_line_ptr
+#include "nvim/decoration.h"
 #include "nvim/drawscreen.h"      // for NOT_VALID, redraw_later
 #include "nvim/eval/typval.h"     // for semsg
 #include "nvim/ex_cmds.h"         // for do_sub_msg
@@ -220,7 +221,7 @@ size_t spell_check(win_T *wp, char_u *ptr, hlf_T *attrp, int *capcol, bool docou
   size_t nrlen = 0;              // found a number first
   size_t wrongcaplen = 0;
   bool count_word = docount;
-  bool use_camel_case = *wp->w_s->b_p_spo != NUL;
+  bool use_camel_case = (wp->w_s->b_p_spo_flags & SPO_CAMEL) != 0;
   bool camel_case = false;
 
   // A word never starts at a space or a control character. Return quickly
@@ -571,7 +572,7 @@ static void find_word(matchinf_T *mip, int mode)
     arridx = endidx[endidxcnt];
     wlen = endlen[endidxcnt];
 
-    if (utf_head_off(ptr, ptr + wlen) > 0) {
+    if (utf_head_off((char *)ptr, (char *)ptr + wlen) > 0) {
       continue;             // not at first byte of character
     }
     if (spell_iswordp(ptr + wlen, mip->mi_win)) {
@@ -1198,6 +1199,24 @@ bool no_spell_checking(win_T *wp)
   return false;
 }
 
+static void decor_spell_nav_start(win_T *wp)
+{
+  decor_state = (DecorState){ 0 };
+  decor_redraw_reset(wp->w_buffer, &decor_state);
+}
+
+static bool decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, int col,
+                                char **decor_error)
+{
+  if (*decor_lnum != lnum) {
+    decor_providers_invoke_spell(wp, lnum - 1, col, lnum - 1, -1, decor_error);
+    decor_redraw_line(wp->w_buffer, lnum - 1, &decor_state);
+    *decor_lnum = lnum;
+  }
+  decor_redraw_col(wp->w_buffer, col, col, false, &decor_state);
+  return decor_state.spell;
+}
+
 /// Moves to the next spell error.
 /// "curline" is false for "[s", "]s", "[S" and "]S".
 /// "curline" is true to find word under/after cursor in the same line.
@@ -1216,17 +1235,19 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
   hlf_T attr = HLF_COUNT;
   size_t len;
   int has_syntax = syntax_present(wp);
-  int col;
+  colnr_T col;
   char_u *buf = NULL;
   size_t buflen = 0;
   int skip = 0;
-  int capcol = -1;
+  colnr_T capcol = -1;
   bool found_one = false;
   bool wrapped = false;
 
   if (no_spell_checking(wp)) {
     return 0;
   }
+
+  size_t ret = 0;
 
   // Start looking for bad word at the start of the line, because we can't
   // start halfway through a word, we don't know where it starts or ends.
@@ -1239,6 +1260,19 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
   // though...
   linenr_T lnum = wp->w_cursor.lnum;
   clearpos(&found_pos);
+
+  char *decor_error = NULL;
+  // Ephemeral extmarks are currently stored in the global decor_state.
+  // When looking for spell errors, we need to:
+  //  - temporarily reset decor_state
+  //  - run the _on_spell_nav decor callback for each line we look at
+  //  - detect if any spell marks are present
+  //  - restore decor_state to the value saved here.
+  // TODO(lewis6991): un-globalize decor_state and allow ephemeral marks to be stored into a
+  // temporary DecorState.
+  DecorState saved_decor_start = decor_state;
+  linenr_T decor_lnum = -1;
+  decor_spell_nav_start(wp);
 
   while (!got_int) {
     char_u *line = ml_get_buf(wp->w_buffer, lnum, false);
@@ -1258,10 +1292,10 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
 
     // For checking first word with a capital skip white space.
     if (capcol == 0) {
-      capcol = (int)getwhitecols((char *)line);
+      capcol = (colnr_T)getwhitecols((char *)line);
     } else if (curline && wp == curwin) {
       // For spellbadword(): check if first word needs a capital.
-      col = (int)getwhitecols((char *)line);
+      col = (colnr_T)getwhitecols((char *)line);
       if (check_need_cap(lnum, col)) {
         capcol = col;
       }
@@ -1308,33 +1342,37 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
               || ((colnr_T)(curline
                             ? p - buf + (ptrdiff_t)len
                             : p - buf) > wp->w_cursor.col)) {
-            bool can_spell;
-            if (has_syntax) {
-              col = (int)(p - buf);
-              (void)syn_get_id(wp, lnum, (colnr_T)col,
-                               false, &can_spell, false);
-              if (!can_spell) {
-                attr = HLF_COUNT;
-              }
-            } else {
-              can_spell = true;
+            col = (colnr_T)(p - buf);
+
+            bool can_spell = (wp->w_s->b_p_spo_flags & SPO_NPBUFFER) == 0;
+
+            if (!can_spell) {
+              can_spell = decor_spell_nav_col(wp, lnum, &decor_lnum, col, &decor_error);
+            }
+
+            if (!can_spell && has_syntax) {
+              (void)syn_get_id(wp, lnum, col, false, &can_spell, false);
+            }
+
+            if (!can_spell) {
+              attr = HLF_COUNT;
             }
 
             if (can_spell) {
               found_one = true;
               found_pos = (pos_T) {
                 .lnum = lnum,
-                .col = (int)(p - buf),
+                .col = col,
                 .coladd = 0
               };
               if (dir == FORWARD) {
                 // No need to search further.
                 wp->w_cursor = found_pos;
-                xfree(buf);
                 if (attrp != NULL) {
                   *attrp = attr;
                 }
-                return len;
+                ret = len;
+                goto theend;
               } else if (curline) {
                 // Insert mode completion: put cursor after
                 // the bad word.
@@ -1358,8 +1396,8 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
     if (dir == BACKWARD && found_pos.lnum != 0) {
       // Use the last match in the line (before the cursor).
       wp->w_cursor = found_pos;
-      xfree(buf);
-      return found_len;
+      ret = found_len;
+      goto theend;
     }
 
     if (curline) {
@@ -1429,8 +1467,12 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
     line_breakcheck();
   }
 
+theend:
+  decor_state_free(&decor_state);
+  xfree(decor_error);
+  decor_state = saved_decor_start;
   xfree(buf);
-  return 0;
+  return ret;
 }
 
 // For spell checking: concatenate the start of the following line "line" into
@@ -2104,8 +2146,8 @@ static void clear_midword(win_T *wp)
   XFREE_CLEAR(wp->w_s->b_spell_ismw_mb);
 }
 
-// Use the "sl_midword" field of language "lp" for buffer "buf".
-// They add up to any currently used midword characters.
+/// Use the "sl_midword" field of language "lp" for buffer "buf".
+/// They add up to any currently used midword characters.
 static void use_midword(slang_T *lp, win_T *wp)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -2113,20 +2155,20 @@ static void use_midword(slang_T *lp, win_T *wp)
     return;
   }
 
-  for (char_u *p = lp->sl_midword; *p != NUL;) {
-    const int c = utf_ptr2char((char *)p);
-    const int l = utfc_ptr2len((char *)p);
+  for (char *p = (char *)lp->sl_midword; *p != NUL;) {
+    const int c = utf_ptr2char(p);
+    const int l = utfc_ptr2len(p);
     if (c < 256 && l <= 2) {
       wp->w_s->b_spell_ismw[c] = true;
     } else if (wp->w_s->b_spell_ismw_mb == NULL) {
       // First multi-byte char in "b_spell_ismw_mb".
-      wp->w_s->b_spell_ismw_mb = (char *)vim_strnsave(p, (size_t)l);
+      wp->w_s->b_spell_ismw_mb = xstrnsave(p, (size_t)l);
     } else {
       // Append multi-byte chars to "b_spell_ismw_mb".
       const int n = (int)STRLEN(wp->w_s->b_spell_ismw_mb);
-      char_u *bp = vim_strnsave((char_u *)wp->w_s->b_spell_ismw_mb, (size_t)n + (size_t)l);
+      char *bp = xstrnsave(wp->w_s->b_spell_ismw_mb, (size_t)n + (size_t)l);
       xfree(wp->w_s->b_spell_ismw_mb);
-      wp->w_s->b_spell_ismw_mb = (char *)bp;
+      wp->w_s->b_spell_ismw_mb = bp;
       STRLCPY(bp + n, p, l + 1);
     }
     p += l;
@@ -2470,7 +2512,7 @@ bool check_need_cap(linenr_T lnum, colnr_T col)
     return false;
   }
 
-  char_u *line = get_cursor_line_ptr();
+  char_u *line = (char_u *)get_cursor_line_ptr();
   char_u *line_copy = NULL;
   colnr_T endcol = 0;
   if (getwhitecols((char *)line) >= (int)col) {
@@ -2479,7 +2521,7 @@ bool check_need_cap(linenr_T lnum, colnr_T col)
     if (lnum == 1) {
       need_cap = true;
     } else {
-      line = ml_get(lnum - 1);
+      line = (char_u *)ml_get(lnum - 1);
       if (*skipwhite((char *)line) == NUL) {
         need_cap = true;
       } else {
@@ -2548,7 +2590,7 @@ void ex_spellrepall(exarg_T *eap)
 
     // Only replace when the right word isn't there yet.  This happens
     // when changing "etc" to "etc.".
-    char_u *line = get_cursor_line_ptr();
+    char_u *line = (char_u *)get_cursor_line_ptr();
     if (addlen <= 0 || STRNCMP(line + curwin->w_cursor.col,
                                repl_to, STRLEN(repl_to)) != 0) {
       char_u *p = xmalloc(STRLEN(line) + (size_t)addlen + 1);
@@ -3289,7 +3331,7 @@ void spell_dump_compl(char_u *pat, int ic, Direction *dir, int dumpflags_arg)
             // ignore case...
             assert(depth >= 0);
             if (depth <= patlen
-                && mb_strnicmp(word, pat, (size_t)depth) != 0) {
+                && mb_strnicmp((char *)word, (char *)pat, (size_t)depth) != 0) {
               depth--;
             }
           }
@@ -3371,7 +3413,7 @@ static void dump_word(slang_T *slang, char_u *word, char_u *pat, Direction *dir,
 
     ml_append(lnum, (char *)p, (colnr_T)0, false);
   } else if (((dumpflags & DUMPFLAG_ICASE)
-              ? mb_strnicmp(p, pat, STRLEN(pat)) == 0
+              ? mb_strnicmp((char *)p, (char *)pat, STRLEN(pat)) == 0
               : STRNCMP(p, pat, STRLEN(pat)) == 0)
              && ins_compl_add_infercase(p, (int)STRLEN(p),
                                         p_ic, NULL, *dir, false) == OK) {
@@ -3497,7 +3539,7 @@ int spell_word_start(int startcol)
     return startcol;
   }
 
-  char_u *line = get_cursor_line_ptr();
+  char_u *line = (char_u *)get_cursor_line_ptr();
   char_u *p;
 
   // Find a word character before "startcol".

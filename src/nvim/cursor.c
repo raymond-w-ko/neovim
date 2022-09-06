@@ -138,7 +138,7 @@ static int coladvance2(pos_T *pos, bool addspaces, bool finetune, colnr_T wcol_a
     }
 
     chartabsize_T cts;
-    init_chartabsize_arg(&cts, curwin, pos->lnum, 0, line, line);
+    init_chartabsize_arg(&cts, curwin, pos->lnum, 0, (char *)line, (char *)line);
     while (cts.cts_vcol <= wcol && *cts.cts_ptr != NUL) {
       // Count a tab for what it's worth (if list mode not on)
       csize = win_lbr_chartabsize(&cts, &head);
@@ -493,9 +493,9 @@ void pchar_cursor(char_u c)
 }
 
 /// @return  pointer to cursor line.
-char_u *get_cursor_line_ptr(void)
+char *get_cursor_line_ptr(void)
 {
-  return ml_get_buf(curbuf, curwin->w_cursor.lnum, false);
+  return (char *)ml_get_buf(curbuf, curwin->w_cursor.lnum, false);
 }
 
 /// @return  pointer to cursor position.

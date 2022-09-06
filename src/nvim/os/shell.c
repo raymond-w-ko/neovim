@@ -64,7 +64,7 @@ static void save_patterns(int num_pat, char **pat, int *num_file, char ***file)
 static bool have_wildcard(int num, char **file)
 {
   for (int i = 0; i < num; i++) {
-    if (path_has_wildcard((char_u *)file[i])) {
+    if (path_has_wildcard(file[i])) {
       return true;
     }
   }
@@ -503,7 +503,7 @@ int os_expand_wildcards(int num_pat, char **pat, int *num_file, char ***file, in
   // Move the file names to allocated memory.
   for (j = 0, i = 0; i < *num_file; i++) {
     // Require the files to exist. Helps when using /bin/sh
-    if (!(flags & EW_NOTFOUND) && !os_path_exists((char_u *)(*file)[i])) {
+    if (!(flags & EW_NOTFOUND) && !os_path_exists((*file)[i])) {
       continue;
     }
 
@@ -1106,13 +1106,13 @@ static void out_data_append_to_screen(char *output, size_t *count, bool eof)
       //    incomplete UTF-8 sequence that could be composing with the last
       //    complete sequence.
       // This will be corrected when we switch to vterm based implementation
-      int i = *p ? utfc_ptr2len_len((char_u *)p, (int)(end - p)) : 1;
+      int i = *p ? utfc_ptr2len_len(p, (int)(end - p)) : 1;
       if (!eof && i == 1 && utf8len_tab_zero[*(uint8_t *)p] > (end - p)) {
         *count = (size_t)(p - output);
         goto end;
       }
 
-      (void)msg_outtrans_len_attr((char_u *)p, i, 0);
+      (void)msg_outtrans_len_attr(p, i, 0);
       p += i;
     }
   }
@@ -1208,7 +1208,7 @@ static void read_input(DynamicBuffer *buf)
 {
   size_t written = 0, l = 0, len = 0;
   linenr_T lnum = curbuf->b_op_start.lnum;
-  char_u *lp = ml_get(lnum);
+  char_u *lp = (char_u *)ml_get(lnum);
 
   for (;;) {
     l = strlen((char *)lp + written);
@@ -1240,7 +1240,7 @@ static void read_input(DynamicBuffer *buf)
       if (lnum > curbuf->b_op_end.lnum) {
         break;
       }
-      lp = ml_get(lnum);
+      lp = (char_u *)ml_get(lnum);
       written = 0;
     } else if (len > 0) {
       written += len;
