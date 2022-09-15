@@ -122,7 +122,7 @@ static char *mpack_array_dyn16(char **buf)
 static void mpack_str(char **buf, const char *str)
 {
   assert(sizeof(schar_T) - 1 < 0x20);
-  size_t len = STRLEN(str);
+  size_t len = strlen(str);
   mpack_w(buf, 0xa0 | len);
   memcpy(*buf, str, len);
   *buf += len;
@@ -845,7 +845,7 @@ static void remote_ui_raw_line(UI *ui, Integer grid, Integer row, Integer startc
     for (size_t i = 0; i < ncells; i++) {
       repeat++;
       if (i == ncells - 1 || attrs[i] != attrs[i + 1]
-          || STRCMP(chunk[i], chunk[i + 1])) {
+          || strcmp(chunk[i], chunk[i + 1])) {
         if (UI_BUF_SIZE - BUF_POS(data) < 2 * (1 + 2 + sizeof(schar_T) + 5 + 5)) {
           // close to overflowing the redraw buffer. finish this event,
           // flush, and start a new "grid_line" event at the current position.

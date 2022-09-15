@@ -451,7 +451,7 @@ void init_homedir(void)
       var = NULL;
       const char *exp = os_getenv(os_buf);
       if (exp != NULL && *exp != NUL
-          && STRLEN(exp) + STRLEN(p) < MAXPATHL) {
+          && strlen(exp) + strlen(p) < MAXPATHL) {
         vim_snprintf(os_buf, MAXPATHL, "%s%s", exp, p + 1);
         var = os_buf;
       }
@@ -476,7 +476,7 @@ void init_homedir(void)
     // Change to the directory and get the actual path.  This resolves
     // links.  Don't do it when we can't return.
     if (os_dirname((char_u *)os_buf, MAXPATHL) == OK && os_chdir(os_buf) == 0) {
-      if (!os_chdir(var) && os_dirname(IObuff, IOSIZE) == OK) {
+      if (!os_chdir(var) && os_dirname((char_u *)IObuff, IOSIZE) == OK) {
         var = (char *)IObuff;
       }
       if (os_chdir(os_buf) != 0) {
@@ -800,11 +800,11 @@ static char *vim_version_dir(const char *vimdir)
 /// @return The new pend including dirname or just pend
 static char *remove_tail(char *path, char *pend, char *dirname)
 {
-  size_t len = STRLEN(dirname);
+  size_t len = strlen(dirname);
   char *new_tail = pend - len - 1;
 
   if (new_tail >= path
-      && FNAMENCMP((char_u *)new_tail, (char_u *)dirname, len) == 0
+      && path_fnamencmp(new_tail, dirname, len) == 0
       && (new_tail == path || after_pathsep(path, new_tail))) {
     return new_tail;
   }
@@ -1098,7 +1098,7 @@ size_t home_replace(const buf_T *const buf, const char *src, char *const dst, si
     size_t len = dirlen;
     for (;;) {
       if (len
-          && FNAMENCMP(src, (char_u *)p, len) == 0
+          && path_fnamencmp(src, p, len) == 0
           && (vim_ispathsep(src[len])
               || (!one && (src[len] == ',' || src[len] == ' '))
               || src[len] == NUL)) {
@@ -1146,7 +1146,7 @@ char *home_replace_save(buf_T *buf, const char *src)
 {
   size_t len = 3;             // space for "~/" and trailing NUL
   if (src != NULL) {          // just in case
-    len += STRLEN(src);
+    len += strlen(src);
   }
   char *dst = xmalloc(len);
   home_replace(buf, src, dst, len, true);

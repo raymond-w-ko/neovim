@@ -870,7 +870,8 @@ static uint8_t *command_line_enter(int firstc, long count, int indent, bool init
 
   if (!tl_ret && ERROR_SET(&err)) {
     msg_putchar('\n');
-    msg_printf_attr(HL_ATTR(HLF_E)|MSG_HIST, (char *)e_autocmd_err, err.msg);
+    semsg(e_autocmd_err, err.msg);
+    did_emsg = false;
     api_clear_error(&err);
   }
 
@@ -1411,7 +1412,7 @@ static int may_do_command_line_next_incsearch(int firstc, long count, incsearch_
 
 static void command_line_next_histidx(CommandLineState *s, bool next_match)
 {
-  int j = (int)STRLEN(s->lookfor);
+  int j = (int)strlen(s->lookfor);
   for (;;) {
     // one step backwards
     if (!next_match) {
@@ -1920,7 +1921,7 @@ static int command_line_handle_key(CommandLineState *s)
         STRCPY(ccline.cmdbuff, p);
       }
 
-      ccline.cmdpos = ccline.cmdlen = (int)STRLEN(ccline.cmdbuff);
+      ccline.cmdpos = ccline.cmdlen = (int)strlen(ccline.cmdbuff);
       redrawcmd();
       return command_line_changed(s);
     }
@@ -2005,7 +2006,7 @@ static int command_line_handle_key(CommandLineState *s)
   } else {
     int j = utf_char2bytes(s->c, (char *)IObuff);
     IObuff[j] = NUL;                // exclude composing chars
-    put_on_cmdline(IObuff, j, true);
+    put_on_cmdline((char_u *)IObuff, j, true);
   }
   return command_line_changed(s);
 }
@@ -2027,7 +2028,7 @@ static int command_line_not_changed(CommandLineState *s)
 /// as a trailing \|, which can happen while typing a pattern.
 static int empty_pattern(char *p)
 {
-  size_t n = STRLEN(p);
+  size_t n = strlen(p);
 
   // remove trailing \v and the like
   while (n >= 2 && p[n - 2] == '\\'
@@ -2803,7 +2804,7 @@ static void color_expr_cmdline(const CmdlineInfo *const colored_ccline,
   ParserLine parser_lines[] = {
     {
       .data = (const char *)colored_ccline->cmdbuff,
-      .size = STRLEN(colored_ccline->cmdbuff),
+      .size = strlen(colored_ccline->cmdbuff),
       .allocated = false,
     },
     { NULL, 0, false },
@@ -2881,7 +2882,7 @@ static bool color_cmdline(CmdlineInfo *colored_ccline)
   // Check whether result of the previous call is still valid.
   if (ccline_colors->prompt_id == colored_ccline->prompt_id
       && ccline_colors->cmdbuff != NULL
-      && STRCMP(ccline_colors->cmdbuff, colored_ccline->cmdbuff) == 0) {
+      && strcmp(ccline_colors->cmdbuff, colored_ccline->cmdbuff) == 0) {
     return ret;
   }
 
@@ -3377,7 +3378,7 @@ void unputcmdline(void)
 }
 
 // Put the given string, of the given length, onto the command line.
-// If len is -1, then STRLEN() is used to calculate the length.
+// If len is -1, then strlen() is used to calculate the length.
 // If 'redraw' is true then the new part of the command line, and the remaining
 // part will be redrawn, otherwise it will not.  If this function is called
 // twice in a row, then 'redraw' should be false and redrawcmd() should be
@@ -3863,7 +3864,7 @@ char *vim_strsave_fnameescape(const char *const fname, const int what)
 /// Put a backslash before the file name in "pp", which is in allocated memory.
 void escape_fname(char **pp)
 {
-  char_u *p = xmalloc(STRLEN(*pp) + 2);
+  char_u *p = xmalloc(strlen(*pp) + 2);
   p[0] = '\\';
   STRCPY(p + 1, *pp);
   xfree(*pp);
@@ -4010,7 +4011,7 @@ static int set_cmdline_str(const char *str, int pos)
     return 1;
   }
 
-  int len = (int)STRLEN(str);
+  int len = (int)strlen(str);
   realloc_cmdbuff(len + 1);
   p->cmdlen = len;
   STRCPY(p->cmdbuff, str);
@@ -4050,8 +4051,8 @@ static int set_cmdline_pos(int pos)
 /// "setcmdline()" function
 void f_setcmdline(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  if (argvars[0].v_type != VAR_STRING || argvars[0].vval.v_string == NULL) {
-    emsg(_(e_stringreq));
+  if (tv_check_for_string_arg(argvars, 0) == FAIL
+      || tv_check_for_opt_number_arg(argvars, 1) == FAIL) {
     return;
   }
 
@@ -4347,7 +4348,7 @@ static int open_cmdwin(void)
       ccline.cmdpos = 0;
       cmdwin_result = Ctrl_C;
     } else {
-      ccline.cmdlen = (int)STRLEN(ccline.cmdbuff);
+      ccline.cmdlen = (int)strlen(ccline.cmdbuff);
       ccline.cmdbufflen = ccline.cmdlen + 1;
       ccline.cmdpos = curwin->w_cursor.col;
       if (ccline.cmdpos > ccline.cmdlen) {
@@ -4420,7 +4421,7 @@ char *script_get(exarg_T *const eap, size_t *const lenp)
   const char *const cmd = (const char *)eap->arg;
 
   if (cmd[0] != '<' || cmd[1] != '<' || eap->getline == NULL) {
-    *lenp = STRLEN(eap->arg);
+    *lenp = strlen(eap->arg);
     return eap->skip ? NULL : xmemdupz(eap->arg, *lenp);
   }
 

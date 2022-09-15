@@ -266,7 +266,7 @@ static void au_show_for_event(int group, event_T event, char *pat)
       // normalize pat into standard "<buffer>#N" form
       aupat_normalize_buflocal_pat(buflocal_pat, pat, patlen, aupat_get_buflocal_nr(pat, patlen));
       pat = (char *)buflocal_pat;
-      patlen = (int)STRLEN(buflocal_pat);
+      patlen = (int)strlen(buflocal_pat);
     }
 
     assert(*pat != NUL);
@@ -725,7 +725,7 @@ int check_ei(void)
 char *au_event_disable(char *what)
 {
   char *save_ei = xstrdup(p_ei);
-  char *new_ei = xstrnsave(p_ei, STRLEN(p_ei) + STRLEN(what));
+  char *new_ei = xstrnsave(p_ei, strlen(p_ei) + strlen(what));
   if (*what == ',' && *p_ei == NUL) {
     STRCPY(new_ei, what + 1);
   } else {
@@ -957,7 +957,7 @@ int do_autocmd_event(event_T event, char *pat, bool once, int nested, char *cmd,
       aupat_normalize_buflocal_pat(buflocal_pat, pat, patlen, buflocal_nr);
 
       pat = buflocal_pat;
-      patlen = (int)STRLEN(buflocal_pat);
+      patlen = (int)strlen(buflocal_pat);
     }
 
     if (delete) {
@@ -1018,7 +1018,7 @@ int autocmd_register(int64_t id, event_T event, char *pat, int patlen, int group
   int findgroup;
   char buflocal_pat[BUFLOCAL_PAT_LEN];  // for "<buffer=X>"
 
-  if (patlen > (int)STRLEN(pat)) {
+  if (patlen > (int)strlen(pat)) {
     return FAIL;
   }
 
@@ -1039,7 +1039,7 @@ int autocmd_register(int64_t id, event_T event, char *pat, int patlen, int group
     aupat_normalize_buflocal_pat(buflocal_pat, pat, patlen, buflocal_nr);
 
     pat = buflocal_pat;
-    patlen = (int)STRLEN(buflocal_pat);
+    patlen = (int)strlen(buflocal_pat);
   }
 
   // always goes at or after the last one, so start at the end.
@@ -1193,7 +1193,7 @@ size_t aucmd_pattern_length(char *pat)
     return (size_t)(endpat - pat);
   }
 
-  return STRLEN(pat);
+  return strlen(pat);
 }
 
 char *aucmd_next_pattern(char *pat, size_t patlen)
@@ -2012,7 +2012,7 @@ void auto_next_pat(AutoPatCmd *apc, int stop_at_last)
         s = _("%s Autocommands for \"%s\"");
 
         const size_t sourcing_name_len
-          = (STRLEN(s) + strlen(name) + (size_t)ap->patlen + 1);
+          = (strlen(s) + strlen(name) + (size_t)ap->patlen + 1);
 
         char *const namep = xmalloc(sourcing_name_len);
         snprintf(namep, sourcing_name_len, s, name, ap->pat);
@@ -2396,7 +2396,7 @@ bool au_exists(const char *const arg) FUNC_ATTR_WARN_UNUSED_RESULT
   }
 
   // if pattern is "<buffer>", special handling is needed which uses curbuf
-  // for pattern "<buffer=N>, FNAMECMP() will work fine
+  // for pattern "<buffer=N>, path_fnamecmp() will work fine
   if (pattern != NULL && STRICMP(pattern, "<buffer>") == 0) {
     buflocal_buf = curbuf;
   }
@@ -2404,12 +2404,12 @@ bool au_exists(const char *const arg) FUNC_ATTR_WARN_UNUSED_RESULT
   // Check if there is an autocommand with the given pattern.
   for (; ap != NULL; ap = ap->next) {
     // only use a pattern when it has not been removed and has commands.
-    // For buffer-local autocommands, FNAMECMP() works fine.
+    // For buffer-local autocommands, path_fnamecmp() works fine.
     if (ap->pat != NULL && ap->cmds != NULL
         && (group == AUGROUP_ALL || ap->group == group)
         && (pattern == NULL
             || (buflocal_buf == NULL
-                ? FNAMECMP(ap->pat, pattern) == 0
+                ? path_fnamecmp(ap->pat, pattern) == 0
                 : ap->buflocal_nr == buflocal_buf->b_fnum))) {
       retval = true;
       break;

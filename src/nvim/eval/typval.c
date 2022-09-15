@@ -40,6 +40,13 @@
 # include "eval/typval.c.generated.h"
 #endif
 
+static char e_string_required_for_argument_nr[]
+  = N_("E1174: String required for argument %d");
+static char e_non_empty_string_required_for_argument_nr[]
+  = N_("E1142: Non-empty string required for argument %d");
+static char e_number_required_for_argument_nr[]
+  = N_("E1210: Number required for argument %d");
+
 bool tv_in_free_unref_items = false;
 
 // TODO(ZyX-I): Remove DICT_MAXNEST, make users be non-recursive instead
@@ -1016,7 +1023,7 @@ static int item_compare(const void *s1, const void *s2, bool keep_zero)
     if (sortinfo->item_compare_lc) {
       res = strcoll(p1, p2);
     } else {
-      res = sortinfo->item_compare_ic ? STRICMP(p1, p2): STRCMP(p1, p2);
+      res = sortinfo->item_compare_ic ? STRICMP(p1, p2): strcmp(p1, p2);
     }
   } else {
     double n1, n2;
@@ -1568,7 +1575,7 @@ bool tv_callback_equal(const Callback *cb1, const Callback *cb2)
   }
   switch (cb1->type) {
   case kCallbackFuncref:
-    return STRCMP(cb1->data.funcref, cb2->data.funcref) == 0;
+    return strcmp(cb1->data.funcref, cb2->data.funcref) == 0;
   case kCallbackPartial:
     // FIXME: this is inconsistent with tv_equal but is needed for precision
     // maybe change dictwatcheradd to return a watcher id instead?
@@ -3800,29 +3807,48 @@ float_T tv_get_float(const typval_T *const tv)
   return 0;
 }
 
-// Give an error and return FAIL unless "tv" is a string.
-int tv_check_for_string(const typval_T *const tv)
+/// Give an error and return FAIL unless "args[idx]" is a string.
+int tv_check_for_string_arg(const typval_T *const args, const int idx)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
 {
-  if (tv->v_type != VAR_STRING) {
-    emsg(_(e_stringreq));
+  if (args[idx].v_type != VAR_STRING) {
+    semsg(_(e_string_required_for_argument_nr), idx + 1);
     return FAIL;
   }
   return OK;
 }
 
-// Give an error and return FAIL unless "tv" is a non-empty string.
-int tv_check_for_nonempty_string(const typval_T *const tv)
+/// Give an error and return FAIL unless "args[idx]" is a non-empty string.
+int tv_check_for_nonempty_string_arg(const typval_T *const args, const int idx)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
 {
-  if (tv_check_for_string(tv) == FAIL) {
+  if (tv_check_for_string_arg(args, idx) == FAIL) {
     return FAIL;
   }
-  if (tv->vval.v_string == NULL || *tv->vval.v_string == NUL) {
-    emsg(_(e_non_empty_string_required));
+  if (args[idx].vval.v_string == NULL || *args[idx].vval.v_string == NUL) {
+    semsg(_(e_non_empty_string_required_for_argument_nr), idx + 1);
     return FAIL;
   }
   return OK;
+}
+
+/// Give an error and return FAIL unless "args[idx]" is a number.
+int tv_check_for_number_arg(const typval_T *const args, const int idx)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
+{
+  if (args[idx].v_type != VAR_NUMBER) {
+    semsg(_(e_number_required_for_argument_nr), idx + 1);
+    return FAIL;
+  }
+  return OK;
+}
+
+/// Check for an optional number argument at "idx"
+int tv_check_for_opt_number_arg(const typval_T *const args, const int idx)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
+{
+  return (args[idx].v_type == VAR_UNKNOWN
+          || tv_check_for_number_arg(args, idx) != FAIL) ? OK : FAIL;
 }
 
 /// Get the string value of a "stringish" VimL object.

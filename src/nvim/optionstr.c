@@ -464,7 +464,7 @@ static char *check_mousescroll(char *string)
 
   for (;;) {
     char *end = vim_strchr(string, ',');
-    size_t length = end ? (size_t)(end - string) : STRLEN(string);
+    size_t length = end ? (size_t)(end - string) : strlen(string);
 
     // Both "ver:" and "hor:" are 4 bytes long.
     // They should be followed by at least one digit.
@@ -532,7 +532,7 @@ static int check_signcolumn(char *val)
   }
 
   // check for 'auto:<NUMBER>-<NUMBER>'
-  if (STRLEN(val) == 8
+  if (strlen(val) == 8
       && !STRNCMP(val, "auto:", 5)
       && ascii_isdigit(val[5])
       && val[6] == '-'
@@ -683,7 +683,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
       }
     }
   } else if (varp == &p_bex || varp == &p_pm) {  // 'backupext' and 'patchmode'
-    if (STRCMP(*p_bex == '.' ? p_bex + 1 : p_bex,
+    if (strcmp(*p_bex == '.' ? p_bex + 1 : p_bex,
                *p_pm == '.' ? p_pm + 1 : p_pm) == 0) {
       errmsg = e_backupext_and_patchmode_are_equal;
     }
@@ -731,7 +731,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
       }
     }
   } else if (varp == &p_hl) {  // 'highlight'
-    if (STRCMP(*varp, HIGHLIGHT_INIT) != 0) {
+    if (strcmp(*varp, HIGHLIGHT_INIT) != 0) {
       errmsg = e_unsupportedoption;
     }
   } else if (varp == &p_jop) {  // 'jumpoptions'
@@ -823,13 +823,13 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
     }
 
     if (errmsg == NULL) {
-      // canonize the value, so that STRCMP() can be used on it
+      // canonize the value, so that strcmp() can be used on it
       p = enc_canonize(*varp);
       xfree(*varp);
       *varp = p;
       if (varp == &p_enc) {
         // only encoding=utf-8 allowed
-        if (STRCMP(p_enc, "utf-8") != 0) {
+        if (strcmp(p_enc, "utf-8") != 0) {
           errmsg = e_unsupportedoption;
         } else {
           spell_reload();
@@ -1258,7 +1258,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
     if (*p_pt) {
       p = NULL;
       (void)replace_termcodes(p_pt,
-                              STRLEN(p_pt),
+                              strlen(p_pt),
                               &p, REPTERM_FROM_PART | REPTERM_DO_LT, NULL,
                               CPO_TO_CPO_FLAGS);
       if (p != NULL) {
@@ -1358,7 +1358,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
     } else {
       if (opt_strings_flags(ve, p_ve_values, flags, true) != OK) {
         errmsg = e_invarg;
-      } else if (STRCMP(p_ve, oldval) != 0) {
+      } else if (strcmp(p_ve, oldval) != 0) {
         // Recompute cursor position in case the new 've' setting
         // changes something.
         validate_virtcol();
@@ -1393,7 +1393,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
     if (!valid_filetype(*varp)) {
       errmsg = e_invarg;
     } else {
-      value_changed = STRCMP(oldval, *varp) != 0;
+      value_changed = strcmp(oldval, *varp) != 0;
 
       // Since we check the value, there is no need to set P_INSECURE,
       // even when the value comes from a modeline.
@@ -1403,7 +1403,7 @@ char *did_set_string_option(int opt_idx, char **varp, char *oldval, char *errbuf
     if (!valid_filetype(*varp)) {
       errmsg = e_invarg;
     } else {
-      value_changed = STRCMP(oldval, *varp) != 0;
+      value_changed = strcmp(oldval, *varp) != 0;
 
       // Since we check the value, there is no need to set P_INSECURE,
       // even when the value comes from a modeline.
@@ -1641,7 +1641,7 @@ static int opt_strings_flags(char *val, char **values, unsigned *flagp, bool lis
         return FAIL;
       }
 
-      size_t len = STRLEN(values[i]);
+      size_t len = strlen(values[i]);
       if (STRNCMP(values[i], val, len) == 0
           && ((list && val[len] == ',') || val[len] == NUL)) {
         val += len + (val[len] == ',');

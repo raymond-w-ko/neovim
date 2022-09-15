@@ -111,7 +111,7 @@ static int get_function_args(char **argp, char_u endchar, garray_T *newargs, int
 
         // Check for duplicate argument name.
         for (i = 0; i < newargs->ga_len; i++) {
-          if (STRCMP(((char **)(newargs->ga_data))[i], arg) == 0) {
+          if (strcmp(((char **)(newargs->ga_data))[i], arg) == 0) {
             semsg(_("E853: Duplicate argument name: %s"), arg);
             xfree(arg);
             goto err_ret;
@@ -528,14 +528,14 @@ static char *fname_trans_sid(const char *const name, char *const fname_buf, char
       } else {
         snprintf(fname_buf + i, (size_t)(FLEN_FIXED + 1 - i), "%" PRId64 "_",
                  (int64_t)current_sctx.sc_sid);
-        i = (int)STRLEN(fname_buf);
+        i = (int)strlen(fname_buf);
       }
     }
-    if ((size_t)i + STRLEN(name + llen) < FLEN_FIXED) {
+    if ((size_t)i + strlen(name + llen) < FLEN_FIXED) {
       STRCPY(fname_buf + i, name + llen);
       fname = fname_buf;
     } else {
-      fname = xmalloc((size_t)i + STRLEN(name + llen) + 1);
+      fname = xmalloc((size_t)i + strlen(name + llen) + 1);
       *tofree = fname;
       memmove(fname, fname_buf, (size_t)i);
       STRCPY(fname + i, name + llen);
@@ -1516,7 +1516,7 @@ int call_func(const char *funcname, int len, typval_T *rettv, int argcount_in, t
         fp = find_func((char_u *)rfname);
       }
       // Try loading a package.
-      if (fp == NULL && script_autoload((const char *)rfname, STRLEN(rfname),
+      if (fp == NULL && script_autoload((const char *)rfname, strlen(rfname),
                                         true) && !aborting()) {
         // Loaded a package, search for the function again.
         fp = find_func((char_u *)rfname);
@@ -2167,7 +2167,7 @@ void ex_function(exarg_T *eap)
       theline = line_arg;
       p = vim_strchr(theline, '\n');
       if (p == NULL) {
-        line_arg += STRLEN(line_arg);
+        line_arg += strlen(line_arg);
       } else {
         *p = NUL;
         line_arg = p + 1;
@@ -2209,16 +2209,16 @@ void ex_function(exarg_T *eap)
       if (heredoc_trimmed == NULL
           || (is_heredoc && skipwhite(theline) == theline)
           || STRNCMP(theline, heredoc_trimmed,
-                     STRLEN(heredoc_trimmed)) == 0) {
+                     strlen(heredoc_trimmed)) == 0) {
         if (heredoc_trimmed == NULL) {
           p = theline;
         } else if (is_heredoc) {
           p = skipwhite(theline) == theline
-            ? theline : theline + STRLEN(heredoc_trimmed);
+            ? theline : theline + strlen(heredoc_trimmed);
         } else {
-          p = theline + STRLEN(heredoc_trimmed);
+          p = theline + strlen(heredoc_trimmed);
         }
-        if (STRCMP(p, skip_until) == 0) {
+        if (strcmp(p, skip_until) == 0) {
           XFREE_CLEAR(skip_until);
           XFREE_CLEAR(heredoc_trimmed);
           do_concat = true;
@@ -2383,7 +2383,7 @@ void ex_function(exarg_T *eap)
 
   // If there are no errors, add the function
   if (fudi.fd_dict == NULL) {
-    v = find_var((const char *)name, STRLEN(name), &ht, false);
+    v = find_var((const char *)name, strlen(name), &ht, false);
     if (v != NULL && v->di_tv.v_type == VAR_FUNC) {
       emsg_funcname(N_("E707: Function name conflicts with variable: %s"),
                     (char_u *)name);
@@ -2458,11 +2458,11 @@ void ex_function(exarg_T *eap)
       // Check that the autoload name matches the script name.
       int j = FAIL;
       if (SOURCING_NAME != NULL) {
-        scriptname = (char_u *)autoload_name((const char *)name, STRLEN(name));
+        scriptname = (char_u *)autoload_name((const char *)name, strlen(name));
         p = vim_strchr((char *)scriptname, '/');
         plen = (int)STRLEN(p);
         slen = (int)STRLEN(SOURCING_NAME);
-        if (slen > plen && FNAMECMP(p, SOURCING_NAME + slen - plen) == 0) {
+        if (slen > plen && path_fnamecmp(p, SOURCING_NAME + slen - plen) == 0) {
           j = OK;
         }
         xfree(scriptname);
@@ -2474,7 +2474,7 @@ void ex_function(exarg_T *eap)
       }
     }
 
-    fp = xcalloc(1, offsetof(ufunc_T, uf_name) + STRLEN(name) + 1);
+    fp = xcalloc(1, offsetof(ufunc_T, uf_name) + strlen(name) + 1);
 
     if (fudi.fd_dict != NULL) {
       if (fudi.fd_di == NULL) {
@@ -2632,7 +2632,7 @@ char *get_user_func_name(expand_T *xp, int idx)
       return (char *)fp->uf_name;  // Prevent overflow.
     }
 
-    cat_func_name(IObuff, fp);
+    cat_func_name((char_u *)IObuff, fp);
     if (xp->xp_context != EXPAND_USER_FUNC) {
       STRCAT(IObuff, "(");
       if (!fp->uf_varargs && GA_EMPTY(&fp->uf_args)) {
@@ -3085,7 +3085,7 @@ char *get_return_cmd(void *rettv)
 
   STRCPY(IObuff, ":return ");
   STRLCPY(IObuff + 8, s, IOSIZE - 8);
-  if (STRLEN(s) + 8 >= IOSIZE) {
+  if (strlen(s) + 8 >= IOSIZE) {
     STRCPY(IObuff + IOSIZE - 4, "...");
   }
   xfree(tofree);

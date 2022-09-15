@@ -227,8 +227,8 @@ static int get_char_class(char **pp)
 
   if ((*pp)[1] == ':') {
     for (i = 0; i < (int)ARRAY_SIZE(class_names); i++) {
-      if (STRNCMP(*pp + 2, class_names[i], STRLEN(class_names[i])) == 0) {
-        *pp += STRLEN(class_names[i]) + 2;
+      if (STRNCMP(*pp + 2, class_names[i], strlen(class_names[i])) == 0) {
+        *pp += strlen(class_names[i]) + 2;
         return i;
       }
     }
@@ -1545,8 +1545,8 @@ char *regtilde(char *source, int magic, bool preview)
     if ((*p == '~' && magic) || (*p == '\\' && *(p + 1) == '~' && !magic)) {
       if (reg_prev_sub != NULL) {
         // length = len(newsub) - 1 + len(prev_sub) + 1
-        prevlen = (int)STRLEN(reg_prev_sub);
-        tmpsub = xmalloc(STRLEN(newsub) + (size_t)prevlen);
+        prevlen = (int)strlen(reg_prev_sub);
+        tmpsub = xmalloc(strlen(newsub) + (size_t)prevlen);
         // copy prefix
         len = (int)(p - newsub);              // not including ~
         memmove(tmpsub, newsub, (size_t)len);
@@ -1621,11 +1621,11 @@ static int fill_submatch_list(int argc FUNC_ATTR_UNUSED, typval_T *argv, int arg
   // There are always 10 list items in staticList10_T.
   listitem_T *li = tv_list_first(listarg->vval.v_list);
   for (int i = 0; i < 10; i++) {
-    char *s = (char *)rsm.sm_match->startp[i];
+    char *s = rsm.sm_match->startp[i];
     if (s == NULL || rsm.sm_match->endp[i] == NULL) {
       s = NULL;
     } else {
-      s = xstrnsave(s, (size_t)(rsm.sm_match->endp[i] - (char_u *)s));
+      s = xstrnsave(s, (size_t)(rsm.sm_match->endp[i] - s));
     }
     TV_LIST_ITEM_TV(li)->v_type = VAR_STRING;
     TV_LIST_ITEM_TV(li)->vval.v_string = s;
@@ -1767,7 +1767,7 @@ static int vim_regsub_both(char_u *source, typval_T *expr, char_u *dest, int des
     if (copy) {
       if (eval_result[nested] != NULL) {
         STRCPY(dest, eval_result[nested]);
-        dst += STRLEN(eval_result[nested]);
+        dst += strlen(eval_result[nested]);
         XFREE_CLEAR(eval_result[nested]);
       }
     } else {
@@ -1865,7 +1865,7 @@ static int vim_regsub_both(char_u *source, typval_T *expr, char_u *dest, int des
           eval_result[nested] = (char *)s;
         }
 
-        dst += STRLEN(eval_result[nested]);
+        dst += strlen(eval_result[nested]);
       }
 
       can_f_submatch = prev_can_f_submatch;
@@ -2006,11 +2006,11 @@ static int vim_regsub_both(char_u *source, typval_T *expr, char_u *dest, int des
             }
           }
         } else {
-          s = rex.reg_match->startp[no];
+          s = (char_u *)rex.reg_match->startp[no];
           if (rex.reg_match->endp[no] == NULL) {
             s = NULL;
           } else {
-            len = (int)(rex.reg_match->endp[no] - s);
+            len = (int)(rex.reg_match->endp[no] - (char *)s);
           }
         }
         if (s != NULL) {
@@ -2172,7 +2172,7 @@ char *reg_submatch(int no)
       } else {
         // Multiple lines: take start line from start col, middle
         // lines completely and end line up to end col.
-        len = (ssize_t)STRLEN(s);
+        len = (ssize_t)strlen(s);
         if (round == 2) {
           STRCPY(retval, s);
           retval[len] = '\n';
@@ -2184,7 +2184,7 @@ char *reg_submatch(int no)
           if (round == 2) {
             STRCPY(retval + len, s);
           }
-          len += (ssize_t)STRLEN(s);
+          len += (ssize_t)strlen(s);
           if (round == 2) {
             retval[len] = '\n';
           }
@@ -2206,11 +2206,11 @@ char *reg_submatch(int no)
       }
     }
   } else {
-    s = (char *)rsm.sm_match->startp[no];
+    s = rsm.sm_match->startp[no];
     if (s == NULL || rsm.sm_match->endp[no] == NULL) {
       retval = NULL;
     } else {
-      retval = xstrnsave(s, (size_t)(rsm.sm_match->endp[no] - (char_u *)s));
+      retval = xstrnsave(s, (size_t)(rsm.sm_match->endp[no] - s));
     }
   }
 
