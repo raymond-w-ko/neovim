@@ -195,15 +195,15 @@ int call_internal_func(const char_u *const fname, const int argcount, typval_T *
 {
   const EvalFuncDef *const fdef = find_internal_func((const char *)fname);
   if (fdef == NULL) {
-    return ERROR_UNKNOWN;
+    return FCERR_UNKNOWN;
   } else if (argcount < fdef->min_argc) {
-    return ERROR_TOOFEW;
+    return FCERR_TOOFEW;
   } else if (argcount > fdef->max_argc) {
-    return ERROR_TOOMANY;
+    return FCERR_TOOMANY;
   }
   argvars[argcount].v_type = VAR_UNKNOWN;
   fdef->func(argvars, rettv, fdef->data);
-  return ERROR_NONE;
+  return FCERR_NONE;
 }
 
 /// Invoke a method for base->method().
@@ -213,13 +213,13 @@ int call_internal_method(const char_u *const fname, const int argcount, typval_T
 {
   const EvalFuncDef *const fdef = find_internal_func((const char *)fname);
   if (fdef == NULL) {
-    return ERROR_UNKNOWN;
+    return FCERR_UNKNOWN;
   } else if (fdef->base_arg == BASE_NONE) {
-    return ERROR_NOTMETHOD;
+    return FCERR_NOTMETHOD;
   } else if (argcount + 1 < fdef->min_argc) {
-    return ERROR_TOOFEW;
+    return FCERR_TOOFEW;
   } else if (argcount + 1 > fdef->max_argc) {
-    return ERROR_TOOMANY;
+    return FCERR_TOOMANY;
   }
 
   typval_T argv[MAX_FUNC_ARGS + 1];
@@ -231,7 +231,7 @@ int call_internal_method(const char_u *const fname, const int argcount, typval_T
   argv[argcount + 1].v_type = VAR_UNKNOWN;
 
   fdef->func(argv, rettv, fdef->data);
-  return ERROR_NONE;
+  return FCERR_NONE;
 }
 
 /// @return  true for a non-zero Number and a non-empty String.
@@ -1344,7 +1344,7 @@ static void f_debugbreak(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   if (pid == 0) {
     emsg(_(e_invarg));
   } else {
-#ifdef WIN32
+#ifdef MSWIN
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
 
     if (hProcess != NULL) {
@@ -1695,7 +1695,7 @@ static void f_environ(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     char c = env[i][len];
     env[i][len] = NUL;
 
-#ifdef WIN32
+#ifdef MSWIN
     // Upper-case all the keys for Windows so we can detect duplicates
     char *const key = strcase_save(str, true);
 #else
@@ -3532,7 +3532,7 @@ static void f_has(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 #ifdef UNIX
     "unix",
 #endif
-#if defined(WIN32)
+#if defined(MSWIN)
     "win32",
 #endif
 #ifdef _WIN64
@@ -4257,7 +4257,7 @@ static void f_jobresize(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 }
 
 static const char *ignored_env_vars[] = {
-#ifndef WIN32
+#ifndef MSWIN
   "COLUMNS",
   "LINES",
   "TERMCAP",
@@ -4269,7 +4269,7 @@ static const char *ignored_env_vars[] = {
 /// According to comments in src/win/process.c of libuv, Windows has a few
 /// "essential" environment variables.
 static const char *required_env_vars[] = {
-#ifdef WIN32
+#ifdef MSWIN
   "HOMEDRIVE",
   "HOMEPATH",
   "LOGONSERVER",
@@ -4308,7 +4308,7 @@ static dict_T *create_environment(const dictitem_T *job_env, const bool clear_en
           tv_dict_item_remove(env, dv);
         }
       }
-#ifndef WIN32
+#ifndef MSWIN
       // Set COLORTERM to "truecolor" if termguicolors is set and 256
       // otherwise, but only if it was set in the parent terminal at all
       dictitem_T *dv = tv_dict_find(env, S_LEN("COLORTERM"));
@@ -4343,7 +4343,7 @@ static dict_T *create_environment(const dictitem_T *job_env, const bool clear_en
   }
 
   if (job_env) {
-#ifdef WIN32
+#ifdef MSWIN
     TV_DICT_ITER(job_env->di_tv.vval.v_dict, var, {
       // Always use upper-case keys for Windows so we detect duplicate keys
       char *const key = strcase_save((const char *)var->di_key, true);
@@ -4443,7 +4443,7 @@ static void f_jobstart(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       return;
     }
 
-#ifdef WIN32
+#ifdef MSWIN
     if (pty && overlapped) {
       semsg(_(e_invarg2),
             "job cannot have both 'pty' and 'overlapped' options set");
@@ -6286,7 +6286,7 @@ static void f_resolve(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   rettv->v_type = VAR_STRING;
   const char *fname = tv_get_string(&argvars[0]);
-#ifdef WIN32
+#ifdef MSWIN
   char *v = os_resolve_shortcut(fname);
   if (v == NULL) {
     if (os_is_reparse_point_include(fname)) {
@@ -6498,8 +6498,8 @@ static void f_reduce(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   funcexe_T funcexe = FUNCEXE_INIT;
-  funcexe.evaluate = true;
-  funcexe.partial = partial;
+  funcexe.fe_evaluate = true;
+  funcexe.fe_partial = partial;
 
   typval_T initial;
   typval_T argv[3];

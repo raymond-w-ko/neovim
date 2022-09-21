@@ -1655,9 +1655,10 @@ static void getchar_common(typval_T *argvars, typval_T *rettv)
   no_mapping++;
   allow_keys++;
   for (;;) {
-    // Position the cursor.  Needed after a message that ends in a space,
-    // or if event processing caused a redraw.
-    ui_cursor_goto(msg_row, msg_col);
+    if (msg_col > 0) {
+      // Position the cursor. Needed after a message that ends in a space.
+      ui_cursor_goto(msg_row, msg_col);
+    }
 
     if (argvars[0].v_type == VAR_UNKNOWN) {
       // getchar(): blocking wait.
@@ -1665,7 +1666,7 @@ static void getchar_common(typval_T *argvars, typval_T *rettv)
       if (!char_avail()) {
         // flush output before waiting
         ui_flush();
-        (void)os_inchar(NULL, 0, -1, 0, main_loop.events);
+        (void)os_inchar(NULL, 0, -1, typebuf.tb_change_cnt, main_loop.events);
         if (!multiqueue_empty(main_loop.events)) {
           state_handle_k_event();
           continue;
@@ -1694,12 +1695,6 @@ static void getchar_common(typval_T *argvars, typval_T *rettv)
   }
   no_mapping--;
   allow_keys--;
-
-  if (!ui_has_messages()) {
-    // redraw the screen after getchar()
-    update_screen(UPD_NOT_VALID);
-    clear_cmdline = true;
-  }
 
   set_vim_var_nr(VV_MOUSE_WIN, 0);
   set_vim_var_nr(VV_MOUSE_WINID, 0);

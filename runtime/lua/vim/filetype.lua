@@ -202,6 +202,7 @@ local extension = {
     return require('vim.filetype.detect').change(bufnr)
   end,
   chs = 'chaskell',
+  chatito = 'chatito',
   chopro = 'chordpro',
   crd = 'chordpro',
   crdpro = 'chordpro',
@@ -611,6 +612,7 @@ local extension = {
   nse = 'lua',
   rockspec = 'lua',
   lua = 'lua',
+  lrc = 'lyrics',
   m = function(path, bufnr)
     return require('vim.filetype.detect').m(bufnr)
   end,
@@ -1021,6 +1023,7 @@ local extension = {
   dsm = 'vb',
   ctl = 'vb',
   vbs = 'vb',
+  vdf = 'vdf',
   vdmpp = 'vdmpp',
   vpp = 'vdmpp',
   vdmrt = 'vdmrt',

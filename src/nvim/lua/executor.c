@@ -248,7 +248,7 @@ static int nlua_luv_thread_common_cfpcall(lua_State *lstate, int nargs, int nres
       mch_errmsg(e_outofmem);
       mch_errmsg("\n");
       lua_close(lstate);
-#ifdef WIN32
+#ifdef MSWIN
       ExitThread(0);
 #else
       pthread_exit(0);
@@ -673,7 +673,7 @@ static bool nlua_state_init(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   lua_setfield(lstate, -2, "debug");
   lua_pop(lstate, 1);
 
-#ifdef WIN32
+#ifdef MSWIN
   // os.getenv
   lua_getglobal(lstate, "os");
   lua_pushcfunction(lstate, &nlua_getenv);
@@ -1110,9 +1110,9 @@ int nlua_call(lua_State *lstate)
     try_start();
     typval_T rettv;
     funcexe_T funcexe = FUNCEXE_INIT;
-    funcexe.firstline = curwin->w_cursor.lnum;
-    funcexe.lastline = curwin->w_cursor.lnum;
-    funcexe.evaluate = true;
+    funcexe.fe_firstline = curwin->w_cursor.lnum;
+    funcexe.fe_lastline = curwin->w_cursor.lnum;
+    funcexe.fe_evaluate = true;
     // call_func() retval is deceptive, ignore it.  Instead we set `msg_list`
     // (TRY_WRAP) to capture abort-causing non-exception errors.
     (void)call_func((char *)name, (int)name_len, &rettv, nargs, vim_args, &funcexe);
@@ -1201,7 +1201,7 @@ static int nlua_empty_dict_tostring(lua_State *lstate)
   return 1;
 }
 
-#ifdef WIN32
+#ifdef MSWIN
 /// os.getenv: override os.getenv to maintain coherency. #9681
 ///
 /// uv_os_setenv uses SetEnvironmentVariableW which does not update _environ.
@@ -1435,12 +1435,12 @@ int typval_exec_lua_callable(LuaRef lua_cb, int argcount, typval_T *argvars, typ
 
   if (nlua_pcall(lstate, argcount, 1)) {
     nlua_print(lstate);
-    return ERROR_OTHER;
+    return FCERR_OTHER;
   }
 
   nlua_pop_typval(lstate, rettv);
 
-  return ERROR_NONE;
+  return FCERR_NONE;
 }
 
 /// Execute Lua string

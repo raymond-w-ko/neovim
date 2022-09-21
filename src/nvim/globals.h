@@ -23,7 +23,7 @@
 #define MSG_BUF_CLEN  (MSG_BUF_LEN / 6)  // cell length (worst case: utf-8
                                          // takes 6 bytes for one cell)
 
-#ifdef WIN32
+#ifdef MSWIN
 # define _PATHSEPSTR "\\"
 #else
 # define _PATHSEPSTR "/"
@@ -1070,8 +1070,5 @@ typedef enum {
 EXTERN char windowsVersion[20] INIT(= { 0 });
 
 EXTERN int exit_need_delay INIT(= 0);
-
-// Set when 'cmdheight' is changed from zero to one temporarily.
-EXTERN bool made_cmdheight_nonzero INIT(= false);
 
 #endif  // NVIM_GLOBALS_H
