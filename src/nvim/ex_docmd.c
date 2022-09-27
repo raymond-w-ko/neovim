@@ -4696,7 +4696,6 @@ void tabpage_close(int forceit)
 void tabpage_close_other(tabpage_T *tp, int forceit)
 {
   int done = 0;
-  int h = tabline_height();
   char prev_idx[NUMBUFLEN];
 
   // Limit to 1000 windows, autocommands may add a window while we close
@@ -4711,11 +4710,6 @@ void tabpage_close_other(tabpage_T *tp, int forceit)
     if (!valid_tabpage(tp) || tp->tp_lastwin == wp) {
       break;
     }
-  }
-
-  redraw_tabline = true;
-  if (h != tabline_height()) {
-    win_new_screen_rows();
   }
 }
 
@@ -5873,7 +5867,7 @@ static void ex_undo(exarg_T *eap)
 {
   if (eap->addr_count != 1) {
     if (eap->forceit) {
-      u_undo_and_forget(1);         // :undo!
+      u_undo_and_forget(1, true);   // :undo!
     } else {
       u_undo(1);                    // :undo
     }
@@ -5900,7 +5894,7 @@ static void ex_undo(exarg_T *eap)
       emsg(_(e_undobang_cannot_redo_or_move_branch));
       return;
     }
-    u_undo_and_forget(count);
+    u_undo_and_forget(count, true);
   } else {                        // :undo 123
     undo_time(step, false, false, true);
   }
@@ -6094,7 +6088,7 @@ static void ex_redrawstatus(exarg_T *eap)
   } else {
     status_redraw_curbuf();
   }
-  if (msg_scrolled && (State & MODE_CMDLINE)) {
+  if (msg_scrolled && !msg_use_msgsep() && (State & MODE_CMDLINE)) {
     return;  // redraw later
   }
 
