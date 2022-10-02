@@ -737,7 +737,7 @@ void win_set_minimal_style(win_T *wp)
   }
 
   // TODO(bfredl): this could use a highlight namespace directly,
-  // and avoid pecularities around window options
+  // and avoid peculiarities around window options
   char_u *old = (char_u *)wp->w_p_winhl;
   wp->w_p_winhl = ((*old == NUL)
                    ? xstrdup("EndOfBuffer:")
@@ -2239,7 +2239,7 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       // Compute maximum number of windows vertically in this frame.
       n = frame_minheight(topfr, NOWIN);
       // add one for the bottom window if it doesn't have a statusline or separator
-      if (row + height == cmdline_row && p_ls == 0) {
+      if (row + height >= cmdline_row && p_ls == 0) {
         extra_sep = STATUS_HEIGHT;
       } else if (global_stl_height() > 0) {
         extra_sep = 1;
@@ -4981,8 +4981,7 @@ static win_T *win_alloc(win_T *after, bool hidden)
 
   foldInitWin(new_wp);
   unblock_autocmds();
-  new_wp->w_match_head = NULL;
-  new_wp->w_next_match_id = 4;
+  new_wp->w_next_match_id = 1000;  // up to 1000 can be picked by the user
   return new_wp;
 }
 

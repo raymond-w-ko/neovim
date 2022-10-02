@@ -905,7 +905,7 @@ describe('lua stdlib', function()
     ]]))
 
     -- vim.empty_dict() gives new value each time
-    -- equality is not overriden (still by ref)
+    -- equality is not overridden (still by ref)
     -- non-empty table uses the usual heuristics (ignores the tag)
     eq({false, {"foo"}, {namey="bar"}}, exec_lua([[
       local aa = vim.empty_dict()
@@ -1390,11 +1390,23 @@ describe('lua stdlib', function()
   end)
 
   it('vim.env', function()
-    exec_lua [[
-    vim.fn.setenv("A", 123)
-    ]]
-    eq('123', funcs.luaeval "vim.env.A")
-    eq(true, funcs.luaeval "vim.env.B == nil")
+    exec_lua([[vim.fn.setenv('A', 123)]])
+    eq('123', funcs.luaeval('vim.env.A'))
+    exec_lua([[vim.env.A = 456]])
+    eq('456', funcs.luaeval('vim.env.A'))
+    exec_lua([[vim.env.A = nil]])
+    eq(NIL, funcs.luaeval('vim.env.A'))
+
+    eq(true, funcs.luaeval('vim.env.B == nil'))
+
+    command([[let $HOME = 'foo']])
+    eq('foo', funcs.expand('~'))
+    eq('foo', funcs.luaeval('vim.env.HOME'))
+    exec_lua([[vim.env.HOME = nil]])
+    eq('foo', funcs.expand('~'))
+    exec_lua([[vim.env.HOME = 'bar']])
+    eq('bar', funcs.expand('~'))
+    eq('bar', funcs.luaeval('vim.env.HOME'))
   end)
 
   it('vim.v', function()
