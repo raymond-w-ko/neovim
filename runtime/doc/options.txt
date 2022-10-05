@@ -2130,7 +2130,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 					*'display'* *'dy'*
 'display' 'dy'		string	(default "lastline,msgsep")
 			global
-	Change the way text is displayed.  This is comma-separated list of
+	Change the way text is displayed.  This is a comma-separated list of
 	flags:
 	lastline	When included, as much as possible of the last line
 			in a window will be displayed.  "@@@" is put in the
@@ -2147,6 +2147,9 @@ A jump table for the options with a short description can be found at |Q_op|.
 
 	When neither "lastline" nor "truncate" is included, a last line that
 	doesn't fit is replaced with "@" lines.
+
+	The "@" character can be changed by setting the "lastline" item in
+	'fillchars'.  The character is highlighted with |hl-NonText|.
 
 						*'eadirection'* *'ead'*
 'eadirection' 'ead'	string	(default "both")
@@ -2483,6 +2486,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	  diff		'-'		deleted lines of the 'diff' option
 	  msgsep	' '		message separator 'display'
 	  eob		'~'		empty lines at the end of a buffer
+	  lastline	'@'		'display' contains lastline/truncate
 
 	Any one that is omitted will fall back to the default.  For "stl" and
 	"stlnc" the space will be used when there is highlighting, '^' or '='
@@ -2520,6 +2524,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	  fold		Folded			|hl-Folded|
 	  diff		DiffDelete		|hl-DiffDelete|
 	  eob		EndOfBuffer		|hl-EndOfBuffer|
+	  lastline	NonText			|hl-NonText|
 
 		*'fixendofline'* *'fixeol'* *'nofixendofline'* *'nofixeol'*
 'fixendofline' 'fixeol'	boolean	(default on)

@@ -2,6 +2,10 @@
 cmake_minimum_required (VERSION 3.10)
 project(NVIM_DEPS C)
 
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 # Point CMake at any custom modules we may ship
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" "${PROJECT_SOURCE_DIR}/../cmake")
 
@@ -62,8 +66,6 @@ else()
   option(USE_BUNDLED_LIBICONV "Use the bundled version of libiconv." OFF)
 endif()
 
-option(USE_EXISTING_SRC_DIR "Skip download of deps sources in case of existing source directory." OFF)
-
 find_package(Git)
 if(NOT Git_FOUND)
   message(FATAL_ERROR "Git is required to apply patches.")
@@ -101,11 +103,7 @@ if(MINGW AND CMAKE_GENERATOR MATCHES "Ninja")
   endif()
 endif()
 
-if(CMAKE_C_COMPILER_ARG1)
-  set(DEPS_C_COMPILER "${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1}")
-else()
-  set(DEPS_C_COMPILER "${CMAKE_C_COMPILER}")
-endif()
+set(DEPS_C_COMPILER "${CMAKE_C_COMPILER}")
 
 if(CMAKE_CXX_COMPILER)
   set(DEPS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
@@ -143,13 +141,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   message("-- Using deployment target ${CMAKE_OSX_DEPLOYMENT_TARGET}")
 endif()
 
-set(HOSTDEPS_INSTALL_DIR "${DEPS_INSTALL_DIR}")
-set(HOSTDEPS_BIN_DIR "${DEPS_BIN_DIR}")
-set(HOSTDEPS_LIB_DIR "${DEPS_LIB_DIR}")
-set(HOSTDEPS_C_COMPILER "${DEPS_C_COMPILER}")
-set(HOSTDEPS_CXX_COMPILER "${DEPS_CXX_COMPILER}")
-
 include(ExternalProject)
+set_directory_properties(PROPERTIES EP_PREFIX "${DEPS_BUILD_DIR}")
 
 set(LIBUV_URL https://github.com/libuv/libuv/archive/f610339f74f7f0fcd183533d2c965ce1468b44c6.tar.gz)
 set(LIBUV_SHA256 d5f22303ba44ac60d3232b1977b404d23a349ae4e8cb83f00e7122fafe38d8c9)
@@ -158,8 +151,8 @@ set(MSGPACK_URL https://github.com/msgpack/msgpack-c/releases/download/c-4.0.0/m
 set(MSGPACK_SHA256 420fe35e7572f2a168d17e660ef981a589c9cbe77faa25eb34a520e1fcc032c8)
 
 # https://github.com/LuaJIT/LuaJIT/tree/v2.1
-set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/633f265f67f322cbe2c5fd11d3e46d968ac220f7.tar.gz)
-set(LUAJIT_SHA256 2681f0a6f624a64a8dfb70a5a377d494daf38960442c547d9c468674c1afa3c2)
+set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/6c4826f12c4d33b8b978004bc681eb1eef2be977.tar.gz)
+set(LUAJIT_SHA256 19a911fdd77af69e48fa50749606a9009696f543cc88e898b4480d8d3c8828f5)
 
 set(LUA_URL https://www.lua.org/ftp/lua-5.1.5.tar.gz)
 set(LUA_SHA256 2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
@@ -190,8 +183,6 @@ set(WINTOOLS_SHA256 3c4c490a3d392ceeb1347cb77cc821a31900b688a2189276d3a1131a3f21
 set(WINGUI_URL https://github.com/equalsraf/neovim-qt/releases/download/v0.2.17/neovim-qt.zip)
 set(WINGUI_SHA256 502e386eef677c2c2e0c11d8cbb27f3e12b4d96818369417e8da4129c4580c25)
 
-set(WIN32YANK_X86_URL https://github.com/equalsraf/win32yank/releases/download/v0.0.4/win32yank-x86.zip)
-set(WIN32YANK_X86_SHA256 62f34e5a46c5d4a7b3f3b512e1ff7b77fedd432f42581cbe825233a996eed62c)
 set(WIN32YANK_X86_64_URL https://github.com/equalsraf/win32yank/releases/download/v0.0.4/win32yank-x64.zip)
 set(WIN32YANK_X86_64_SHA256 33a747a92da60fb65e668edbf7661d3d902411a2d545fe9dc08623cecd142a20)
 
@@ -210,8 +201,8 @@ set(TREESITTER_LUA_SHA256 564594fe0ffd2f2fb3578a15019b723e1bc94ac82cb6a0103a6b3b
 set(TREESITTER_VIM_URL https://github.com/vigoux/tree-sitter-viml/archive/v0.2.0.tar.gz)
 set(TREESITTER_VIM_SHA256 608dcc31a7948cb66ae7f45494620e2e9face1af75598205541f80d782ec4501)
 
-set(TREESITTER_HELP_URL https://github.com/neovim/tree-sitter-vimdoc/archive/v1.1.0.tar.gz)
-set(TREESITTER_HELP_SHA256 4c0ef80c6dc09acab362478950ec6be58a4ab1cbf2d95754b8fbb566e4c647a1)
+set(TREESITTER_HELP_URL https://github.com/neovim/tree-sitter-vimdoc/archive/c27e3e21a54f6d90dfb791f37d90eab5b28de971.tar.gz)
+set(TREESITTER_HELP_SHA256 54a6a5b52a395097775f06f96ac1e1c9efdab10243550a467e1198a286b8c59c)
 
 set(TREESITTER_URL https://github.com/tree-sitter/tree-sitter/archive/v0.20.7.tar.gz)
 set(TREESITTER_SHA256 b355e968ec2d0241bbd96748e00a9038f83968f85d822ecb9940cbe4c42e182e)
@@ -281,15 +272,8 @@ if(WIN32)
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory bin ${DEPS_INSTALL_DIR}/bin
       COMMAND ${CMAKE_COMMAND} -E copy_directory share ${DEPS_INSTALL_DIR}/share)
 
-  include(TargetArch)
-  GetBinaryDep(TARGET "win32yank_${TARGET_ARCH}"
+  GetBinaryDep(TARGET win32yank_X86_64
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy win32yank.exe ${DEPS_INSTALL_DIR}/bin)
-
-  if("${TARGET_ARCH}" STREQUAL "X86_64")
-    set(TARGET_ARCH x64)
-  elseif(TARGET_ARCH STREQUAL "X86")
-    set(TARGET_ARCH ia32)
-  endif()
 endif()
 
 # clean-shared-libraries removes ${DEPS_INSTALL_DIR}/lib/nvim/parser/c.dll,
