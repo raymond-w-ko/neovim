@@ -239,7 +239,7 @@ enum {
   SHM_MOD            = 'm',  ///< Modified.
   SHM_FILE           = 'f',  ///< (file 1 of 2)
   SHM_LAST           = 'i',  ///< Last line incomplete.
-  SHM_TEXT           = 'x',  ///< Tx instead of textmode.
+  SHM_TEXT           = 'x',  ///< tx instead of textmode.
   SHM_LINES          = 'l',  ///< "L" instead of "lines".
   SHM_NEW            = 'n',  ///< "[New]" instead of "[New file]".
   SHM_WRI            = 'w',  ///< "[w]" instead of "written".
@@ -253,9 +253,10 @@ enum {
   SHM_ATTENTION      = 'A',  ///< No ATTENTION messages.
   SHM_INTRO          = 'I',  ///< Intro messages.
   SHM_COMPLETIONMENU = 'c',  ///< Completion menu messages.
+  SHM_COMPLETIONSCAN = 'C',  ///< Completion scanning messages.
   SHM_RECORDING      = 'q',  ///< Short recording message.
   SHM_FILEINFO       = 'F',  ///< No file info messages.
-  SHM_SEARCHCOUNT    = 'S',  ///< Search sats: '[1/10]'
+  SHM_SEARCHCOUNT    = 'S',  ///< Search stats: '[1/10]'
 };
 /// Represented by 'a' flag.
 #define SHM_ALL_ABBREVIATIONS ((char[]) { \
@@ -492,7 +493,7 @@ EXTERN unsigned dy_flags;
 #define DY_LASTLINE             0x001
 #define DY_TRUNCATE             0x002
 #define DY_UHEX                 0x004
-// code should use msg_use_msgsep() to check if msgsep is active
+// legacy flag, not used
 #define DY_MSGSEP               0x008
 EXTERN int p_ed;                // 'edcompatible'
 EXTERN char *p_ead;             // 'eadirection'
@@ -729,6 +730,7 @@ EXTERN unsigned int tpf_flags;  ///< flags from 'termpastefilter'
 EXTERN char *p_tfu;             ///< 'tagfunc'
 EXTERN char *p_spc;             ///< 'spellcapcheck'
 EXTERN char *p_spf;             ///< 'spellfile'
+EXTERN char *p_spk;             ///< 'splitkeep'
 EXTERN char *p_spl;             ///< 'spelllang'
 EXTERN char *p_spo;             // 'spelloptions'
 EXTERN unsigned int spo_flags;

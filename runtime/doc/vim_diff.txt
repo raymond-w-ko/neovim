@@ -38,7 +38,7 @@ centralized reference of the differences.
 - 'complete' excludes "i"
 - 'cscopeverbose' is enabled
 - 'directory' defaults to ~/.local/state/nvim/swap// (|xdg|), auto-created
-- 'display' defaults to "lastline,msgsep"
+- 'display' defaults to "lastline"
 - 'encoding' is UTF-8 (cf. 'fileencoding' for file-content encoding)
 - 'fillchars' defaults (in effect) to "vert:│,fold:·,sep:│"
 - 'formatoptions' defaults to "tcqj"
@@ -82,27 +82,24 @@ centralized reference of the differences.
 
 Default Mouse ~
 						*default-mouse* *disable-mouse*
-By default the mouse is enabled.  The right button click opens |popup-menu|
-with standard actions, such as "Cut", "Copy" and "Paste".
+By default the mouse is enabled, and <RightMouse> opens a |popup-menu| with
+standard actions ("Cut", "Copy", "Paste", …). Mouse is NOT enabled in
+|command-mode| or the |more-prompt|, so you can temporarily disable it just by
+typing ":".
 
-If you don't like this you can add to your |config| any of the following:
-
-- ignore mouse completely >
+If you don't like this you can disable the mouse in your |config| using any of
+the following:
+- Disable mouse completely by unsetting the 'mouse' option: >
   set mouse=
-<
-- no |popup-menu| but the right button extends selection >
+- Pressing <RightMouse> extends selection instead of showing popup-menu: >
   set mousemodel=extend
->
-- pressing ALT+LeftMouse releases mouse until main cursor moves  >
-  nnoremap <M-LeftMouse> <Cmd>
+- Pressing <A-LeftMouse> releases mouse until the cursor moves:  >
+  nnoremap <A-LeftMouse> <Cmd>
     \ set mouse=<Bar>
     \ echo 'mouse OFF until next cursor-move'<Bar>
     \ autocmd CursorMoved * ++once set mouse&<Bar>
     \ echo 'mouse ON'<CR>
 <
-Also, mouse is not in use in |command-mode| or at |more-prompt|.  So if you
-need to copy/paste with your terminal then just pressing ':' makes Nvim to
-release the mouse cursor temporarily.
 
 Default Mappings ~
 							*default-mappings*
@@ -256,9 +253,8 @@ Normal commands:
 
 Options:
   'cpoptions'   flags: |cpo-_|
-  'display'     flags: "msgsep" minimizes scrolling when showing messages
   'guicursor'   works in the terminal
-  'fillchars'   flags: "msgsep" (see 'display'), "horiz", "horizup",
+  'fillchars'   flags: "msgsep", "horiz", "horizup",
                 "horizdown", "vertleft", "vertright", "verthoriz"
   'foldcolumn'  supports up to 9 dynamic/fixed columns
   'inccommand'  shows interactive results for |:substitute|-like commands
@@ -479,6 +475,11 @@ TUI:
 UI/Display:
   |Visual| selection highlights the character at cursor. |visual-use|
 
+  messages: When showing messages longer than 'cmdheight', only
+  scroll the message lines, not the entire screen. The
+  separator line is decorated by |hl-MsgSeparator| and
+  the "msgsep" flag of 'fillchars'. *msgsep*
+
 Vimscript compatibility:
   `count` does not alias to |v:count|
   `errmsg` does not alias to |v:errmsg|
@@ -641,6 +642,9 @@ Options:
   *'ttyscroll'* *'tsl'*
   *'ttytype'* *'tty'*
   weirdinvert
+
+Performance:
+  Folds are not updated during insert-mode.
 
 Startup:
   --literal (file args are always literal; to expand wildcards on Windows, use

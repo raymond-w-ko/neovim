@@ -185,11 +185,11 @@ void early_init(mparm_T *paramp)
   init_locale();
 #endif
 
-  // Allocate the first window and buffer.
-  // Can't do anything without it, exit when it fails.
-  if (!win_alloc_first()) {
-    os_exit(0);
-  }
+  // tabpage local options (p_ch) must be set before allocating first tabpage.
+  set_init_tablocal();
+
+  // Allocate the first tabpage, window and buffer.
+  win_alloc_first();
   TIME_MSG("init first window");
 
   alist_init(&global_alist);    // Init the argument list to empty.
@@ -206,6 +206,57 @@ void early_init(mparm_T *paramp)
 
   init_signs();
 }
+
+#ifdef MSWIN
+HWND hWnd = NULL;
+static HICON hOrigIconSmall = NULL;
+static HICON hOrigIcon = NULL;
+
+/// Save Windows console icon to be reset later
+static void SaveWin32ConsoleIcon(void)
+{
+  if ((hWnd = GetConsoleWindow()) == NULL) {
+    return;
+  }
+  hOrigIconSmall = (HICON)SendMessage(hWnd, WM_GETICON, (WPARAM)ICON_SMALL, (LPARAM)0);
+  hOrigIcon = (HICON)SendMessage(hWnd, WM_GETICON, (WPARAM)ICON_BIG, (LPARAM)0);
+}
+
+static void SetConsoleIcon(HWND hWindow, HICON hIconSmall, HICON hIcon)
+{
+  if (hWindow == NULL) {
+    return;
+  }
+  if (hIconSmall != NULL) {
+    SendMessage(hWnd, WM_SETICON, (WPARAM)ICON_SMALL, (LPARAM)hIconSmall);
+  }
+  if (hIcon != NULL) {
+    SendMessage(hWnd, WM_SETICON, (WPARAM)ICON_BIG, (LPARAM)hIcon);
+  }
+}
+
+/// Reset Windows console icon to original
+static void ResetWin32ConsoleIcon(void)
+{
+  SetConsoleIcon(hWnd, hOrigIconSmall, hOrigIcon);
+}
+
+/// Set Neovim logo as Windows console icon
+static void SetWin32ConsoleIcon(void)
+{
+  const char *vimruntime = os_getenv("VIMRUNTIME");
+  if (vimruntime != NULL) {
+    snprintf(NameBuff, MAXPATHL, "%s" _PATHSEPSTR "neovim.ico", vimruntime);
+    if (!os_path_exists(NameBuff)) {
+      WLOG("neovim.ico not found: %s", NameBuff);
+    } else {
+      HICON hVimIcon = LoadImage(NULL, NameBuff, IMAGE_ICON, 64, 64,
+                                 LR_LOADFROMFILE | LR_LOADMAP3DCOLORS);
+      SetConsoleIcon(hWnd, hVimIcon, hVimIcon);
+    }
+  }
+}
+#endif
 
 #ifdef MAKE_LIB
 int nvim_main(int argc, char **argv);  // silence -Wmissing-prototypes
@@ -255,6 +306,11 @@ int main(int argc, char **argv)
   event_init();
 
   early_init(&params);
+
+#ifdef MSWIN
+  SaveWin32ConsoleIcon();
+  SetWin32ConsoleIcon();
+#endif
 
   set_argv_var(argv, argc);  // set v:argv
 
@@ -314,7 +370,7 @@ int main(int argc, char **argv)
   assert(p_ch >= 0 && Rows >= p_ch && Rows - p_ch <= INT_MAX);
   cmdline_row = (int)(Rows - p_ch);
   msg_row = cmdline_row;
-  screenalloc();  // allocate screen buffers
+  default_grid_alloc();  // allocate screen buffers
   set_init_2(headless_mode);
   TIME_MSG("inits 2");
 
@@ -346,12 +402,14 @@ int main(int argc, char **argv)
       ui_builtin_start();
     }
     TIME_MSG("done waiting for UI");
-
-    // prepare screen now, so external UIs can display messages
-    starting = NO_BUFFERS;
-    screenclear();
-    TIME_MSG("init screen for UI");
+    firstwin->w_prev_height = firstwin->w_height;  // may have changed
   }
+
+  // prepare screen now
+  starting = NO_BUFFERS;
+  screenclear();
+  win_new_screensize();
+  TIME_MSG("clear screen");
 
   if (ui_client_channel_id) {
     ui_client_init(ui_client_channel_id);
@@ -361,8 +419,8 @@ int main(int argc, char **argv)
 
   // Default mappings (incl. menus)
   Error err = ERROR_INIT;
-  Object o = nlua_exec(STATIC_CSTR_AS_STRING("return vim._init_default_mappings()"),
-                       (Array)ARRAY_DICT_INIT, &err);
+  Object o = NLUA_EXEC_STATIC("return vim._init_default_mappings()",
+                              (Array)ARRAY_DICT_INIT, &err);
   assert(!ERROR_SET(&err));
   api_clear_error(&err);
   assert(o.type == kObjectTypeNil);
@@ -432,10 +490,8 @@ int main(int argc, char **argv)
     p_ut = 1;
   }
 
-  //
   // Read in registers, history etc, from the ShaDa file.
   // This is where v:oldfiles gets filled.
-  //
   if (*p_shada != NUL) {
     shada_read_everything(NULL, false, true);
     TIME_MSG("reading ShaDa");
@@ -474,14 +530,7 @@ int main(int argc, char **argv)
 
   setmouse();  // may start using the mouse
 
-  if (exmode_active || use_remote_ui || use_builtin_ui) {
-    // Don't clear the screen when starting in Ex mode, or when a UI might have
-    // displayed messages.
-    redraw_later(curwin, UPD_VALID);
-  } else {
-    screenclear();  // clear screen
-    TIME_MSG("clearing screen");
-  }
+  redraw_later(curwin, UPD_VALID);
 
   no_wait_return = true;
 
@@ -727,6 +776,10 @@ void getout(int exitval)
   if (garbage_collect_at_exit) {
     garbage_collect(false);
   }
+
+#ifdef MSWIN
+  ResetWin32ConsoleIcon();
+#endif
 
   os_exit(exitval);
 }
@@ -1281,9 +1334,8 @@ scripterror:
                                                                kFileReadOnly|kFileNonBlocking);
             assert(stdin_dup != NULL);
             scriptin[0] = stdin_dup;
-          } else if ((scriptin[0] =
-                        file_open_new(&error, argv[0], kFileReadOnly|kFileNonBlocking,
-                                      0)) == NULL) {
+          } else if ((scriptin[0] = file_open_new(&error, argv[0],
+                                                  kFileReadOnly|kFileNonBlocking, 0)) == NULL) {
             vim_snprintf((char *)IObuff, IOSIZE,
                          _("Cannot open for reading: \"%s\": %s\n"),
                          argv[0], os_strerror(error));

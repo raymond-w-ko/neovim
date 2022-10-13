@@ -215,11 +215,11 @@ static bool compl_interrupted = false;
 
 static bool compl_restarting = false;   ///< don't insert match
 
-///< When the first completion is done "compl_started" is set.  When it's
-///< false the word to be completed must be located.
+/// When the first completion is done "compl_started" is set.  When it's
+/// false the word to be completed must be located.
 static bool compl_started = false;
 
-///< Which Ctrl-X mode are we in?
+/// Which Ctrl-X mode are we in?
 static int ctrl_x_mode = CTRL_X_NORMAL;
 
 static int compl_matches = 0;           ///< number of completion matches
@@ -1228,7 +1228,7 @@ void ins_compl_show_pum(void)
   do_cmdline_cmd("if exists('g:loaded_matchparen')|3match none|endif");
 
   // Update the screen before drawing the popup menu over it.
-  update_screen(0);
+  update_screen();
 
   int cur = -1;
   bool array_changed = false;
@@ -1433,7 +1433,7 @@ static void ins_compl_files(int count, char **files, int thesaurus, int flags, r
 
   for (i = 0; i < count && !got_int && !compl_interrupted; i++) {
     fp = os_fopen(files[i], "r");  // open dictionary file
-    if (flags != DICT_EXACT) {
+    if (flags != DICT_EXACT && !shortmess(SHM_COMPLETIONSCAN)) {
       msg_hist_off = true;  // reset in msg_trunc_attr()
       vim_snprintf((char *)IObuff, IOSIZE,
                    _("Scanning dictionary: %s"), files[i]);
@@ -1648,7 +1648,7 @@ int ins_compl_bs(void)
     ins_compl_restart();
   }
 
-  // ins_compl_restart() calls update_screen(0) which may invalidate the pointer
+  // ins_compl_restart() calls update_screen() which may invalidate the pointer
   // TODO(bfredl): get rid of random update_screen() calls deep inside completion logic
   line = get_cursor_line_ptr();
 
@@ -1759,7 +1759,7 @@ static void ins_compl_restart(void)
   // update screen before restart.
   // so if complete is blocked,
   // will stay to the last popup menu and reduce flicker
-  update_screen(0);
+  update_screen();  // TODO(bfredl): no.
   ins_compl_free();
   compl_started = false;
   compl_matches = 0;
@@ -2048,7 +2048,7 @@ static bool ins_compl_stop(const int c, const int prev_mode, bool retval)
   if (c == Ctrl_C && cmdwin_type != 0) {
     // Avoid the popup menu remains displayed when leaving the
     // command line window.
-    update_screen(0);
+    update_screen();
   }
 
   // Indent now if a key was typed that is in 'cinkeys'.
@@ -2759,14 +2759,16 @@ static int process_next_cpt_value(ins_compl_next_state_T *st, int *compl_type_ar
       st->dict = (char_u *)st->ins_buf->b_fname;
       st->dict_f = DICT_EXACT;
     }
-    msg_hist_off = true;  // reset in msg_trunc_attr()
-    vim_snprintf((char *)IObuff, IOSIZE, _("Scanning: %s"),
-                 st->ins_buf->b_fname == NULL
-                 ? buf_spname(st->ins_buf)
-                 : st->ins_buf->b_sfname == NULL
-                 ? st->ins_buf->b_fname
-                 : st->ins_buf->b_sfname);
-    (void)msg_trunc_attr((char *)IObuff, true, HL_ATTR(HLF_R));
+    if (!shortmess(SHM_COMPLETIONSCAN)) {
+      msg_hist_off = true;  // reset in msg_trunc_attr()
+      vim_snprintf((char *)IObuff, IOSIZE, _("Scanning: %s"),
+                   st->ins_buf->b_fname == NULL
+                   ? buf_spname(st->ins_buf)
+                   : st->ins_buf->b_sfname == NULL
+                   ? st->ins_buf->b_fname
+                   : st->ins_buf->b_sfname);
+      (void)msg_trunc_attr((char *)IObuff, true, HL_ATTR(HLF_R));
+    }
   } else if (*st->e_cpt == NUL) {
     status = INS_COMPL_CPT_END;
   } else {
@@ -2787,10 +2789,12 @@ static int process_next_cpt_value(ins_compl_next_state_T *st, int *compl_type_ar
     } else if (*st->e_cpt == 'd') {
       compl_type = CTRL_X_PATH_DEFINES;
     } else if (*st->e_cpt == ']' || *st->e_cpt == 't') {
-      msg_hist_off = true;  // reset in msg_trunc_attr()
       compl_type = CTRL_X_TAGS;
-      vim_snprintf((char *)IObuff, IOSIZE, "%s", _("Scanning tags."));
-      (void)msg_trunc_attr((char *)IObuff, true, HL_ATTR(HLF_R));
+      if (!shortmess(SHM_COMPLETIONSCAN)) {
+        msg_hist_off = true;  // reset in msg_trunc_attr()
+        vim_snprintf((char *)IObuff, IOSIZE, "%s", _("Scanning tags."));
+        (void)msg_trunc_attr((char *)IObuff, true, HL_ATTR(HLF_R));
+      }
     } else {
       compl_type = -1;
     }
@@ -3533,7 +3537,7 @@ static int ins_compl_next(bool allow_get_expansion, int count, bool insert_match
 
   if (!allow_get_expansion) {
     // redraw to show the user what was inserted
-    update_screen(0);
+    update_screen();  // TODO(bfredl): no!
 
     // display the updated popup menu
     ins_compl_show_pum();

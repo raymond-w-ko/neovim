@@ -147,6 +147,13 @@ typedef enum {
 # include "option.c.generated.h"
 #endif
 
+void set_init_tablocal(void)
+{
+  // susy baka: cmdheight calls itself OPT_GLOBAL but is really tablocal!
+  int ch_idx = findoption("cmdheight");
+  p_ch = (long)options[ch_idx].def_val;
+}
+
 /// Initialize the options, first part.
 ///
 /// Called only once from main(), just after creating the first buffer.
@@ -200,7 +207,7 @@ void set_init_1(bool clean_arg)
         p = "/tmp";
 # endif
         mustfree = false;
-      } else
+      } else  // NOLINT(readability/braces)
 #endif
       {
         p = vim_getenv(names[n]);
@@ -2035,10 +2042,9 @@ static char *set_bool_option(const int opt_idx, char_u *const varp, const int va
     }
     redraw_titles();
     modified_was_set = value;
-  }
 
 #ifdef BACKSLASH_IN_FILENAME
-  else if ((int *)varp == &p_ssl) {
+  } else if ((int *)varp == &p_ssl) {
     if (p_ssl) {
       psepc = '/';
       psepcN = '\\';
@@ -2053,9 +2059,8 @@ static char *set_bool_option(const int opt_idx, char_u *const varp, const int va
     buflist_slash_adjust();
     alist_slash_adjust();
     scriptnames_slash_adjust();
-  }
 #endif
-  else if ((int *)varp == &curwin->w_p_wrap) {
+  } else if ((int *)varp == &curwin->w_p_wrap) {
     // If 'wrap' is set, set w_leftcol to zero.
     if (curwin->w_p_wrap) {
       curwin->w_leftcol = 0;
@@ -2461,7 +2466,9 @@ static char *set_num_option(int opt_idx, char_u *varp, long value, char *errbuf,
     // if p_ch changed value, change the command line height
     // Only compute the new window layout when startup has been
     // completed. Otherwise the frame sizes may be wrong.
-    if (p_ch != old_value && full_screen) {
+    if ((p_ch != old_value
+         || tabline_height() + global_stl_height() + topframe->fr_height != Rows - p_ch)
+        && full_screen) {
       command_height();
     }
   } else if (pp == &p_uc) {
@@ -2634,9 +2641,8 @@ static char *set_num_option(int opt_idx, char_u *varp, long value, char *errbuf,
 /// Called after an option changed: check if something needs to be redrawn.
 void check_redraw(uint32_t flags)
 {
-  // Careful: P_RCLR and P_RALL are a combination of other P_ flags
-  bool doclear = (flags & P_RCLR) == P_RCLR;
-  bool all = ((flags & P_RALL) == P_RALL || doclear);
+  // Careful: P_RALL is a combination of other P_ flags
+  bool all = (flags & P_RALL) == P_RALL;
 
   if ((flags & P_RSTAT) || all) {  // mark all status lines and window bars dirty
     status_redraw_all();
@@ -2651,9 +2657,7 @@ void check_redraw(uint32_t flags)
   if (flags & P_RWINONLY) {
     redraw_later(curwin, UPD_NOT_VALID);
   }
-  if (doclear) {
-    redraw_all_later(UPD_CLEAR);
-  } else if (all) {
+  if (all) {
     redraw_all_later(UPD_NOT_VALID);
   }
 }
@@ -2675,7 +2679,7 @@ int findoption_len(const char *const arg, const size_t len)
   // letter.  There are 26 letters, plus the first "t_" option.
   if (quick_tab[1] == 0) {
     p = options[0].fullname;
-    for (short int i = 1; (s = options[i].fullname) != NULL; i++) {
+    for (uint16_t i = 1; (s = options[i].fullname) != NULL; i++) {
       if (s[0] != p[0]) {
         if (s[0] == 't' && s[1] == '_') {
           quick_tab[26] = i;
@@ -3106,6 +3110,12 @@ void set_option_value_give_err(const char *name, long number, const char *string
   if (errmsg != NULL) {
     emsg(_(errmsg));
   }
+}
+
+bool is_option_allocated(const char *name)
+{
+  int idx = findoption(name);
+  return idx >= 0 && (options[idx].flags & P_ALLOCED);
 }
 
 /// Return true if "name" is a string option.
@@ -3592,8 +3602,7 @@ void unset_global_local_option(char *name, void *from)
   }
   p = &(options[opt_idx]);
 
-  switch ((int)p->indir)
-  {
+  switch ((int)p->indir) {
   // global option with local value: use local value if it's been set
   case PV_EP:
     clear_string_option(&buf->b_p_ep);
@@ -4856,7 +4865,7 @@ static void option_value2string(vimoption_T *opp, int opt_flags)
       snprintf((char *)NameBuff,
                sizeof(NameBuff),
                "%" PRId64,
-               (int64_t)*(long *)varp);
+               (int64_t)(*(long *)varp));
     }
   } else {  // P_STRING
     varp = *(char_u **)(varp);
