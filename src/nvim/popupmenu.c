@@ -264,12 +264,15 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
       pum_row = above_row;
       pum_height = pum_win_row - above_row;
     }
+
+    pum_array = array;
+    // Set "pum_size" before returning so that pum_set_event_info() gets the correct size.
+    pum_size = size;
+
     if (pum_external) {
       return;
     }
 
-    pum_array = array;
-    pum_size = size;
     pum_compute_size();
     int max_width = pum_base_width;
 
@@ -899,6 +902,17 @@ void pum_invalidate(void)
 void pum_recompose(void)
 {
   ui_comp_compose_grid(&pum_grid);
+}
+
+void pum_ext_select_item(int item, bool insert, bool finish)
+{
+  if (!pum_visible() || item < -1 || item >= pum_size) {
+    return;
+  }
+  pum_want.active = true;
+  pum_want.item = item;
+  pum_want.insert = insert;
+  pum_want.finish = finish;
 }
 
 /// Gets the height of the menu.

@@ -401,6 +401,7 @@ let s:filename_checks = {
     \ 'opam': ['opam', 'file.opam', 'file.opam.template'],
     \ 'openroad': ['file.or'],
     \ 'openscad': ['file.scad'],
+    \ 'openvpn': ['file.ovpn', '/etc/openvpn/client/client.conf', '/usr/share/openvpn/examples/server.conf'],
     \ 'opl': ['file.OPL', 'file.OPl', 'file.OpL', 'file.Opl', 'file.oPL', 'file.oPl', 'file.opL', 'file.opl'],
     \ 'ora': ['file.ora'],
     \ 'org': ['file.org', 'file.org_archive'],
@@ -454,7 +455,7 @@ let s:filename_checks = {
     \ 'ql': ['file.ql', 'file.qll'],
     \ 'quake': ['anybaseq2/file.cfg', 'anyid1/file.cfg', 'quake3/file.cfg', 'baseq2/file.cfg', 'id1/file.cfg', 'quake1/file.cfg', 'some-baseq2/file.cfg', 'some-id1/file.cfg', 'some-quake1/file.cfg'],
     \ 'quarto': ['file.qmd'],
-    \ 'r': ['file.r'],
+    \ 'r': ['file.r', '.Rprofile', 'Rprofile', 'Rprofile.site'],
     \ 'radiance': ['file.rad', 'file.mat'],
     \ 'raku': ['file.pm6', 'file.p6', 'file.t6', 'file.pod6', 'file.raku', 'file.rakumod', 'file.rakudoc', 'file.rakutest'],
     \ 'raml': ['file.raml'],
@@ -1764,6 +1765,11 @@ func Test_cls_file()
   " TeX
 
   call writefile(['%'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('tex', &filetype)
+  bwipe!
+
+  call writefile(['\NeedsTeXFormat{LaTeX2e}'], 'Xfile.cls')
   split Xfile.cls
   call assert_equal('tex', &filetype)
   bwipe!
