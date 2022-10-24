@@ -339,6 +339,7 @@ local function validate_link(node, bufnr, fname)
   return helppage, tagname, ignored
 end
 
+-- TODO: port the logic from scripts/check_urls.vim
 local function validate_url(text, fname)
   local ignored = false
   if vim.fs.basename(fname) == 'pi_netrw.txt' then
@@ -388,6 +389,18 @@ local function visit_validate(root, level, lang_tree, opt, stats)
   elseif node_name == 'taglink' or node_name == 'optionlink' then
     local _, _, _ = validate_link(root, opt.buf, opt.fname)
   end
+end
+
+-- Fix tab alignment issues caused by concealed characters like |, `, * in tags
+-- and code blocks.
+local function fix_tab_after_conceal(text, next_node_text)
+  -- Vim tabs take into account the two concealed characters even though they
+  -- are invisible, so we need to add back in the two spaces if this is
+  -- followed by a tab to make the tab alignment to match Vim's behavior.
+  if string.sub(next_node_text,1,1) == '\t' then
+    text = text .. '  '
+  end
+  return text
 end
 
 -- Generates HTML from node `root` recursively.
@@ -506,12 +519,20 @@ local function visit_node(root, level, lang_tree, headings, opt, stats)
     if ignored then
       return text
     end
-    return ('%s<a href="%s#%s">%s</a>'):format(ws(), helppage, url_encode(tagname), html_esc(tagname))
+    local s = ('%s<a href="%s#%s">%s</a>'):format(ws(), helppage, url_encode(tagname), html_esc(tagname))
+    if opt.old and node_name == 'taglink' then
+      s = fix_tab_after_conceal(s, node_text(root:next_sibling()))
+    end
+    return s
   elseif vim.tbl_contains({'codespan', 'keycode'}, node_name) then
     if root:has_error() then
       return text
     end
-    return ('%s<code>%s</code>'):format(ws(), trimmed)
+    local s = ('%s<code>%s</code>'):format(ws(), trimmed)
+    if opt.old and node_name == 'codespan' then
+      s = fix_tab_after_conceal(s, node_text(root:next_sibling()))
+    end
+    return s
   elseif node_name == 'argument' then
     return ('%s<code>{%s}</code>'):format(ws(), text)
   elseif node_name == 'codeblock' then
@@ -533,6 +554,10 @@ local function visit_node(root, level, lang_tree, headings, opt, stats)
     end
     local el = in_heading and 'span' or 'code'
     local s = ('%s<a name="%s"></a><%s class="%s">%s</%s>'):format(ws(), url_encode(tagname), el, cssclass, trimmed, el)
+    if opt.old then
+        s = fix_tab_after_conceal(s, node_text(root:next_sibling()))
+    end
+
     if in_heading and prev ~= 'tag' then
       -- Start the <span> container for tags in a heading.
       -- This makes "justify-content:space-between" right-align the tags.

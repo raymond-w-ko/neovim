@@ -1880,7 +1880,7 @@ void set_cmd_context(expand_T *xp, char_u *str, int len, int col, int use_ccline
 /// @param col  position of cursor
 /// @param matchcount  return: nr of matches
 /// @param matches  return: array of pointers to matches
-int expand_cmdline(expand_T *xp, char_u *str, int col, int *matchcount, char ***matches)
+int expand_cmdline(expand_T *xp, const char_u *str, int col, int *matchcount, char ***matches)
 {
   char_u *file_str = NULL;
   int options = WILD_ADD_SLASH|WILD_SILENT;
@@ -2351,7 +2351,7 @@ static void expand_shellcmd(char *filepat, int *num_file, char ***file, int flag
   }
 
   // Go over all directories in $PATH.  Expand matches in that directory and
-  // collect them in "ga". When "." is not in $PATH also expaned for the
+  // collect them in "ga". When "." is not in $PATH also expand for the
   // current directory, to find "subdir/cmd".
   ga_init(&ga, (int)sizeof(char *), 10);
   hashtab_T found_ht;
