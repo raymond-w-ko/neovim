@@ -378,7 +378,7 @@ func Test_syntax_invalid_arg()
   call assert_fails('syntax sync x', 'E404:')
   call assert_fails('syntax keyword Abc a[', 'E789:')
   call assert_fails('syntax keyword Abc a[bc]d', 'E890:')
-  call assert_fails('syntax cluster Abc add=A add=', 'E475:')
+  call assert_fails('syntax cluster Abc add=A add=', 'E406:')
 
   " Test for too many \z\( and unmatched \z\(
   " Not able to use assert_fails() here because both E50:/E879: and E475:
@@ -407,6 +407,7 @@ func Test_syntax_invalid_arg()
   call AssertFails('syntax cluster contains=Abc', 'E400:')
   call AssertFails("syntax match Character /'.'", 'E401:')
   call AssertFails("syntax match Character /'.'/a", 'E402:')
+  call assert_fails('syntax sync linecont /\%(/', 'E53:')
   call assert_fails('syntax sync linecont /pat', 'E404:')
   call assert_fails('syntax sync linecont', 'E404:')
   call assert_fails('syntax sync linecont /pat1/ linecont /pat2/', 'E403:')
@@ -416,6 +417,7 @@ func Test_syntax_invalid_arg()
   call AssertFails('syntax match ccFoo "Foo" nextgroup=ALLBUT,F', 'E407:')
   call AssertFails('syntax region Block start="{" contains=F,ALLBUT', 'E408:')
   call AssertFails("syntax match Characters contains=a.*x /'.'/", 'E409:')
+  call assert_fails('syntax match Search /abc/ contains=ALLBUT,/\%(/', 'E53:')
 endfunc
 
 func Test_syn_sync()
@@ -631,9 +633,7 @@ endfunc
 
 " Check highlighting for a small piece of C code with a screen dump.
 func Test_syntax_c()
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot make screendumps'
-  endif
+  CheckRunVimInTerminal
   call writefile([
 	\ '/* comment line at the top */',
 	\ 'int main(int argc, char **argv) { // another comment',

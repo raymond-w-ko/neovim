@@ -496,6 +496,13 @@ func Test_function_with_funcref()
   call assert_fails("call function('foo()')", 'E475:')
   call assert_fails("call function('foo()')", 'foo()')
   call assert_fails("function('')", 'E129:')
+
+  let Len = {s -> strlen(s)}
+  call assert_equal(6, Len('foobar'))
+  let name = string(Len)
+  " can evaluate "function('<lambda>99')"
+  call execute('let Ref = ' .. name)
+  call assert_equal(4, Ref('text'))
 endfunc
 
 func Test_funcref()
@@ -528,6 +535,7 @@ func Test_setmatches()
   endif
   eval set->setmatches()
   call assert_equal(exp, getmatches())
+  call assert_fails('let m = setmatches([], [])', 'E745:')
 endfunc
 
 func Test_empty_concatenate()

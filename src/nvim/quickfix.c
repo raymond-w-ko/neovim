@@ -5325,10 +5325,8 @@ static int vgr_process_args(exarg_T *eap, vgr_args_T *args)
   }
 
   // Parse the list of arguments, wildcards have already been expanded.
-  if (get_arglist_exp(p, &args->fcount, &args->fnames, true) == FAIL) {
-    return FAIL;
-  }
-  if (args->fcount == 0) {
+  if (get_arglist_exp(p, &args->fcount, &args->fnames, true) == FAIL
+      || args->fcount == 0) {
     emsg(_(e_nomatch));
     return FAIL;
   }
@@ -6688,7 +6686,8 @@ int set_errorlist(win_T *wp, list_T *list, int action, char *title, dict_T *what
   return retval;
 }
 
-/// Mark the context as in use for all the lists in a quickfix stack.
+/// Mark the quickfix context and callback function as in use for all the lists
+/// in a quickfix stack.
 static bool mark_quickfix_ctx(qf_info_T *qi, int copyID)
 {
   bool abort = false;
@@ -6697,8 +6696,11 @@ static bool mark_quickfix_ctx(qf_info_T *qi, int copyID)
     typval_T *ctx = qi->qf_lists[i].qf_ctx;
     if (ctx != NULL && ctx->v_type != VAR_NUMBER
         && ctx->v_type != VAR_STRING && ctx->v_type != VAR_FLOAT) {
-      abort = set_ref_in_item(ctx, copyID, NULL, NULL);
+      abort = abort || set_ref_in_item(ctx, copyID, NULL, NULL);
     }
+
+    Callback *cb = &qi->qf_lists[i].qf_qftf_cb;
+    abort = abort || set_ref_in_callback(cb, copyID, NULL, NULL);
   }
 
   return abort;
@@ -6709,6 +6711,11 @@ static bool mark_quickfix_ctx(qf_info_T *qi, int copyID)
 bool set_ref_in_quickfix(int copyID)
 {
   bool abort = mark_quickfix_ctx(&ql_info, copyID);
+  if (abort) {
+    return abort;
+  }
+
+  abort = set_ref_in_callback(&qftf_cb, copyID, NULL, NULL);
   if (abort) {
     return abort;
   }

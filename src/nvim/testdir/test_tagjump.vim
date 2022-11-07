@@ -8,7 +8,7 @@ func Test_ptag_with_notagstack()
   CheckFeature quickfix
 
   set notagstack
-  call assert_fails('ptag does_not_exist_tag_name', 'E426')
+  call assert_fails('ptag does_not_exist_tag_name', 'E433')
   set tagstack&vim
 endfunc
 
@@ -184,6 +184,10 @@ function Test_keyword_jump()
   call search("start")
   exe "normal! 5\<C-W>\<C-I>"
   call assert_equal("		start OK if found this line", getline('.'))
+
+  " invalid tag search pattern
+  call assert_fails('tag /\%(/', 'E426:')
+
   enew! | only
   call delete('Xtestfile')
   call delete('Xinclude')
@@ -346,7 +350,7 @@ func Test_tagjump_etags()
         \ "Xmain.c,64",
         \ ";;;;\x7f1,0",
 	\ ], 'Xtags')
-  call assert_fails('tag foo', 'E426:')
+  call assert_fails('tag foo', 'E431:')
 
   call delete('Xtags')
   call delete('Xtags2')
@@ -372,6 +376,7 @@ func Test_getsettagstack()
   call assert_fails("call settagstack(1, {'items' : 10})", 'E714')
   call assert_fails("call settagstack(1, {'items' : []}, 10)", 'E928')
   call assert_fails("call settagstack(1, {'items' : []}, 'b')", 'E962')
+  call assert_equal(-1, settagstack(0, v:_null_dict))
 
   set tags=Xtags
   call writefile(["!_TAG_FILE_ENCODING\tutf-8\t//",

@@ -29,6 +29,8 @@ func Test_has()
     call assert_equal(0, and(has('ttyout'), 0))
     call assert_equal(1, has('multi_byte_encoding'))
   endif
+  call assert_equal(1, has('vcon', 1))
+  call assert_equal(1, has('mouse_gpm_enabled', 1))
 
   call assert_equal(0, has('nonexistent'))
   call assert_equal(0, has('nonexistent', 1))
@@ -209,7 +211,7 @@ func Test_str2nr()
   if has('float')
     call assert_fails('call str2nr(1.2)', 'E806:')
   endif
-  call assert_fails('call str2nr(10, [])', 'E474:')
+  call assert_fails('call str2nr(10, [])', 'E745:')
 endfunc
 
 func Test_strftime()
@@ -796,16 +798,39 @@ func Test_mode()
   delfunction OperatorFunc
 endfunc
 
+" Test for append()
 func Test_append()
   enew!
   split
   call append(0, ["foo"])
+  call append(1, [])
+  call append(1, v:_null_list)
+  call assert_equal(['foo', ''], getline(1, '$'))
   split
   only
+  undo
   undo
 
   " Using $ instead of '$' must give an error
   call assert_fails("call append($, 'foobar')", 'E116:')
+endfunc
+
+" Test for setline()
+func Test_setline()
+  new
+  call setline(0, ["foo"])
+  call setline(0, [])
+  call setline(0, v:_null_list)
+  call setline(1, ["bar"])
+  call setline(1, [])
+  call setline(1, v:_null_list)
+  call setline(2, [])
+  call setline(2, v:_null_list)
+  call setline(3, [])
+  call setline(3, v:_null_list)
+  call setline(2, ["baz"])
+  call assert_equal(['bar', 'baz'], getline(1, '$'))
+  close!
 endfunc
 
 func Test_getbufvar()
@@ -915,6 +940,8 @@ func Test_match_func()
   call assert_equal(-1, match(['a', 'b', 'c', 'a'], 'a', 5))
   call assert_equal(4,  match('testing', 'ing', -1))
   call assert_fails("let x=match('testing', 'ing', 0, [])", 'E745:')
+  call assert_equal(-1, match(v:_null_list, 2))
+  call assert_equal(-1, match('abc', '\\%('))
 endfunc
 
 func Test_matchend()
@@ -1075,8 +1102,8 @@ func Test_charidx()
   call assert_fails('let x = charidx([], 1)', 'E474:')
   call assert_fails('let x = charidx("abc", [])', 'E474:')
   call assert_fails('let x = charidx("abc", 1, [])', 'E474:')
-  call assert_fails('let x = charidx("abc", 1, -1)', 'E474:')
-  call assert_fails('let x = charidx("abc", 1, 2)', 'E474:')
+  call assert_fails('let x = charidx("abc", 1, -1)', 'E1023:')
+  call assert_fails('let x = charidx("abc", 1, 2)', 'E1023:')
 endfunc
 
 func Test_count()
@@ -1331,12 +1358,15 @@ endfunc
 
 " Test for the inputdialog() function
 func Test_inputdialog()
-  CheckNotGui
-
-  call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<CR>", 'xt')
-  call assert_equal('xx', v)
-  call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<Esc>", 'xt')
-  call assert_equal('yy', v)
+  if has('gui_running')
+    call assert_fails('let v=inputdialog([], "xx")', 'E730:')
+    call assert_fails('let v=inputdialog("Q", [])', 'E730:')
+  else
+    call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<CR>", 'xt')
+    call assert_equal('xx', v)
+    call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<Esc>", 'xt')
+    call assert_equal('yy', v)
+  endif
 endfunc
 
 " Test for inputlist()
@@ -1387,6 +1417,7 @@ func Test_balloon_show()
   call balloon_show('hi!')
   if !has('gui_running')
     call balloon_show(range(3))
+    call balloon_show([])
   endif
 endfunc
 
@@ -1698,11 +1729,11 @@ func Test_libcall_libcallnr()
   call assert_equal(4, 'abcd'->libcallnr(libc, 'strlen'))
   call assert_equal(char2nr('A'), char2nr('a')->libcallnr(libc, 'toupper'))
 
-  call assert_fails("call libcall(libc, 'Xdoesnotexist_', '')", 'E364:')
-  call assert_fails("call libcallnr(libc, 'Xdoesnotexist_', '')", 'E364:')
+  call assert_fails("call libcall(libc, 'Xdoesnotexist_', '')", ['', 'E364:'])
+  call assert_fails("call libcallnr(libc, 'Xdoesnotexist_', '')", ['', 'E364:'])
 
-  call assert_fails("call libcall('Xdoesnotexist_', 'getenv', 'HOME')", 'E364:')
-  call assert_fails("call libcallnr('Xdoesnotexist_', 'strlen', 'abcd')", 'E364:')
+  call assert_fails("call libcall('Xdoesnotexist_', 'getenv', 'HOME')", ['', 'E364:'])
+  call assert_fails("call libcallnr('Xdoesnotexist_', 'strlen', 'abcd')", ['', 'E364:'])
 endfunc
 
 sandbox function Fsandbox()
@@ -1916,6 +1947,7 @@ func Test_call()
   call assert_equal(3, 'len'->call([123]))
   call assert_fails("call call('len', 123)", 'E714:')
   call assert_equal(0, call('', []))
+  call assert_equal(0, call('len', v:_null_list))
 
   function Mylen() dict
      return len(self.data)
@@ -2271,6 +2303,9 @@ func Test_range()
   call assert_fails('let x=range(2, 8, 0)', 'E726:')
   call assert_fails('let x=range(3, 1)', 'E727:')
   call assert_fails('let x=range(1, 3, -2)', 'E727:')
+  call assert_fails('let x=range([])', 'E745:')
+  call assert_fails('let x=range(1, [])', 'E745:')
+  call assert_fails('let x=range(1, 4, [])', 'E745:')
 endfunc
 
 func Test_garbagecollect_now_fails()
@@ -2419,6 +2454,7 @@ endfunc
 func Test_glob()
   call assert_equal('', glob(v:_null_string))
   call assert_equal('', globpath(v:_null_string, v:_null_string))
+  call assert_fails("let x = globpath(&rtp, 'syntax/c.vim', [])", 'E745:')
 
   call writefile([], 'Xglob1')
   call writefile([], 'XGLOB2')
@@ -2443,5 +2479,47 @@ endfunc
 func Test_default_arg_value()
   call assert_equal('msg', HasDefault())
 endfunc
+
+" Test for gettext()
+func Test_gettext()
+  call assert_fails('call gettext(1)', 'E475:')
+endfunc
+
+func Test_builtin_check()
+  call assert_fails('let g:["trim"] = {x -> " " .. x}', 'E704:')
+  call assert_fails('let g:.trim = {x -> " " .. x}', 'E704:')
+  call assert_fails('let l:["trim"] = {x -> " " .. x}', 'E704:')
+  call assert_fails('let l:.trim = {x -> " " .. x}', 'E704:')
+  let lines =<< trim END
+    vim9script
+    var s:trim = (x) => " " .. x
+  END
+  " call CheckScriptFailure(lines, 'E704:')
+
+  call assert_fails('call extend(g:, #{foo: { -> "foo" }})', 'E704:')
+  let g:bar = 123
+  call extend(g:, #{bar: { -> "foo" }}, "keep")
+  call assert_fails('call extend(g:, #{bar: { -> "foo" }}, "force")', 'E704:')
+  unlet g:bar
+
+  call assert_fails('call extend(l:, #{foo: { -> "foo" }})', 'E704:')
+  let bar = 123
+  call extend(l:, #{bar: { -> "foo" }}, "keep")
+  call assert_fails('call extend(l:, #{bar: { -> "foo" }}, "force")', 'E704:')
+  unlet bar
+
+  call assert_fails('call extend(g:, #{foo: function("extend")})', 'E704:')
+  let g:bar = 123
+  call extend(g:, #{bar: function("extend")}, "keep")
+  call assert_fails('call extend(g:, #{bar: function("extend")}, "force")', 'E704:')
+  unlet g:bar
+
+  call assert_fails('call extend(l:, #{foo: function("extend")})', 'E704:')
+  let bar = 123
+  call extend(l:, #{bar: function("extend")}, "keep")
+  call assert_fails('call extend(l:, #{bar: function("extend")}, "force")', 'E704:')
+  unlet bar
+endfunc
+
 
 " vim: shiftwidth=2 sts=2 expandtab

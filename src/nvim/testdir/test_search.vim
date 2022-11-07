@@ -294,6 +294,9 @@ func Test_searchpair()
   new
   call setline(1, ['other code', 'here [', ' [', ' " cursor here', ' ]]'])
 
+  " should not give an error for using "42"
+  call assert_equal(0, searchpair('a', 'b', 'c', '', 42))
+
   4
   call assert_equal(3, searchpair('\[', '', ']', 'bW'))
   call assert_equal([0, 3, 2, 0], getpos('.'))
@@ -897,9 +900,7 @@ func Test_incsearch_cmdline_modifier()
 endfunc
 
 func Test_incsearch_scrolling()
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot make screendumps'
-  endif
+  CheckRunVimInTerminal
   call assert_equal(0, &scrolloff)
   call writefile([
 	\ 'let dots = repeat(".", 120)',
@@ -1649,8 +1650,8 @@ func Test_search_with_no_last_pat()
     call assert_fails(";//p", 'E35:')
     call assert_fails("??p", 'E35:')
     call assert_fails(";??p", 'E35:')
-    call assert_fails('g//p', 'E476:')
-    call assert_fails('v//p', 'E476:')
+    call assert_fails('g//p', ['E35:', 'E476:'])
+    call assert_fails('v//p', ['E35:', 'E476:'])
     call writefile(v:errors, 'Xresult')
     qall!
   [SCRIPT]
@@ -1671,8 +1672,8 @@ func Test_search_tilde_pat()
     call assert_fails('exe "normal /~\<CR>"', 'E33:')
     call assert_fails('exe "normal ?~\<CR>"', 'E33:')
     set regexpengine=2
-    call assert_fails('exe "normal /~\<CR>"', 'E383:')
-    call assert_fails('exe "normal ?~\<CR>"', 'E383:')
+    call assert_fails('exe "normal /~\<CR>"', ['E33:', 'E383:'])
+    call assert_fails('exe "normal ?~\<CR>"', ['E33:', 'E383:'])
     set regexpengine&
     call writefile(v:errors, 'Xresult')
     qall!

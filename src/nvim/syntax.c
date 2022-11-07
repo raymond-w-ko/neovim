@@ -1655,13 +1655,12 @@ static int syn_current_attr(const bool syncing, const bool displaying, bool *con
                 && (spp->sp_type == SPTYPE_MATCH
                     || spp->sp_type == SPTYPE_START)
                 && (current_next_list != NULL
-                           ? in_id_list(NULL, current_next_list,
-                                        &spp->sp_syn, 0)
-                           : (cur_si == NULL
-                              ? !(spp->sp_flags & HL_CONTAINED)
-                              : in_id_list(cur_si,
-                                           cur_si->si_cont_list, &spp->sp_syn,
-                                           spp->sp_flags & HL_CONTAINED)))) {
+                    ? in_id_list(NULL, current_next_list, &spp->sp_syn, 0)
+                    : (cur_si == NULL
+                       ? !(spp->sp_flags & HL_CONTAINED)
+                       : in_id_list(cur_si,
+                                    cur_si->si_cont_list, &spp->sp_syn,
+                                    spp->sp_flags & HL_CONTAINED)))) {
               // If we already tried matching in this line, and
               // there isn't a match before next_match_col, skip
               // this item.
@@ -2788,9 +2787,9 @@ static keyentry_T *match_keyword(char *keyword, hashtab_T *ht, stateitem_T *cur_
       if (current_next_list != 0
           ? in_id_list(NULL, current_next_list, &kp->k_syn, 0)
           : (cur_si == NULL
-            ? !(kp->flags & HL_CONTAINED)
-            : in_id_list(cur_si, cur_si->si_cont_list,
-                         &kp->k_syn, kp->flags & HL_CONTAINED))) {
+             ? !(kp->flags & HL_CONTAINED)
+             : in_id_list(cur_si, cur_si->si_cont_list,
+                          &kp->k_syn, kp->flags & HL_CONTAINED))) {
         return kp;
       }
     }
@@ -4749,7 +4748,7 @@ static char *get_syn_pattern(char *arg, synpat_T *ci)
     return NULL;
   }
 
-  end = skip_regexp(arg + 1, *arg, true, NULL);
+  end = skip_regexp(arg + 1, *arg, true);
   if (*end != *arg) {                       // end delimiter not found
     semsg(_("E401: Pattern delimiter not found: %s"), arg);
     return NULL;
@@ -4902,7 +4901,7 @@ static void syn_cmd_sync(exarg_T *eap, int syncing)
         finished = true;
         break;
       }
-      arg_end = skip_regexp(next_arg + 1, *next_arg, true, NULL);
+      arg_end = skip_regexp(next_arg + 1, *next_arg, true);
       if (*arg_end != *next_arg) {          // end delimiter not found
         illegal = true;
         break;
