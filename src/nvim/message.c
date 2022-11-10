@@ -59,8 +59,10 @@ struct msgchunk_S {
 };
 
 // Magic chars used in confirm dialog strings
-#define DLG_BUTTON_SEP  '\n'
-#define DLG_HOTKEY_CHAR '&'
+enum {
+  DLG_BUTTON_SEP = '\n',
+  DLG_HOTKEY_CHAR = '&',
+};
 
 static int confirm_msg_used = false;            // displaying confirm_msg
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -128,7 +130,6 @@ static bool msg_ext_history_visible = false;
 static bool msg_ext_keep_after_cmdline = false;
 
 static int msg_grid_pos_at_flush = 0;
-static int msg_grid_scroll_discount = 0;
 
 static void ui_ext_msg_set_pos(int row, bool scrolled)
 {
@@ -2443,6 +2444,7 @@ void msg_reset_scroll(void)
   }
   msg_scrolled = 0;
   msg_scrolled_at_flush = 0;
+  msg_grid_scroll_discount = 0;
 }
 
 /// Increment "msg_scrolled".
