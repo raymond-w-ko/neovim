@@ -196,7 +196,7 @@ void msg_grid_validate(void)
     msg_grid_set_pos(max_rows, false);
   }
 
-  if (msg_grid.chars && cmdline_row < msg_grid_pos) {
+  if (msg_grid.chars && !msg_scrolled && cmdline_row < msg_grid_pos) {
     // TODO(bfredl): this should already be the case, but fails in some
     // "batched" executions where compute_cmdrow() use stale positions or
     // something.
@@ -664,7 +664,7 @@ static bool emsg_multiline(const char *s, bool multiline)
       return true;
     }
 
-    if (emsg_assert_fails_used && emsg_assert_fails_msg == NULL) {
+    if (in_assert_fails && emsg_assert_fails_msg == NULL) {
       emsg_assert_fails_msg = xstrdup(s);
       emsg_assert_fails_lnum = SOURCING_LNUM;
       xfree(emsg_assert_fails_context);
