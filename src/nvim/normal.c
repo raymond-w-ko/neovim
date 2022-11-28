@@ -1230,8 +1230,7 @@ static void normal_check_interrupt(NormalState *s)
 static void normal_check_window_scrolled(NormalState *s)
 {
   if (!finish_op) {
-    // Trigger Scroll if the viewport changed.
-    may_trigger_winscrolled();
+    may_trigger_win_scrolled_resized();
   }
 }
 
@@ -1912,7 +1911,7 @@ bool add_to_showcmd(int c)
   if (*p == ' ') {
     STRCPY(p, "<20>");
   }
-  size_t old_len = STRLEN(showcmd_buf);
+  size_t old_len = strlen(showcmd_buf);
   size_t extra_len = strlen(p);
   size_t limit = ui_has(kUIMessages) ? SHOWCMD_BUFLEN - 1 : SHOWCMD_COLS;
   if (old_len + extra_len > limit) {
@@ -2769,7 +2768,7 @@ static void nv_zet(cmdarg_T *cap)
   long old_fdl = curwin->w_p_fdl;
   int old_fen = curwin->w_p_fen;
 
-  int l_p_siso = (int)get_sidescrolloff_value(curwin);
+  int siso = (int)get_sidescrolloff_value(curwin);
 
   if (ascii_isdigit(nchar) && !nv_z_get_count(cap, &nchar)) {
     return;
@@ -2899,8 +2898,8 @@ static void nv_zet(cmdarg_T *cap)
       } else {
         getvcol(curwin, &curwin->w_cursor, &col, NULL, NULL);
       }
-      if (col > l_p_siso) {
-        col -= l_p_siso;
+      if (col > siso) {
+        col -= siso;
       } else {
         col = 0;
       }
@@ -2920,10 +2919,10 @@ static void nv_zet(cmdarg_T *cap)
         getvcol(curwin, &curwin->w_cursor, NULL, NULL, &col);
       }
       n = curwin->w_width_inner - curwin_col_off();
-      if (col + l_p_siso < n) {
+      if (col + siso < n) {
         col = 0;
       } else {
-        col = col + l_p_siso - n + 1;
+        col = col + siso - n + 1;
       }
       if (curwin->w_leftcol != col) {
         curwin->w_leftcol = col;
@@ -3499,7 +3498,7 @@ static void nv_ident(cmdarg_T *cap)
       p = vim_strsave_fnameescape((const char *)ptr, VSE_NONE);
     } else {
       // Escape the argument properly for a shell command
-      p = (char *)vim_strsave_shellescape((char_u *)ptr, true, true);
+      p = vim_strsave_shellescape(ptr, true, true);
     }
     xfree(ptr);
     char *newbuf = xrealloc(buf, strlen(buf) + strlen(p) + 1);

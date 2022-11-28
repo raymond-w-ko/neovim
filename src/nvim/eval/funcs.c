@@ -5245,7 +5245,7 @@ static void max_min(const typval_T *const tv, typval_T *const rettv, const bool 
     TV_LIST_ITER_CONST(tv->vval.v_list, li, {
       const varnumber_T i = tv_get_number_chk(TV_LIST_ITEM_TV(li), &error);
       if (error) {
-        return;
+        return;  // type error; errmsg already given
       }
       if (domax ? i > n : i < n) {
         n = i;
@@ -5258,7 +5258,7 @@ static void max_min(const typval_T *const tv, typval_T *const rettv, const bool 
     TV_DICT_ITER(tv->vval.v_dict, di, {
       const varnumber_T i = tv_get_number_chk(&di->di_tv, &error);
       if (error) {
-        return;
+        return;  // type error; errmsg already given
       }
       if (domax ? i > n : i < n) {
         n = i;
@@ -5268,6 +5268,7 @@ static void max_min(const typval_T *const tv, typval_T *const rettv, const bool 
     semsg(_(e_listdictarg), domax ? "max()" : "min()");
     return;
   }
+
   rettv->vval.v_number = n;
 }
 
@@ -7995,8 +7996,7 @@ static void f_shellescape(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   const bool do_special = non_zero_arg(&argvars[1]);
 
   rettv->vval.v_string =
-    (char *)vim_strsave_shellescape((const char_u *)tv_get_string(&argvars[0]), do_special,
-                                    do_special);
+    vim_strsave_shellescape(tv_get_string(&argvars[0]), do_special, do_special);
   rettv->v_type = VAR_STRING;
 }
 
