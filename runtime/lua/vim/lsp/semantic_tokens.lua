@@ -323,7 +323,9 @@ function STHighlighter:process_response(response, client, version)
     local idx = 1
     for _, token_edit in ipairs(token_edits) do
       vim.list_extend(tokens, old_tokens, idx, token_edit.start)
-      vim.list_extend(tokens, token_edit.data)
+      if token_edit.data then
+        vim.list_extend(tokens, token_edit.data)
+      end
       idx = token_edit.start + token_edit.deleteCount + 1
     end
     vim.list_extend(tokens, old_tokens, idx)
@@ -583,6 +585,51 @@ function M.stop(bufnr, client_id)
   if vim.tbl_isempty(highlighter.client_state) then
     highlighter:destroy()
   end
+end
+
+--- Return the semantic token(s) at the given position.
+--- If called without arguments, returns the token under the cursor.
+---
+---@param bufnr number|nil Buffer number (0 for current buffer, default)
+---@param row number|nil Position row (default cursor position)
+---@param col number|nil Position column (default cursor position)
+---
+---@return table|nil (table|nil) List of tokens at position
+function M.get_at_pos(bufnr, row, col)
+  if bufnr == nil or bufnr == 0 then
+    bufnr = api.nvim_get_current_buf()
+  end
+
+  local highlighter = STHighlighter.active[bufnr]
+  if not highlighter then
+    return
+  end
+
+  if row == nil or col == nil then
+    local cursor = api.nvim_win_get_cursor(0)
+    row, col = cursor[1] - 1, cursor[2]
+  end
+
+  local tokens = {}
+  for client_id, client in pairs(highlighter.client_state) do
+    local highlights = client.current_result.highlights
+    if highlights then
+      local idx = binary_search(highlights, row)
+      for i = idx, #highlights do
+        local token = highlights[i]
+
+        if token.line > row then
+          break
+        end
+
+        if token.start_col <= col and token.end_col > col then
+          token.client_id = client_id
+          tokens[#tokens + 1] = token
+        end
+      end
+    end
+  end
+  return tokens
 end
 
 --- Force a refresh of all semantic tokens

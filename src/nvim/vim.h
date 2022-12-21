@@ -201,7 +201,6 @@ enum { FOLD_TEXT_LEN = 51, };  //!< buffer size for get_foldtext()
 
 #define STRCPY(d, s)        strcpy((char *)(d), (char *)(s))  // NOLINT(runtime/printf)
 #define STRLCPY(d, s, n)    xstrlcpy((char *)(d), (char *)(s), (size_t)(n))
-#define STRNCMP(d, s, n)    strncmp((char *)(d), (char *)(s), (size_t)(n))
 #ifdef HAVE_STRCASECMP
 # define STRICMP(d, s)      strcasecmp((char *)(d), (char *)(s))
 #else
@@ -253,8 +252,8 @@ enum { FOLD_TEXT_LEN = 51, };  //!< buffer size for get_foldtext()
 // been seen at that stage.  But it must be before globals.h, where error_ga
 // is declared.
 #ifndef MSWIN
-# define mch_errmsg(str)        fprintf(stderr, "%s", (str))
-# define mch_msg(str)           printf("%s", (str))
+# define os_errmsg(str)        fprintf(stderr, "%s", (str))
+# define os_msg(str)           printf("%s", (str))
 #endif
 
 #include "nvim/buffer_defs.h"    // buffer and windows
