@@ -241,7 +241,7 @@ void ui_refresh(void)
   }
 
   if (ext_widgets[kUIMessages]) {
-    p_ch = 0;
+    set_option_value("cmdheight", 0L, NULL, 0);
     command_height();
   }
   ui_mode_info_set();
@@ -506,6 +506,7 @@ handle_T ui_cursor_grid(void)
 
 void ui_flush(void)
 {
+  assert(!ui_client_channel_id);
   if (!ui_active()) {
     return;
   }
