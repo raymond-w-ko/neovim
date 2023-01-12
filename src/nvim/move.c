@@ -379,12 +379,19 @@ static bool check_top_offset(void)
   return false;
 }
 
+/// Update w_curswant.
+void update_curswant_force(void)
+{
+  validate_virtcol();
+  curwin->w_curswant = curwin->w_virtcol;
+  curwin->w_set_curswant = false;
+}
+
+/// Update w_curswant if w_set_curswant is set.
 void update_curswant(void)
 {
   if (curwin->w_set_curswant) {
-    validate_virtcol();
-    curwin->w_curswant = curwin->w_virtcol;
-    curwin->w_set_curswant = false;
+    update_curswant_force();
   }
 }
 
@@ -649,7 +656,8 @@ void validate_cursor_col(void)
 // fold column and sign column (these don't move when scrolling horizontally).
 int win_col_off(win_T *wp)
 {
-  return ((wp->w_p_nu || wp->w_p_rnu) ? number_width(wp) + 1 : 0)
+  return ((wp->w_p_nu || wp->w_p_rnu || (*wp->w_p_stc != NUL)) ?
+          (number_width(wp) + (*wp->w_p_stc == NUL)) : 0)
          + (cmdwin_type == 0 || wp != curwin ? 0 : 1)
          + win_fdccol_count(wp)
          + (win_signcol_count(wp) * win_signcol_width(wp));

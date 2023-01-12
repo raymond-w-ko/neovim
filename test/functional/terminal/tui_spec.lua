@@ -626,37 +626,35 @@ describe('TUI', function()
       tabnew
       highlight Tabline ctermbg=NONE ctermfg=NONE cterm=underline
     ]])
-    local attrs = screen:get_default_attr_ids()
-    attrs[11] = {underline = true}
     screen:expect([[
-      {11: + [No Name]  + [No Name] }{3: [No Name] }{1:            }{11:X}|
+      {12: + [No Name]  + [No Name] }{3: [No Name] }{1:            }{12:X}|
       {1: }                                                 |
       {4:~                                                 }|
       {4:~                                                 }|
       {5:[No Name]                                         }|
                                                         |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
     feed_data('\027[57421;5u') -- CTRL + KP_PAGE_UP
     screen:expect([[
-      {11: + [No Name] }{3: + [No Name] }{11: [No Name] }{1:            }{11:X}|
+      {12: + [No Name] }{3: + [No Name] }{12: [No Name] }{1:            }{12:X}|
       0123456789/*-{1:+}                                    |
       =                                                 |
       {4:~                                                 }|
       {5:[No Name] [+]                                     }|
                                                         |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
     feed_data('\027[57422;5u') -- CTRL + KP_PAGE_DOWN
     screen:expect([[
-      {11: + [No Name]  + [No Name] }{3: [No Name] }{1:            }{11:X}|
+      {12: + [No Name]  + [No Name] }{3: [No Name] }{1:            }{12:X}|
       {1: }                                                 |
       {4:~                                                 }|
       {4:~                                                 }|
       {5:[No Name]                                         }|
                                                         |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
   end)
 
   it('mouse events work with right-click menu', function()
@@ -671,31 +669,28 @@ describe('TUI', function()
       highlight Pmenu ctermbg=NONE ctermfg=NONE cterm=underline,reverse
       highlight PmenuSel ctermbg=NONE ctermfg=NONE cterm=underline,reverse,bold
     ]])
-    local attrs = screen:get_default_attr_ids()
-    attrs[11] = {underline = true, reverse = true}
-    attrs[12] = {underline = true, reverse = true, bold = true}
     meths.input_mouse('right', 'press', '', 0, 0, 4)
     screen:expect([[
       {1:p}opup menu test                                   |
-      {4:~  }{11: foo }{4:                                          }|
-      {4:~  }{11: bar }{4:                                          }|
-      {4:~  }{11: baz }{4:                                          }|
+      {4:~  }{13: foo }{4:                                          }|
+      {4:~  }{13: bar }{4:                                          }|
+      {4:~  }{13: baz }{4:                                          }|
       {5:[No Name] [+]                                     }|
                                                         |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
     meths.input_mouse('right', 'release', '', 0, 0, 4)
     screen:expect_unchanged()
     meths.input_mouse('move', '', '', 0, 3, 6)
     screen:expect([[
       {1:p}opup menu test                                   |
-      {4:~  }{11: foo }{4:                                          }|
-      {4:~  }{11: bar }{4:                                          }|
-      {4:~  }{12: baz }{4:                                          }|
+      {4:~  }{13: foo }{4:                                          }|
+      {4:~  }{13: bar }{4:                                          }|
+      {4:~  }{14: baz }{4:                                          }|
       {5:[No Name] [+]                                     }|
                                                         |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
     meths.input_mouse('left', 'press', '', 0, 2, 6)
     screen:expect([[
       {1:p}opup menu test                                   |
@@ -705,7 +700,7 @@ describe('TUI', function()
       {5:[No Name] [+]                                     }|
       :let g:menustr = 'bar'                            |
       {3:-- TERMINAL --}                                    |
-    ]], attrs)
+    ]])
     meths.input_mouse('left', 'release', '', 0, 2, 6)
     screen:expect_unchanged()
   end)
@@ -1405,18 +1400,14 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider ambiguous-width characters than host terminal #19686', function()
-    child_session:request('nvim_buf_set_lines', 0, 0, 0, true, { ('℃'):rep(60), ('℃'):rep(60) })
+    child_session:request('nvim_buf_set_lines', 0, 0, -1, true, { ('℃'):rep(60), ('℃'):rep(60) })
     child_session:request('nvim_win_set_option', 0, 'cursorline', true)
     child_session:request('nvim_win_set_option', 0, 'list', true)
     child_session:request('nvim_win_set_option', 0, 'listchars', 'eol:$')
-    local attrs = screen:get_default_attr_ids()
-    attrs[11] = {underline = true}  -- CursorLine
-    attrs[12] = {underline = true, reverse = true}  -- CursorLine and TermCursor
-    attrs[13] = {underline = true, foreground = 12}  -- CursorLine and NonText
     feed_data('gg')
     local singlewidth_screen = [[
-      {12:℃}{11:℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃}|
-      {11:℃℃℃℃℃℃℃℃℃℃}{13:$}{11:                                       }|
+      {13:℃}{12:℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃}|
+      {12:℃℃℃℃℃℃℃℃℃℃}{15:$}{12:                                       }|
       ℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃℃|
       ℃℃℃℃℃℃℃℃℃℃{4:$}                                       |
       {5:[No Name] [+]                                     }|
@@ -1426,48 +1417,83 @@ describe('TUI', function()
     -- When grid assumes "℃" to be double-width but host terminal assumes it to be single-width, the
     -- second cell of "℃" is a space and the attributes of the "℃" are applied to it.
     local doublewidth_screen = [[
-      {12:℃}{11: ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }|
-      {11:℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }|
-      {11:℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }{13:$}{11:                             }|
+      {13:℃}{12: ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }|
+      {12:℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }|
+      {12:℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ }{15:$}{12:                             }|
       ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ ℃ >{4:@@@}|
       {5:[No Name] [+]                                     }|
                                                         |
       {3:-- TERMINAL --}                                    |
     ]]
-    screen:expect(singlewidth_screen, attrs)
+    screen:expect(singlewidth_screen)
     child_session:request('nvim_set_option', 'ambiwidth', 'double')
-    screen:expect(doublewidth_screen, attrs)
+    screen:expect(doublewidth_screen)
     child_session:request('nvim_set_option', 'ambiwidth', 'single')
-    screen:expect(singlewidth_screen, attrs)
+    screen:expect(singlewidth_screen)
     child_session:request('nvim_call_function', 'setcellwidths', {{{0x2103, 0x2103, 2}}})
-    screen:expect(doublewidth_screen, attrs)
+    screen:expect(doublewidth_screen)
     child_session:request('nvim_call_function', 'setcellwidths', {{{0x2103, 0x2103, 1}}})
-    screen:expect(singlewidth_screen, attrs)
+    screen:expect(singlewidth_screen)
   end)
 
   it('draws correctly when cursor_address overflows #21643', function()
-    helpers.skip(helpers.is_ci('github'), 'FIXME: flaky on GitHub CI')
-    screen:try_resize(75, 60)
-    -- The composing character takes 3 bytes.
-    local composing = ('a︠'):sub(2)
-    -- The composed character takes 1 + 5 * 3 = 16 bytes.
-    local c = 'a' .. composing:rep(5)
+    helpers.skip(helpers.is_os('mac'), 'FIXME: crashes/errors on macOS')
+    screen:try_resize(77, 834)
+    retry(nil, nil, function()
+      eq({true, 831}, {child_session:request('nvim_win_get_height', 0)})
+    end)
+    -- Use full screen message so that redrawing afterwards is more deterministic.
+    child_session:notify('nvim_command', 'intro')
+    screen:expect({any = 'Nvim'})
     -- Going to top-left corner needs 3 bytes.
-    -- With screen width 75, 4088 characters need 54 full screen lines.
-    -- Drawing each full screen line needs 75 * 16 + 2 = 1202 bytes (2 bytes for CR LF).
-    -- The incomplete screen line needs 38 * 16 + 8 + 3 = 619 bytes.
-    -- The whole line needs 3 + 54 * 1202 + 619 = 65530 bytes.
+    -- Setting underline attribute needs 9 bytes.
+    -- With screen width 77, 63857 characters need 829 full screen lines.
+    -- Drawing each full screen line needs 77 + 2 = 79 bytes (2 bytes for CR LF).
+    -- The incomplete screen line needs 24 + 3 = 27 bytes.
+    -- The whole line needs 3 + 9 + 79 * 829 + 27 = 65530 bytes.
     -- The cursor_address that comes after will overflow the 65535-byte buffer.
-    local line = c:rep(4088) .. ('b'):rep(8) .. '℃'
-    child_session:request('nvim_buf_set_lines', 0, 0, -1, true, {line, 'c'})
+    local line = ('a'):rep(63857) .. '℃'
+    child_session:notify('nvim_exec_lua', [[
+      vim.api.nvim_buf_set_lines(0, 0, -1, true, {...})
+      vim.o.cursorline = true
+    ]], {line, 'b'})
+    -- Close the :intro message and redraw the lines.
+    feed_data('\n')
     screen:expect(
-      '{1:' .. c .. '}' .. c:rep(74) .. '|\n' .. (c:rep(75) .. '|\n'):rep(53)
-      .. c:rep(38) .. ('b'):rep(8) .. '℃' .. (' '):rep(28) .. '|\n' .. dedent([[
-      c                                                                          |
-      {4:~                                                                          }|
-      {5:[No Name] [+]                                                              }|
-                                                                                 |
-      {3:-- TERMINAL --}                                                             |]]))
+      '{13:a}{12:' .. ('a'):rep(76) .. '}|\n'
+      .. ('{12:' .. ('a'):rep(77) .. '}|\n'):rep(828)
+      .. '{12:' .. ('a'):rep(24) .. '℃' .. (' '):rep(52) .. '}|\n' .. dedent([[
+      b                                                                            |
+      {5:[No Name] [+]                                                                }|
+                                                                                   |
+      {3:-- TERMINAL --}                                                               |]]))
+  end)
+
+  it('visual bell (padding) does not crash #21610', function()
+    feed_data ':set visualbell\n'
+    screen:expect{grid=[[
+      {1: }                                                 |
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {5:[No Name]                                         }|
+      :set visualbell                                   |
+      {3:-- TERMINAL --}                                    |
+    ]]}
+
+    -- move left is enough to invoke the bell
+    feed_data 'h'
+    -- visual change to show we process events after this
+    feed_data 'i'
+    screen:expect{grid=[[
+      {1: }                                                 |
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {5:[No Name]                                         }|
+      {3:-- INSERT --}                                      |
+      {3:-- TERMINAL --}                                    |
+    ]]}
   end)
 end)
 

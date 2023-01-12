@@ -648,7 +648,7 @@ wingotofile:
 
 static void cmd_with_count(char *cmd, char *bufp, size_t bufsize, int64_t Prenum)
 {
-  size_t len = STRLCPY(bufp, cmd, bufsize);
+  size_t len = xstrlcpy(bufp, cmd, bufsize);
 
   if (Prenum > 0 && len < bufsize) {
     vim_snprintf(bufp + len, bufsize - len, "%" PRId64, Prenum);
@@ -786,6 +786,12 @@ void win_set_minimal_style(win_T *wp)
     free_string_option(wp->w_p_cc);
     wp->w_p_cc = xstrdup("");
   }
+
+  // statuscolumn: cleared
+  if (wp->w_p_stc != NULL && *wp->w_p_stc != NUL) {
+    free_string_option(wp->w_p_stc);
+    wp->w_p_stc = xstrdup("");
+  }
 }
 
 void win_config_float(win_T *wp, FloatConfig fconfig)
@@ -798,6 +804,15 @@ void win_config_float(win_T *wp, FloatConfig fconfig)
     fconfig.row += curwin->w_wrow;
     fconfig.col += curwin->w_wcol;
     fconfig.window = curwin->handle;
+  } else if (fconfig.relative == kFloatRelativeMouse) {
+    int row = mouse_row, col = mouse_col, grid = mouse_grid;
+    win_T *mouse_win = mouse_find_win(&grid, &row, &col);
+    if (mouse_win != NULL) {
+      fconfig.relative = kFloatRelativeWindow;
+      fconfig.row += row;
+      fconfig.col += col;
+      fconfig.window = mouse_win->handle;
+    }
   }
 
   bool change_external = fconfig.external != wp->w_float_config.external;
@@ -4879,7 +4894,7 @@ void fix_current_dir(void)
   // New directory is either the local directory of the window, tab or NULL.
   char *new_dir = curwin->w_localdir ? curwin->w_localdir : curtab->tp_localdir;
   char cwd[MAXPATHL];
-  if (os_dirname((char_u *)cwd, MAXPATHL) != OK) {
+  if (os_dirname(cwd, MAXPATHL) != OK) {
     cwd[0] = NUL;
   }
 
@@ -5093,6 +5108,9 @@ static void win_free(win_T *wp, tabpage_T *tp)
 
   stl_clear_click_defs(wp->w_winbar_click_defs, wp->w_winbar_click_defs_size);
   xfree(wp->w_winbar_click_defs);
+
+  stl_clear_click_defs(wp->w_statuscol_click_defs, wp->w_statuscol_click_defs_size);
+  xfree(wp->w_statuscol_click_defs);
 
   // Remove the window from the b_wininfo lists, it may happen that the
   // freed memory is re-used for another window.

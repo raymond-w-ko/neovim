@@ -477,12 +477,15 @@ static void newFoldLevelWin(win_T *wp)
 /// Apply 'foldlevel' to all folds that don't contain the cursor.
 void foldCheckClose(void)
 {
-  if (*p_fcl != NUL) {  // can only be "all" right now
-    checkupdate(curwin);
-    if (checkCloseRec(&curwin->w_folds, curwin->w_cursor.lnum,
-                      (int)curwin->w_p_fdl)) {
-      changed_window_setting();
-    }
+  if (*p_fcl == NUL) {
+    return;
+  }
+
+  // 'foldclose' can only be "all" right now
+  checkupdate(curwin);
+  if (checkCloseRec(&curwin->w_folds, curwin->w_cursor.lnum,
+                    (int)curwin->w_p_fdl)) {
+    changed_window_setting();
   }
 }
 
@@ -1005,15 +1008,18 @@ void foldAdjustVisual(void)
   if (hasFolding(start->lnum, &start->lnum, NULL)) {
     start->col = 0;
   }
-  if (hasFolding(end->lnum, NULL, &end->lnum)) {
-    ptr = ml_get(end->lnum);
-    end->col = (colnr_T)strlen(ptr);
-    if (end->col > 0 && *p_sel == 'o') {
-      end->col--;
-    }
-    // prevent cursor from moving on the trail byte
-    mb_adjust_cursor();
+
+  if (!hasFolding(end->lnum, NULL, &end->lnum)) {
+    return;
   }
+
+  ptr = ml_get(end->lnum);
+  end->col = (colnr_T)strlen(ptr);
+  if (end->col > 0 && *p_sel == 'o') {
+    end->col--;
+  }
+  // prevent cursor from moving on the trail byte
+  mb_adjust_cursor();
 }
 
 // cursor_foldstart() {{{2
@@ -1115,10 +1121,12 @@ static int foldLevelWin(win_T *wp, linenr_T lnum)
 /// Check if the folds in window "wp" are invalid and update them if needed.
 static void checkupdate(win_T *wp)
 {
-  if (wp->w_foldinvalid) {
-    foldUpdate(wp, (linenr_T)1, (linenr_T)MAXLNUM);     // will update all
-    wp->w_foldinvalid = false;
+  if (!wp->w_foldinvalid) {
+    return;
   }
+
+  foldUpdate(wp, (linenr_T)1, (linenr_T)MAXLNUM);     // will update all
+  wp->w_foldinvalid = false;
 }
 
 // setFoldRepeat() {{{2
@@ -1607,7 +1615,7 @@ static void foldAddMarker(buf_T *buf, pos_T pos, const char *marker, size_t mark
   STRCPY(newline, line);
   // Append the marker to the end of the line
   if (p == NULL || line_is_comment) {
-    STRLCPY(newline + line_len, marker, markerlen + 1);
+    xstrlcpy(newline + line_len, marker, markerlen + 1);
     added = markerlen;
   } else {
     STRCPY(newline + line_len, cms);
