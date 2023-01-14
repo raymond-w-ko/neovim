@@ -77,6 +77,9 @@ describe('statuscolumn', function()
       16│aaaaa                                             |
                                                            |
     ]])
+    command([[set stc=%l%=%{&rnu?'\ ':''}%r│]])
+    screen:expect_unchanged()
+    command([[set stc=%{&nu?v:lnum:''}%=%{&rnu?'\ '.v:relnum:''}│]])
     command('set relativenumber')
     screen:expect([[
       4  4│aaaaa                                           |
@@ -94,6 +97,9 @@ describe('statuscolumn', function()
       16 8│aaaaa                                           |
                                                            |
     ]])
+    command([[set stc=%l%=%{&rnu?'\ ':''}%r│]])
+    screen:expect_unchanged()
+    command([[set stc=%{&nu?v:lnum:''}%=%{&rnu?'\ '.v:relnum:''}│]])
     command('norm 12GH')
     screen:expect([[
       4   0│^aaaaa                                          |
@@ -111,6 +117,9 @@ describe('statuscolumn', function()
       16 12│aaaaa                                          |
                                                            |
     ]])
+    command([[set stc=%l%=%{&rnu?'\ ':''}%r│]])
+    screen:expect_unchanged()
+    command([[set stc=%{&nu?v:lnum:''}%=%{&rnu?'\ '.v:relnum:''}│]])
   end)
 
   it('works with highlighted \'statuscolumn\'', function()
@@ -366,6 +375,14 @@ describe('statuscolumn', function()
     eq('0 3 r 7', eval("g:testvar"))
     meths.input_mouse('right', 'press', '', 0, 3, 0)
     eq('0 4 r 7', eval("g:testvar"))
+    command('set laststatus=2 winbar=%f')
+    command('let g:testvar=""')
+    -- Check that winbar click doesn't register as statuscolumn click
+    meths.input_mouse('right', 'press', '', 0, 0, 0)
+    eq('', eval("g:testvar"))
+    -- Check that statusline click doesn't register as statuscolumn click
+    meths.input_mouse('right', 'press', '', 0, 12, 0)
+    eq('', eval("g:testvar"))
   end)
 
   it('fits maximum multibyte foldcolumn #21759', function()
