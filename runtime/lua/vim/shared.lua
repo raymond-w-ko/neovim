@@ -60,6 +60,7 @@ end)()
 --- Splits a string at each instance of a separator.
 ---
 ---@see |vim.split()|
+---@see |luaref-patterns|
 ---@see https://www.lua.org/pil/20.2.html
 ---@see http://lua-users.org/wiki/StringLibraryTutorial
 ---
@@ -457,6 +458,33 @@ function vim.tbl_flatten(t)
   return result
 end
 
+--- Enumerate a table sorted by its keys.
+---
+---@see Based on https://github.com/premake/premake-core/blob/master/src/base/table.lua
+---
+---@param t table List-like table
+---@return iterator over sorted keys and their values
+function vim.spairs(t)
+  assert(type(t) == 'table', string.format('Expected table, got %s', type(t)))
+
+  -- collect the keys
+  local keys = {}
+  for k in pairs(t) do
+    table.insert(keys, k)
+  end
+  table.sort(keys)
+
+  -- Return the iterator function.
+  -- TODO(justinmk): Return "iterator function, table {t}, and nil", like pairs()?
+  local i = 0
+  return function()
+    i = i + 1
+    if keys[i] then
+      return keys[i], t[keys[i]]
+    end
+  end
+end
+
 --- Tests if a Lua table can be treated as an array.
 ---
 --- Empty table `{}` is assumed to be an array, unless it was created by
@@ -529,6 +557,7 @@ end
 
 --- Trim whitespace (Lua pattern "%s") from both sides of a string.
 ---
+---@see |luaref-patterns|
 ---@see https://www.lua.org/pil/20.2.html
 ---@param s string String to trim
 ---@return string String with whitespace removed from its beginning and end

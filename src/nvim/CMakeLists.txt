@@ -34,12 +34,9 @@ find_package(LIBVTERM 0.3 REQUIRED)
 target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LIBVTERM_INCLUDE_DIRS})
 target_link_libraries(main_lib INTERFACE ${LIBVTERM_LIBRARIES})
 
-if(Iconv_FOUND)
-  target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${Iconv_INCLUDE_DIRS})
-  if(Iconv_LIBRARIES)
-    target_link_libraries(main_lib INTERFACE ${Iconv_LIBRARIES})
-  endif()
-endif()
+find_package(Iconv REQUIRED)
+target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${Iconv_INCLUDE_DIRS})
+target_link_libraries(main_lib INTERFACE ${Iconv_LIBRARIES})
 
 option(ENABLE_LIBINTL "enable libintl" ON)
 if(ENABLE_LIBINTL)
@@ -65,30 +62,32 @@ else()
   target_link_libraries(main_lib INTERFACE ${LUAJIT_LIBRARIES})
 endif()
 
-# Determine platform's threading library. Set CMAKE_THREAD_PREFER_PTHREAD
-# explicitly to indicate a strong preference for pthread.
-set(CMAKE_THREAD_PREFER_PTHREAD ON)
-find_package(Threads REQUIRED)
-target_link_libraries(main_lib INTERFACE ${CMAKE_THREAD_LIBS_INIT})
-
 option(ENABLE_IWYU "Run include-what-you-use with the compiler." OFF)
 if(ENABLE_IWYU)
   find_program(IWYU_PRG NAMES include-what-you-use iwyu)
   if(NOT IWYU_PRG)
     message(FATAL_ERROR "ENABLE_IWYU is ON but include-what-you-use is not found!")
   endif()
-  set(CMAKE_C_INCLUDE_WHAT_YOU_USE ${IWYU_PRG}
-    -Xiwyu --mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/mapping.imp
-    -Xiwyu --mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/gcc.libc.imp
-    -Xiwyu --mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/gcc.symbols.imp
-    -Xiwyu --no_default_mappings)
+
+  set(iwyu_flags "${IWYU_PRG};")
+  string(APPEND iwyu_flags "-Xiwyu;--no_default_mappings;")
+  string(APPEND iwyu_flags "-Xiwyu;--mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/mapping.imp;")
+  string(APPEND iwyu_flags "-Xiwyu;--mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/gcc.libc.imp;")
+  string(APPEND iwyu_flags "-Xiwyu;--mapping_file=${PROJECT_SOURCE_DIR}/cmake.config/iwyu/gcc.symbols.imp")
+
+  set_target_properties(nvim PROPERTIES C_INCLUDE_WHAT_YOU_USE "${iwyu_flags}")
   target_compile_definitions(main_lib INTERFACE EXITFREE)
 endif()
 
 if(MSVC)
-  # XXX: /W4 gives too many warnings. #3241
-  target_compile_options(main_lib INTERFACE -W1 -wd4311)
+  # TODO(dundargoc): bump warning level
+  target_compile_options(main_lib INTERFACE -W2)
+
+  # Disable warnings that give too many false positives.
+  target_compile_options(main_lib INTERFACE -wd4311 -wd4146)
   target_compile_definitions(main_lib INTERFACE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+
+  target_sources(main_lib INTERFACE ${CMAKE_CURRENT_LIST_DIR}/os/nvim.manifest)
 else()
   target_compile_options(main_lib INTERFACE -Wall -Wextra -pedantic -Wno-unused-parameter
     -Wstrict-prototypes -std=gnu99 -Wshadow -Wconversion
@@ -452,8 +451,11 @@ endforeach()
 
 list(REMOVE_ITEM NVIM_SOURCES ${to_remove})
 
-if(NOT MSVC)
-  # xdiff, mpack, lua-cjson: inlined external project, we don't maintain it. #9306
+# xdiff, mpack, lua-cjson: inlined external project, we don't maintain it. #9306
+if(MSVC)
+  set_source_files_properties(
+    ${EXTERNAL_SOURCES} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} /wd4090 /wd4244")
+else()
   set_source_files_properties(
     ${EXTERNAL_SOURCES} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -Wno-conversion -Wno-missing-noreturn -Wno-missing-format-attribute -Wno-double-promotion -Wno-strict-prototypes")
 endif()
@@ -561,11 +563,11 @@ add_custom_command(OUTPUT ${GENERATED_UNICODE_TABLES}
 add_custom_command(
   OUTPUT ${GENERATED_API_DISPATCH} ${GENERATED_FUNCS_METADATA}
          ${API_METADATA} ${LUA_API_C_BINDINGS}
-  COMMAND ${LUA_PRG} ${API_DISPATCH_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}
-                     ${GENERATED_API_DISPATCH}
-                     ${GENERATED_FUNCS_METADATA} ${API_METADATA}
-                     ${LUA_API_C_BINDINGS}
-                     ${API_HEADERS}
+  COMMAND ${LUA_GEN_PRG} ${API_DISPATCH_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}
+                         ${GENERATED_API_DISPATCH}
+                         ${GENERATED_FUNCS_METADATA} ${API_METADATA}
+                         ${LUA_API_C_BINDINGS}
+                         ${API_HEADERS}
   DEPENDS
     ${API_HEADERS}
     ${MSGPACK_RPC_HEADERS}
@@ -610,12 +612,12 @@ add_custom_command(
          ${GENERATED_UI_EVENTS_REMOTE}
          ${GENERATED_UI_EVENTS_METADATA}
          ${GENERATED_UI_EVENTS_CLIENT}
-  COMMAND ${LUA_PRG} ${API_UI_EVENTS_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}
-                     ${CMAKE_CURRENT_LIST_DIR}/api/ui_events.in.h
-                     ${GENERATED_UI_EVENTS_CALL}
-                     ${GENERATED_UI_EVENTS_REMOTE}
-                     ${GENERATED_UI_EVENTS_METADATA}
-                     ${GENERATED_UI_EVENTS_CLIENT}
+  COMMAND ${LUA_GEN_PRG} ${API_UI_EVENTS_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}
+                         ${CMAKE_CURRENT_LIST_DIR}/api/ui_events.in.h
+                         ${GENERATED_UI_EVENTS_CALL}
+                         ${GENERATED_UI_EVENTS_REMOTE}
+                         ${GENERATED_UI_EVENTS_METADATA}
+                         ${GENERATED_UI_EVENTS_CLIENT}
   DEPENDS
     ${API_UI_EVENTS_GENERATOR}
     ${GENERATOR_C_GRAMMAR}
@@ -681,8 +683,6 @@ foreach(hfile ${NVIM_GENERATED_FOR_HEADERS})
     message(FATAL_ERROR "File included in both NVIM_GENERATED_FOR_HEADERS and NVIM_GENERATED_FOR_SOURCES")
   endif()
 endforeach()
-
-# Our dependencies come first.
 
 if (CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
   target_link_libraries(main_lib INTERFACE pthread c++abi)
@@ -852,7 +852,6 @@ endif()
 set_target_properties(
   libnvim
   PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME ${LIBNVIM_NAME}
 )
 target_compile_definitions(libnvim PRIVATE MAKE_LIB)
@@ -876,11 +875,6 @@ else()
     target_link_libraries(nvim-test PRIVATE "-framework CoreServices")
   endif()
   target_include_directories(nvim-test PRIVATE ${LUAJIT_INCLUDE_DIRS})
-  set_target_properties(
-    nvim-test
-    PROPERTIES
-      POSITION_INDEPENDENT_CODE ON
-  )
   target_compile_definitions(nvim-test PRIVATE UNIT_TESTING)
 endif()
 
@@ -974,7 +968,9 @@ add_glob_target(
   TARGET lintc-clint
   COMMAND ${PROJECT_SOURCE_DIR}/src/clint.py
   FLAGS --output=${LINT_OUTPUT_FORMAT}
-  FILES ${LINT_NVIM_SOURCES})
+  FILES ${LINT_NVIM_SOURCES}
+  EXCLUDE
+    tui/terminfo_defs.h)
 
 add_custom_target(uncrustify-version
   COMMAND ${CMAKE_COMMAND}

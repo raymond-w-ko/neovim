@@ -12,6 +12,7 @@
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/cursor.h"
 #include "nvim/eval/funcs.h"
 #include "nvim/eval/typval.h"
@@ -139,6 +140,8 @@ void win_findbuf(typval_T *argvars, list_T *list)
 /// Find window specified by "vp" in tabpage "tp".
 ///
 /// @param tp  NULL for current tab page
+/// @return  current window if "vp" is number zero.
+///          NULL if not found.
 win_T *find_win_by_nr(typval_T *vp, tabpage_T *tp)
 {
   int nr = (int)tv_get_number_chk(vp, NULL);

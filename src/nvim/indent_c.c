@@ -23,7 +23,6 @@
 #include "nvim/pos.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
 #include "nvim/vim.h"
 
 // Find result cache for cpp_baseclass
@@ -705,7 +704,7 @@ static int cin_get_equal_amount(linenr_T lnum)
 
   s = ml_get(lnum);
   line = s;
-  while (*s != NUL && vim_strchr("=;{}\"'", *s) == NULL) {
+  while (*s != NUL && vim_strchr("=;{}\"'", (uint8_t)(*s)) == NULL) {
     if (cin_iscomment(s)) {     // ignore comments
       s = cin_skipcomment(s);
     } else {

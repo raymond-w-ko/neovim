@@ -78,19 +78,19 @@ static void pum_compute_size(void)
   for (int i = 0; i < pum_size; i++) {
     int w;
     if (pum_array[i].pum_text != NULL) {
-      w = vim_strsize((char *)pum_array[i].pum_text);
+      w = vim_strsize(pum_array[i].pum_text);
       if (pum_base_width < w) {
         pum_base_width = w;
       }
     }
     if (pum_array[i].pum_kind != NULL) {
-      w = vim_strsize((char *)pum_array[i].pum_kind) + 1;
+      w = vim_strsize(pum_array[i].pum_kind) + 1;
       if (pum_kind_width < w) {
         pum_kind_width = w;
       }
     }
     if (pum_array[i].pum_extra != NULL) {
-      w = vim_strsize((char *)pum_array[i].pum_extra) + 1;
+      w = vim_strsize(pum_array[i].pum_extra) + 1;
       if (pum_extra_width < w) {
         pum_extra_width = w;
       }
@@ -167,10 +167,10 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
         Array arr = arena_array(&arena, (size_t)size);
         for (int i = 0; i < size; i++) {
           Array item = arena_array(&arena, 4);
-          ADD_C(item, STRING_OBJ(cstr_as_string((char *)array[i].pum_text)));
-          ADD_C(item, STRING_OBJ(cstr_as_string((char *)array[i].pum_kind)));
-          ADD_C(item, STRING_OBJ(cstr_as_string((char *)array[i].pum_extra)));
-          ADD_C(item, STRING_OBJ(cstr_as_string((char *)array[i].pum_info)));
+          ADD_C(item, STRING_OBJ(cstr_as_string(array[i].pum_text)));
+          ADD_C(item, STRING_OBJ(cstr_as_string(array[i].pum_kind)));
+          ADD_C(item, STRING_OBJ(cstr_as_string(array[i].pum_extra)));
+          ADD_C(item, STRING_OBJ(cstr_as_string(array[i].pum_info)));
           ADD_C(arr, ARRAY_OBJ(item));
         }
         ui_call_popupmenu_show(arr, selected, pum_win_row, cursor_col,
@@ -218,11 +218,16 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
       // pum above "pum_win_row"
       pum_above = true;
 
-      // Leave two lines of context if possible
-      if (curwin->w_wrow - curwin->w_cline_row >= 2) {
-        context_lines = 2;
+      if (State == MODE_CMDLINE) {
+        // for cmdline pum, no need for context lines
+        context_lines = 0;
       } else {
-        context_lines = curwin->w_wrow - curwin->w_cline_row;
+        // Leave two lines of context if possible
+        if (curwin->w_wrow - curwin->w_cline_row >= 2) {
+          context_lines = 2;
+        } else {
+          context_lines = curwin->w_wrow - curwin->w_cline_row;
+        }
       }
 
       if (pum_win_row >= size + context_lines) {
@@ -241,13 +246,17 @@ void pum_display(pumitem_T *array, int size, int selected, bool array_changed, i
       // pum below "pum_win_row"
       pum_above = false;
 
-      // Leave two lines of context if possible
-      validate_cheight();
-      if (curwin->w_cline_row + curwin->w_cline_height - curwin->w_wrow >= 3) {
-        context_lines = 3;
+      if (State == MODE_CMDLINE) {
+        // for cmdline pum, no need for context lines
+        context_lines = 0;
       } else {
-        context_lines = curwin->w_cline_row
-                        + curwin->w_cline_height - curwin->w_wrow;
+        // Leave two lines of context if possible
+        validate_cheight();
+        if (curwin->w_cline_row + curwin->w_cline_height - curwin->w_wrow >= 3) {
+          context_lines = 3;
+        } else {
+          context_lines = curwin->w_cline_row + curwin->w_cline_height - curwin->w_wrow;
+        }
       }
 
       pum_row = pum_win_row + context_lines;
@@ -501,15 +510,15 @@ void pum_redraw(void)
 
       switch (round) {
       case 1:
-        p = (char *)pum_array[idx].pum_text;
+        p = pum_array[idx].pum_text;
         break;
 
       case 2:
-        p = (char *)pum_array[idx].pum_kind;
+        p = pum_array[idx].pum_kind;
         break;
 
       case 3:
-        p = (char *)pum_array[idx].pum_extra;
+        p = pum_array[idx].pum_extra;
         break;
       }
 
@@ -765,7 +774,7 @@ static bool pum_set_selected(int n, int repeat)
           char *p, *e;
           linenr_T lnum = 0;
 
-          for (p = (char *)pum_array[pum_selected].pum_info; *p != NUL;) {
+          for (p = pum_array[pum_selected].pum_info; *p != NUL;) {
             e = vim_strchr(p, '\n');
             if (e == NULL) {
               ml_append(lnum++, p, 0, false);
@@ -815,7 +824,7 @@ static bool pum_set_selected(int n, int repeat)
             // When the preview window was resized we need to
             // update the view on the buffer.  Only go back to
             // the window when needed, otherwise it will always be
-            // redraw.
+            // redrawn.
             if (resized) {
               no_u_sync++;
               win_enter(curwin_save, true);
@@ -878,6 +887,7 @@ void pum_check_clear(void)
       grid_free(&pum_grid);
     }
     pum_is_drawn = false;
+    pum_external = false;
   }
 }
 
@@ -1060,7 +1070,7 @@ void pum_show_popupmenu(vimmenu_T *menu)
     }
     if (s != NULL) {
       s = xstrdup(s);
-      array[idx++].pum_text = (char_u *)s;
+      array[idx++].pum_text = s;
     }
   }
 

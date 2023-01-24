@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -39,7 +40,6 @@
 #include "nvim/sign.h"
 #include "nvim/strings.h"
 #include "nvim/textobject.h"
-#include "nvim/types.h"
 #include "nvim/undo_defs.h"
 #include "nvim/vim.h"
 
@@ -653,29 +653,31 @@ fmark_T *getnextmark(pos_T *startpos, int dir, int begin_line)
 // until the mark is used to avoid a long startup delay.
 static void fname2fnum(xfmark_T *fm)
 {
-  if (fm->fname != NULL) {
-    // First expand "~/" in the file name to the home directory.
-    // Don't expand the whole name, it may contain other '~' chars.
+  if (fm->fname == NULL) {
+    return;
+  }
+
+  // First expand "~/" in the file name to the home directory.
+  // Don't expand the whole name, it may contain other '~' chars.
 #ifdef BACKSLASH_IN_FILENAME
-    if (fm->fname[0] == '~' && (fm->fname[1] == '/' || fm->fname[1] == '\\')) {
+  if (fm->fname[0] == '~' && (fm->fname[1] == '/' || fm->fname[1] == '\\')) {
 #else
-    if (fm->fname[0] == '~' && (fm->fname[1] == '/')) {
+  if (fm->fname[0] == '~' && (fm->fname[1] == '/')) {
 #endif
 
-      expand_env("~/", NameBuff, MAXPATHL);
-      int len = (int)strlen(NameBuff);
-      xstrlcpy(NameBuff + len, fm->fname + 2, (size_t)(MAXPATHL - len));
-    } else {
-      xstrlcpy(NameBuff, fm->fname, MAXPATHL);
-    }
-
-    // Try to shorten the file name.
-    os_dirname(IObuff, IOSIZE);
-    char *p = path_shorten_fname(NameBuff, IObuff);
-
-    // buflist_new() will call fmarks_check_names()
-    (void)buflist_new(NameBuff, p, (linenr_T)1, 0);
+    expand_env("~/", NameBuff, MAXPATHL);
+    int len = (int)strlen(NameBuff);
+    xstrlcpy(NameBuff + len, fm->fname + 2, (size_t)(MAXPATHL - len));
+  } else {
+    xstrlcpy(NameBuff, fm->fname, MAXPATHL);
   }
+
+  // Try to shorten the file name.
+  os_dirname(IObuff, IOSIZE);
+  char *p = path_shorten_fname(NameBuff, IObuff);
+
+  // buflist_new() will call fmarks_check_names()
+  (void)buflist_new(NameBuff, p, (linenr_T)1, 0);
 }
 
 // Check all file marks for a name that matches the file name in buf.
@@ -915,7 +917,7 @@ static void show_one_mark(int c, char *arg, pos_T *p, char *name_arg, int curren
 // ":delmarks[!] [marks]"
 void ex_delmarks(exarg_T *eap)
 {
-  char_u *p;
+  char *p;
   int from, to;
   int i;
   int lower;
@@ -931,14 +933,14 @@ void ex_delmarks(exarg_T *eap)
     emsg(_(e_argreq));
   } else {
     // clear specified marks only
-    for (p = (char_u *)eap->arg; *p != NUL; p++) {
+    for (p = eap->arg; *p != NUL; p++) {
       lower = ASCII_ISLOWER(*p);
       digit = ascii_isdigit(*p);
       if (lower || digit || ASCII_ISUPPER(*p)) {
         if (p[1] == '-') {
           // clear range of marks
-          from = *p;
-          to = p[2];
+          from = (uint8_t)(*p);
+          to = (uint8_t)p[2];
           if (!(lower ? ASCII_ISLOWER(p[2])
                 : (digit ? ascii_isdigit(p[2])
                    : ASCII_ISUPPER(p[2])))
@@ -949,7 +951,7 @@ void ex_delmarks(exarg_T *eap)
           p += 2;
         } else {
           // clear one lower case mark
-          from = to = *p;
+          from = to = (uint8_t)(*p);
         }
 
         for (i = from; i <= to; i++) {
@@ -1378,18 +1380,21 @@ void mark_col_adjust(linenr_T lnum, colnr_T mincol, linenr_T lnum_amount, long c
 
 // When deleting lines, this may create duplicate marks in the
 // jumplist. They will be removed here for the specified window.
-// When "checktail" is true, removes tail jump if it matches current position.
-void cleanup_jumplist(win_T *wp, bool checktail)
+// When "loadfiles" is true first ensure entries have the "fnum" field set
+// (this may be a bit slow).
+void cleanup_jumplist(win_T *wp, bool loadfiles)
 {
   int i;
 
-  // Load all the files from the jump list. This is
-  // needed to properly clean up duplicate entries, but will take some
-  // time.
-  for (i = 0; i < wp->w_jumplistlen; i++) {
-    if ((wp->w_jumplist[i].fmark.fnum == 0)
-        && (wp->w_jumplist[i].fmark.mark.lnum != 0)) {
-      fname2fnum(&wp->w_jumplist[i]);
+  if (loadfiles) {
+    // If specified, load all the files from the jump list. This is
+    // needed to properly clean up duplicate entries, but will take some
+    // time.
+    for (i = 0; i < wp->w_jumplistlen; i++) {
+      if ((wp->w_jumplist[i].fmark.fnum == 0)
+          && (wp->w_jumplist[i].fmark.mark.lnum != 0)) {
+        fname2fnum(&wp->w_jumplist[i]);
+      }
     }
   }
 
@@ -1437,8 +1442,8 @@ void cleanup_jumplist(win_T *wp, bool checktail)
 
   // When pointer is below last jump, remove the jump if it matches the current
   // line.  This avoids useless/phantom jumps. #9805
-  if (checktail && wp->w_jumplistlen
-      && wp->w_jumplistidx == wp->w_jumplistlen) {
+  if (loadfiles  // otherwise (i.e.: Shada), last entry should be kept
+      && wp->w_jumplistlen && wp->w_jumplistidx == wp->w_jumplistlen) {
     const xfmark_T *fm_last = &wp->w_jumplist[wp->w_jumplistlen - 1];
     if (fm_last->fmark.fnum == curbuf->b_fnum
         && fm_last->fmark.mark.lnum == wp->w_cursor.lnum) {

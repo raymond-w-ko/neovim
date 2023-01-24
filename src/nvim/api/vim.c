@@ -1834,7 +1834,7 @@ Dictionary nvim__stats(void)
 ///   - "width"   Requested width of the UI
 ///   - "rgb"     true if the UI uses RGB colors (false implies |cterm-colors|)
 ///   - "ext_..." Requested UI extensions, see |ui-option|
-///   - "chan"    Channel id of remote UI or 0 for TUI
+///   - "chan"    |channel-id| of remote UI
 Array nvim_list_uis(void)
   FUNC_API_SINCE(4)
 {
@@ -2271,7 +2271,7 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
       if (sp->userhl == 0) {
         grpname = get_default_stl_hl(wp, use_winbar);
       } else if (sp->userhl < 0) {
-        grpname = (char *)syn_id2name(-sp->userhl);
+        grpname = syn_id2name(-sp->userhl);
       } else {
         snprintf(user_group, sizeof(user_group), "User%d", sp->userhl);
         grpname = user_group;

@@ -53,7 +53,6 @@
 #include "nvim/search.h"
 #include "nvim/shada.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
 #include "nvim/version.h"
 #include "nvim/vim.h"
 
@@ -1341,7 +1340,7 @@ static void shada_read(ShaDaReadDef *const sd_reader, const int flags)
     case kSDItemBufferList:
       for (size_t i = 0; i < cur_entry.data.buffer_list.size; i++) {
         char *const sfname =
-          (char *)path_try_shorten_fname((char_u *)cur_entry.data.buffer_list.buffers[i].fname);
+          path_try_shorten_fname(cur_entry.data.buffer_list.buffers[i].fname);
         buf_T *const buf =
           buflist_new(cur_entry.data.buffer_list.buffers[i].fname, sfname, 0, BLN_LISTED);
         if (buf != NULL) {
@@ -1483,7 +1482,7 @@ static char *shada_filename(const char *file)
     if (p_shadafile != NULL && *p_shadafile != NUL) {
       file = p_shadafile;
     } else {
-      if ((file = (char *)find_shada_parameter('n')) == NULL || *file == NUL) {
+      if ((file = find_shada_parameter('n')) == NULL || *file == NUL) {
         file = shada_get_default_file();
       }
       // XXX It used to be one level lower, so that whatever is in
@@ -2668,8 +2667,6 @@ static ShaDaWriteResult shada_write(ShaDaWriteDef *const sd_writer, ShaDaReadDef
   }
 
   // Initialize jump list
-  setpcmark();
-  cleanup_jumplist(curwin, false);
   wms->jumps_size = shada_init_jumps(wms->jumps, &removable_bufs);
 
   const bool search_highlighted = !(no_hlsearch
@@ -4039,13 +4036,11 @@ static bool shada_removable(const char *name)
 static inline size_t shada_init_jumps(PossiblyFreedShadaEntry *jumps,
                                       khash_t(bufset) *const removable_bufs)
 {
-  if (!curwin->w_jumplistlen) {
-    return 0;
-  }
-
+  // Initialize jump list
   size_t jumps_size = 0;
   const void *jump_iter = NULL;
-
+  setpcmark();
+  cleanup_jumplist(curwin, false);
   do {
     xfmark_T fm;
     jump_iter = mark_jumplist_iter(jump_iter, curwin, &fm);
@@ -4118,7 +4113,6 @@ void shada_encode_jumps(msgpack_sbuffer *const sbuf)
   khash_t(bufset) removable_bufs = KHASH_EMPTY_TABLE(bufset);
   find_removable_bufs(&removable_bufs);
   PossiblyFreedShadaEntry jumps[JUMPLISTSIZE];
-  cleanup_jumplist(curwin, true);
   size_t jumps_size = shada_init_jumps(jumps, &removable_bufs);
   msgpack_packer packer;
   msgpack_packer_init(&packer, sbuf, msgpack_sbuffer_write);

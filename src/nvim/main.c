@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "auto/config.h"
 #include "nvim/arglist.h"
@@ -62,7 +61,6 @@
 #include "nvim/os/fileio.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
-#include "nvim/os/pty_process.h"
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/path.h"
@@ -97,7 +95,6 @@
 #include "nvim/msgpack_rpc/helpers.h"
 #include "nvim/msgpack_rpc/server.h"
 #include "nvim/os/signal.h"
-#include "nvim/tui/tui.h"
 
 // values for "window_layout"
 enum {
@@ -289,7 +286,13 @@ int main(int argc, char **argv)
     }
   }
 
-  bool use_builtin_ui = (!headless_mode && !embedded_mode && !silent_mode);
+#ifdef MSWIN
+  // on windows we use CONIN special file, thus we don't know this yet.
+  bool has_term = true;
+#else
+  bool has_term = (stdin_isatty || stdout_isatty || stderr_isatty);
+#endif
+  bool use_builtin_ui = (has_term && !headless_mode && !embedded_mode && !silent_mode);
 
   // don't bind the server yet, if we are using builtin ui.
   // This will be done when nvim server has been forked from the ui process
@@ -305,7 +308,7 @@ int main(int argc, char **argv)
   bool remote_ui = (ui_client_channel_id != 0);
 
   if (use_builtin_ui && !remote_ui) {
-    ui_client_forward_stdin = !params.input_isatty;
+    ui_client_forward_stdin = !stdin_isatty;
     uint64_t rv = ui_client_start_server(params.argc, params.argv);
     if (!rv) {
       os_errmsg("Failed to start Nvim server!\n");
@@ -362,8 +365,8 @@ int main(int argc, char **argv)
   debug_break_level = params.use_debug_break_level;
 
   // Read ex-commands if invoked with "-es".
-  if (!params.input_isatty && !params.input_istext && silent_mode && exmode_active) {
-    input_start(STDIN_FILENO);
+  if (!stdin_isatty && !params.input_istext && silent_mode && exmode_active) {
+    input_start();
   }
 
   if (ui_client_channel_id) {
@@ -542,7 +545,9 @@ int main(int argc, char **argv)
   if (params.diff_mode) {
     // set options in each window for "nvim -d".
     FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
-      diff_win_options(wp, true);
+      if (!wp->w_arg_idx_invalid) {
+        diff_win_options(wp, true);
+      }
     }
   }
 
@@ -579,6 +584,7 @@ int main(int argc, char **argv)
   if (use_builtin_ui) {
     os_icon_init();
   }
+  os_title_save();
 #endif
 
   // Adjust default register name for "unnamed" in 'clipboard'. Can only be
@@ -640,8 +646,8 @@ void os_exit(int r)
   if (!event_teardown() && r == 0) {
     r = 1;  // Exit with error if main_loop did not teardown gracefully.
   }
-  if (input_global_fd() >= 0) {
-    stream_set_blocking(input_global_fd(), true);  // normalize stream (#2598)
+  if (used_stdin) {
+    stream_set_blocking(STDIN_FILENO, true);  // normalize stream (#2598)
   }
 
   ILOG("Nvim exit: %d", r);
@@ -760,7 +766,7 @@ void getout(int exitval)
 
   // Apply 'titleold'.
   if (p_title && *p_titleold != NUL) {
-    ui_call_set_title(cstr_as_string((char *)p_titleold));
+    ui_call_set_title(cstr_as_string(p_titleold));
   }
 
   if (garbage_collect_at_exit) {
@@ -770,6 +776,7 @@ void getout(int exitval)
 #ifdef MSWIN
   // Restore Windows console icon before exiting.
   os_icon_set(NULL, NULL);
+  os_title_reset();
 #endif
 
   os_exit(exitval);
@@ -786,9 +793,9 @@ void preserve_exit(void)
 
   // Prevent repeated calls into this method.
   if (really_exiting) {
-    if (input_global_fd() >= 0) {
+    if (used_stdin) {
       // normalize stream (#2598)
-      stream_set_blocking(input_global_fd(), true);
+      stream_set_blocking(STDIN_FILENO, true);
     }
     exit(2);
   }
@@ -880,7 +887,7 @@ static void remote_request(mparm_T *params, int remote_args, char *server_addr, 
       os_errmsg("Remote ui failed to start: ");
       os_errmsg(connect_error);
       os_errmsg("\n");
-      exit(1);
+      os_exit(1);
     }
 
     ui_client_channel_id = chan;
@@ -964,7 +971,7 @@ static bool edit_stdin(mparm_T *parmp)
   bool implicit = !headless_mode
                   && !(embedded_mode && stdin_fd <= 0)
                   && (!exmode_active || parmp->input_istext)
-                  && !parmp->input_isatty
+                  && !stdin_isatty
                   && parmp->scriptin == NULL;  // `-s -` was not given.
   return parmp->had_stdin_file || implicit;
 }
@@ -1450,11 +1457,9 @@ static void init_startuptime(mparm_T *paramp)
 
 static void check_and_set_isatty(mparm_T *paramp)
 {
-  stdin_isatty
-    = paramp->input_isatty = os_isatty(STDIN_FILENO);
-  stdout_isatty
-    = paramp->output_isatty = os_isatty(STDOUT_FILENO);
-  paramp->err_isatty = os_isatty(STDERR_FILENO);
+  stdin_isatty = os_isatty(STDIN_FILENO);
+  stdout_isatty = os_isatty(STDOUT_FILENO);
+  stderr_isatty = os_isatty(STDERR_FILENO);
   TIME_MSG("window checked");
 }
 
@@ -1506,7 +1511,7 @@ static void handle_quickfix(mparm_T *paramp)
       set_string_option_direct("ef", -1, paramp->use_ef, OPT_FREE, SID_CARG);
     }
     vim_snprintf(IObuff, IOSIZE, "cfile %s", p_ef);
-    if (qf_init(NULL, (char *)p_ef, p_efm, true, IObuff, p_menc) < 0) {
+    if (qf_init(NULL, p_ef, p_efm, true, IObuff, p_menc) < 0) {
       msg_putchar('\n');
       os_exit(3);
     }
@@ -1828,17 +1833,19 @@ static void exe_pre_commands(mparm_T *parmp)
   int cnt = parmp->n_pre_commands;
   int i;
 
-  if (cnt > 0) {
-    curwin->w_cursor.lnum = 0;     // just in case..
-    estack_push(ETYPE_ARGS, _("pre-vimrc command line"), 0);
-    current_sctx.sc_sid = SID_CMDARG;
-    for (i = 0; i < cnt; i++) {
-      do_cmdline_cmd(cmds[i]);
-    }
-    estack_pop();
-    current_sctx.sc_sid = 0;
-    TIME_MSG("--cmd commands");
+  if (cnt <= 0) {
+    return;
   }
+
+  curwin->w_cursor.lnum = 0;     // just in case..
+  estack_push(ETYPE_ARGS, _("pre-vimrc command line"), 0);
+  current_sctx.sc_sid = SID_CMDARG;
+  for (i = 0; i < cnt; i++) {
+    do_cmdline_cmd(cmds[i]);
+  }
+  estack_pop();
+  current_sctx.sc_sid = 0;
+  TIME_MSG("--cmd commands");
 }
 
 // Execute "+", "-c" and "-S" arguments.
@@ -2079,19 +2086,20 @@ static int execute_env(char *env)
   FUNC_ATTR_NONNULL_ALL
 {
   const char *initstr = os_getenv(env);
-  if (initstr != NULL) {
-    estack_push(ETYPE_ENV, env, 0);
-    const sctx_T save_current_sctx = current_sctx;
-    current_sctx.sc_sid = SID_ENV;
-    current_sctx.sc_seq = 0;
-    current_sctx.sc_lnum = 0;
-    do_cmdline_cmd((char *)initstr);
-
-    estack_pop();
-    current_sctx = save_current_sctx;
-    return OK;
+  if (initstr == NULL) {
+    return FAIL;
   }
-  return FAIL;
+
+  estack_push(ETYPE_ENV, env, 0);
+  const sctx_T save_current_sctx = current_sctx;
+  current_sctx.sc_sid = SID_ENV;
+  current_sctx.sc_seq = 0;
+  current_sctx.sc_lnum = 0;
+  do_cmdline_cmd((char *)initstr);
+
+  estack_pop();
+  current_sctx = save_current_sctx;
+  return OK;
 }
 
 /// Prints the following then exits:

@@ -22,6 +22,7 @@ local tmpname = helpers.tmpname
 local trim = helpers.trim
 local currentdir = helpers.funcs.getcwd
 local assert_alive = helpers.assert_alive
+local check_close = helpers.check_close
 local expect_exit = helpers.expect_exit
 local write_file = helpers.write_file
 local Screen = require('test.functional.ui.screen')
@@ -34,7 +35,7 @@ describe('fileio', function()
   before_each(function()
   end)
   after_each(function()
-    expect_exit(command, ':qall!')
+    check_close()
     os.remove('Xtest_startup_shada')
     os.remove('Xtest_startup_file1')
     os.remove('Xtest_startup_file1~')
@@ -270,7 +271,7 @@ describe('tmpdir', function()
   end)
 
   after_each(function()
-    expect_exit(command, ':qall!')
+    check_close()
     os.remove(testlog)
   end)
 
@@ -294,9 +295,7 @@ describe('tmpdir', function()
     clear({ env={ NVIM_LOG_FILE=testlog, TMPDIR=faketmp, } })
     matches(tmproot_pat, funcs.stdpath('run'))  -- Tickle vim_mktempdir().
     -- Assert that broken tmpdir root was handled.
-    retry(nil, 1000, function()
-      assert_log('tempdir root not a directory', testlog, 100)
-    end)
+    assert_log('tempdir root not a directory', testlog, 100)
 
     -- "…/nvim.<user>/" has wrong permissions:
     skip(is_os('win'), 'TODO(justinmk): need setfperm/getfperm on Windows. #8244')
@@ -307,9 +306,7 @@ describe('tmpdir', function()
     clear({ env={ NVIM_LOG_FILE=testlog, TMPDIR=faketmp, } })
     matches(tmproot_pat, funcs.stdpath('run'))  -- Tickle vim_mktempdir().
     -- Assert that broken tmpdir root was handled.
-    retry(nil, 1000, function()
-      assert_log('tempdir root has invalid permissions', testlog, 100)
-    end)
+    assert_log('tempdir root has invalid permissions', testlog, 100)
   end)
 
   it('too long', function()

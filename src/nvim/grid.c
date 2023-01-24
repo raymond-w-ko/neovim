@@ -140,18 +140,18 @@ void grid_putchar(ScreenGrid *grid, int c, int row, int col, int attr)
 
 /// get a single character directly from grid.chars into "bytes[]".
 /// Also return its attribute in *attrp;
-void grid_getbytes(ScreenGrid *grid, int row, int col, char_u *bytes, int *attrp)
+void grid_getbytes(ScreenGrid *grid, int row, int col, char *bytes, int *attrp)
 {
-  size_t off;
-
   grid_adjust(&grid, &row, &col);
 
   // safety check
-  if (grid->chars != NULL && row < grid->rows && col < grid->cols) {
-    off = grid->line_offset[row] + (size_t)col;
-    *attrp = grid->attrs[off];
-    schar_copy((char *)bytes, grid->chars[off]);
+  if (grid->chars == NULL || row >= grid->rows || col >= grid->cols) {
+    return;
   }
+
+  size_t off = grid->line_offset[row] + (size_t)col;
+  *attrp = grid->attrs[off];
+  schar_copy(bytes, grid->chars[off]);
 }
 
 /// put string '*text' on the window grid at position 'row' and 'col', with

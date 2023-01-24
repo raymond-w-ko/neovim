@@ -33,7 +33,6 @@
 #include "nvim/pos.h"
 #include "nvim/ui.h"
 #include "nvim/version.h"
-#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/private/funcs_metadata.generated.h"
@@ -151,7 +150,18 @@ bool try_end(Error *err)
       xfree(msg);
     }
   } else if (did_throw) {
-    api_set_error(err, kErrorTypeException, "%s", current_exception->value);
+    if (*current_exception->throw_name != NUL) {
+      if (current_exception->throw_lnum != 0) {
+        api_set_error(err, kErrorTypeException, "%s, line %" PRIdLINENR ": %s",
+                      current_exception->throw_name, current_exception->throw_lnum,
+                      current_exception->value);
+      } else {
+        api_set_error(err, kErrorTypeException, "%s: %s",
+                      current_exception->throw_name, current_exception->value);
+      }
+    } else {
+      api_set_error(err, kErrorTypeException, "%s", current_exception->value);
+    }
     discard_current_exception();
   }
 

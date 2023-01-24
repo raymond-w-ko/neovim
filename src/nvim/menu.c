@@ -6,6 +6,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "nvim/ascii.h"
@@ -1338,7 +1339,7 @@ static char *menu_text(const char *str, int *mnemonic, char **actext)
         break;
       }
       if (mnemonic != NULL && p[1] != '&') {
-        *mnemonic = (char_u)p[1];
+        *mnemonic = (uint8_t)p[1];
       }
       STRMOVE(p, p + 1);
       p = p + 1;
@@ -1449,9 +1450,11 @@ void show_popupmenu(void)
   }
 
   // Only show a popup when it is defined and has entries
-  if (menu != NULL && menu->children != NULL) {
-    pum_show_popupmenu(menu);
+  if (menu == NULL || menu->children == NULL) {
+    return;
   }
+
+  pum_show_popupmenu(menu);
 }
 
 /// Execute "menu".  Use by ":emenu" and the window toolbar.
@@ -1531,7 +1534,7 @@ void execute_menu(const exarg_T *eap, vimmenu_T *menu, int mode_idx)
 
       ex_normal_busy++;
       if (save_current_state(&save_state)) {
-        exec_normal_cmd((char_u *)menu->strings[idx], menu->noremap[idx],
+        exec_normal_cmd(menu->strings[idx], menu->noremap[idx],
                         menu->silent[idx]);
       }
       restore_current_state(&save_state);

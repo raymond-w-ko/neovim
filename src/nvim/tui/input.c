@@ -8,31 +8,27 @@
 
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/api/vim.h"
 #include "nvim/ascii.h"
-#include "nvim/autocmd.h"
 #include "nvim/charset.h"
 #include "nvim/event/defs.h"
-#include "nvim/event/multiqueue.h"
-#include "nvim/globals.h"
 #include "nvim/log.h"
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/map.h"
 #include "nvim/memory.h"
-#include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/tui/input.h"
 #include "nvim/tui/input_defs.h"
 #include "nvim/tui/tui.h"
+#include "nvim/types.h"
+#include "nvim/ui_client.h"
 #ifdef MSWIN
 # include "nvim/os/os_win_console.h"
 #endif
 #include "nvim/event/rstream.h"
 #include "nvim/msgpack_rpc/channel.h"
-#include "nvim/ui.h"
 
 #define KEY_BUFFER_SIZE 0xfff
 
@@ -153,19 +149,7 @@ void tinput_init(TermInput *input, Loop *loop)
                               kitty_key_map_entry[i].name);
   }
 
-  // If stdin is not a pty, switch to stderr. For cases like:
-  //    echo q | nvim -es
-  //    ls *.md | xargs nvim
-#ifdef MSWIN
-  if (!os_isatty(input->in_fd)) {
-    input->in_fd = os_get_conin_fd();
-  }
-#else
-  if (!os_isatty(input->in_fd) && os_isatty(STDERR_FILENO)) {
-    input->in_fd = STDERR_FILENO;
-  }
-#endif
-  input_global_fd_init(input->in_fd);
+  input->in_fd = STDIN_FILENO;
 
   const char *term = os_getenv("TERM");
   if (!term) {
@@ -174,7 +158,7 @@ void tinput_init(TermInput *input, Loop *loop)
 
   input->tk = termkey_new_abstract(term,
                                    TERMKEY_FLAG_UTF8 | TERMKEY_FLAG_NOSTART);
-  termkey_hook_terminfo_getstr(input->tk, input->tk_ti_hook_fn, NULL);
+  termkey_hook_terminfo_getstr(input->tk, input->tk_ti_hook_fn, input);
   termkey_start(input->tk);
 
   int curflags = termkey_get_canonflags(input->tk);
@@ -671,7 +655,7 @@ static HandleState handle_background_color(TermInput *input)
     bool is_dark = luminance < 0.5;
     char *bgvalue = is_dark ? "dark" : "light";
     DLOG("bg response: %s", bgvalue);
-    ui_client_bg_respose = is_dark ? kTrue : kFalse;
+    ui_client_bg_response = is_dark ? kTrue : kFalse;
     set_bg(bgvalue);
     input->waiting_for_bg_response = 0;
   } else if (!done && !bad) {

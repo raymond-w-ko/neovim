@@ -25,8 +25,10 @@
 #include "nvim/keycodes.h"
 #include "nvim/lua/executor.h"
 #include "nvim/macros.h"
+#include "nvim/mapping.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
+#include "nvim/menu.h"
 #include "nvim/message.h"
 #include "nvim/option_defs.h"
 #include "nvim/os/input.h"
@@ -93,6 +95,8 @@ static const char *command_complete[] = {
   [EXPAND_TAGS_LISTFILES] = "tag_listfiles",
   [EXPAND_USER] = "user",
   [EXPAND_USER_VARS] = "var",
+  [EXPAND_BREAKPOINT] = "breakpoint",
+  [EXPAND_SCRIPTNAMES] = "scriptnames",
 };
 
 /// List of names of address types.  Must be alphabetical for completion.
@@ -220,6 +224,7 @@ char *find_ucmd(exarg_T *eap, char *p, int *full, expand_T *xp, int *complp)
   return p;
 }
 
+/// Set completion context for :command
 const char *set_context_in_user_cmd(expand_T *xp, const char *arg_in)
 {
   const char *arg = arg_in;
@@ -269,6 +274,47 @@ const char *set_context_in_user_cmd(expand_T *xp, const char *arg_in)
 
   // And finally comes a normal command.
   return (const char *)skipwhite(p);
+}
+
+/// Set the completion context for the argument of a user defined command.
+const char *set_context_in_user_cmdarg(const char *cmd FUNC_ATTR_UNUSED, const char *arg,
+                                       uint32_t argt, int context, expand_T *xp, bool forceit)
+{
+  if (context == EXPAND_NOTHING) {
+    return NULL;
+  }
+
+  if (argt & EX_XFILE) {
+    // EX_XFILE: file names are handled above.
+    xp->xp_context = context;
+    return NULL;
+  }
+
+  if (context == EXPAND_MENUS) {
+    return (const char *)set_context_in_menu_cmd(xp, cmd, (char *)arg, forceit);
+  }
+  if (context == EXPAND_COMMANDS) {
+    return arg;
+  }
+  if (context == EXPAND_MAPPINGS) {
+    return (const char *)set_context_in_map_cmd(xp, "map", (char *)arg, forceit, false, false,
+                                                CMD_map);
+  }
+  // Find start of last argument.
+  const char *p = arg;
+  while (*p) {
+    if (*p == ' ') {
+      // argument starts after a space
+      arg = p + 1;
+    } else if (*p == '\\' && *(p + 1) != NUL) {
+      p++;  // skip over escaped character
+    }
+    MB_PTR_ADV(p);
+  }
+  xp->xp_pattern = (char *)arg;
+  xp->xp_context = context;
+
+  return NULL;
 }
 
 char *expand_user_command_name(int idx)
@@ -1378,7 +1424,7 @@ static size_t uc_check_code(char *code, size_t len, char *buf, ucmd_T *cmd, exar
     ct_NONE,
   } type = ct_NONE;
 
-  if ((vim_strchr("qQfF", *p) != NULL) && p[1] == '-') {
+  if ((vim_strchr("qQfF", (uint8_t)(*p)) != NULL) && p[1] == '-') {
     quote = (*p == 'q' || *p == 'Q') ? 1 : 2;
     p += 2;
     l -= 2;
@@ -1386,7 +1432,7 @@ static size_t uc_check_code(char *code, size_t len, char *buf, ucmd_T *cmd, exar
 
   l++;
   if (l <= 1) {
-    type = ct_NONE;
+    // type = ct_NONE;
   } else if (STRNICMP(p, "args>", l) == 0) {
     type = ct_ARGS;
   } else if (STRNICMP(p, "bang>", l) == 0) {
@@ -1608,10 +1654,10 @@ int do_ucmd(exarg_T *eap, bool preview)
         end = vim_strchr(start + 1, '>');
       }
       if (buf != NULL) {
-        for (ksp = p; *ksp != NUL && (char_u)(*ksp) != K_SPECIAL; ksp++) {}
-        if ((char_u)(*ksp) == K_SPECIAL
+        for (ksp = p; *ksp != NUL && (uint8_t)(*ksp) != K_SPECIAL; ksp++) {}
+        if ((uint8_t)(*ksp) == K_SPECIAL
             && (start == NULL || ksp < start || end == NULL)
-            && ((char_u)ksp[1] == KS_SPECIAL && ksp[2] == KE_FILLER)) {
+            && ((uint8_t)ksp[1] == KS_SPECIAL && ksp[2] == KE_FILLER)) {
           // K_SPECIAL has been put in the buffer as K_SPECIAL
           // KS_SPECIAL KE_FILLER, like for mappings, but
           // do_cmdline() doesn't handle that, so convert it back.

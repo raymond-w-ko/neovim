@@ -6,15 +6,18 @@
 #include <stdlib.h>
 
 #include "nvim/api/private/helpers.h"
+#include "nvim/channel.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/event/loop.h"
-#include "nvim/event/multiqueue.h"
 #include "nvim/globals.h"
 #include "nvim/highlight.h"
 #include "nvim/log.h"
 #include "nvim/main.h"
 #include "nvim/memory.h"
 #include "nvim/msgpack_rpc/channel.h"
+#include "nvim/msgpack_rpc/channel_defs.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/tui/tui.h"
 #include "nvim/ui.h"
 #include "nvim/ui_client.h"
@@ -48,9 +51,16 @@ uint64_t ui_client_start_server(int argc, char **argv)
                                        on_err, CALLBACK_NONE,
                                        false, true, true, false, kChannelStdinPipe,
                                        NULL, 0, 0, NULL, &exit_status);
+
+  // If stdin is not a pty, it is forwarded to the client.
+  // Replace stdin in the TUI process with the tty fd.
   if (ui_client_forward_stdin) {
     close(0);
-    dup(2);
+#ifdef MSWIN
+    os_open_conin_fd();
+#else
+    dup(stderr_isatty ? STDERR_FILENO : STDOUT_FILENO);
+#endif
   }
 
   return channel->id;
@@ -74,8 +84,8 @@ void ui_client_run(bool remote_ui)
   if (term) {
     PUT(opts, "term_name", STRING_OBJ(cstr_to_string(term)));
   }
-  if (ui_client_bg_respose != kNone) {
-    bool is_dark = (ui_client_bg_respose == kTrue);
+  if (ui_client_bg_response != kNone) {
+    bool is_dark = (ui_client_bg_response == kTrue);
     PUT_C(opts, "term_background", STRING_OBJ(cstr_as_string(is_dark ? "dark" : "light")));
   }
   PUT_C(opts, "term_colors", INTEGER_OBJ(t_colors));

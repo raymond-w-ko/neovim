@@ -9,6 +9,7 @@
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/change.h"
 #include "nvim/cursor.h"
 #include "nvim/eval.h"
@@ -277,9 +278,9 @@ void f_appendbufline(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 /// "bufadd(expr)" function
 void f_bufadd(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  char_u *name = (char_u *)tv_get_string(&argvars[0]);
+  char *name = (char *)tv_get_string(&argvars[0]);
 
-  rettv->vval.v_number = buflist_add(*name == NUL ? NULL : (char *)name, 0);
+  rettv->vval.v_number = buflist_add(*name == NUL ? NULL : name, 0);
 }
 
 /// "bufexists(expr)" function
