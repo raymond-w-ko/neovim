@@ -252,7 +252,7 @@ static void add_buff(buffheader_T *const buf, const char *const s, ptrdiff_t sle
     } else {
       len = (size_t)slen;
     }
-    buffblock_T *p = xmalloc(sizeof(buffblock_T) + len);
+    buffblock_T *p = xmalloc(offsetof(buffblock_T, b_str) + len + 1);
     buf->bh_space = len - (size_t)slen;
     xstrlcpy(p->b_str, s, (size_t)slen + 1);
 
@@ -2526,10 +2526,12 @@ static int vgetorpeek(bool advance)
           // move cursor left, if possible
           if (curwin->w_cursor.col != 0) {
             if (curwin->w_wcol > 0) {
-              if (did_ai) {
-                // We are expecting to truncate the trailing
-                // white-space, so find the last non-white
-                // character -- webb
+              // After auto-indenting and no text is following,
+              // we are expecting to truncate the trailing
+              // white-space, so find the last non-white
+              // character -- webb
+              if (did_ai
+                  && *skipwhite(get_cursor_line_ptr() + curwin->w_cursor.col) == NUL) {
                 curwin->w_wcol = 0;
                 ptr = (char_u *)get_cursor_line_ptr();
                 chartabsize_T cts;

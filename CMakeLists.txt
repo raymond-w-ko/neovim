@@ -31,6 +31,11 @@ set(TOUCHES_DIR ${PROJECT_BINARY_DIR}/touches)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+find_program(CCACHE_PRG ccache)
+if(CCACHE_PRG)
+  set(CMAKE_C_COMPILER_LAUNCHER ${CMAKE_COMMAND} -E env CCACHE_SLOPPINESS=pch_defines,time_macros ${CCACHE_PRG})
+endif()
+
 # Prefer our bundled versions of dependencies.
 if(DEFINED ENV{DEPS_BUILD_DIR})
   if(CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
@@ -112,11 +117,6 @@ endif()
 message(STATUS "CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 
 set_default_buildtype()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  set(DEBUG 1)
-else()
-  set(DEBUG 0)
-endif()
 
 # If not in a git repo (e.g., a tarball) these tokens define the complete
 # version string, else they are combined with the result of `git describe`.
@@ -370,7 +370,7 @@ endif()
 if(BUSTED_PRG)
   get_target_property(TEST_INCLUDE_DIRS main_lib INTERFACE_INCLUDE_DIRECTORIES)
 
-  set(UNITTEST_PREREQS nvim-test)
+  set(UNITTEST_PREREQS nvim)
   set(FUNCTIONALTEST_PREREQS nvim printenv-test printargs-test shell-test pwsh-test streams-test tty-test ${GENERATED_HELP_TAGS})
   set(BENCHMARK_PREREQS nvim tty-test)
 
@@ -380,6 +380,7 @@ if(BUSTED_PRG)
       COMMAND ${CMAKE_COMMAND}
         -DBUSTED_PRG=${BUSTED_PRG}
         -DLUA_PRG=${LUA_PRG}
+        -DNVIM_PRG=$<TARGET_FILE:nvim>
         -DWORKING_DIR=${CMAKE_CURRENT_SOURCE_DIR}
         -DBUSTED_OUTPUT_TYPE=${BUSTED_OUTPUT_TYPE}
         -DTEST_DIR=${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -394,17 +395,9 @@ if(BUSTED_PRG)
     message(WARNING "disabling unit tests: no Luajit FFI in ${LUA_PRG}")
   endif()
 
-  if(LUA_HAS_FFI)
-    set(TEST_LIBNVIM_PATH $<TARGET_FILE:nvim-test>)
-  else()
-    set(TEST_LIBNVIM_PATH "")
-  endif()
   configure_file(
     ${CMAKE_SOURCE_DIR}/test/cmakeconfig/paths.lua.in
-    ${CMAKE_BINARY_DIR}/test/cmakeconfig/paths.lua.gen)
-  file(GENERATE
-    OUTPUT ${CMAKE_BINARY_DIR}/test/cmakeconfig/paths.lua
-    INPUT ${CMAKE_BINARY_DIR}/test/cmakeconfig/paths.lua.gen)
+    ${CMAKE_BINARY_DIR}/test/cmakeconfig/paths.lua)
 
   add_custom_target(functionaltest
     COMMAND ${CMAKE_COMMAND}
