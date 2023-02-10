@@ -11,12 +11,12 @@ on:
     paths-ignore:
       - 'contrib/**'
 
-# Cancel any in-progress CI runs for a PR if it is updated
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
   cancel-in-progress: true
 
 env:
+  CI_BUILD_DIR: ${{ github.workspace }}
   UNCRUSTIFY_VERSION: uncrustify-0.75.0
   # TEST_FILE: test/functional/core/startup_spec.lua
   # TEST_FILTER: foo
@@ -59,9 +59,9 @@ jobs:
         run: |
           source_dir=uncrustify
           build_dir=uncrustify/build
-          cmake -S $source_dir -B $build_dir -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S $source_dir -B $build_dir -G Ninja -D CMAKE_BUILD_TYPE=Release
           cmake --build $build_dir
-          mkdir -p $HOME/.cache
+          mkdir -p $CACHE_DIR
           cp $build_dir/uncrustify ${{ env.CACHE_UNCRUSTIFY }}
 
       - uses: ./.github/actions/cache
@@ -85,8 +85,8 @@ jobs:
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: luacheck
         run: |
-          cmake -B $BUILD_DIR -G Ninja
-          cmake --build $BUILD_DIR --target lintlua-luacheck
+          cmake -B build -G Ninja
+          cmake --build build --target lintlua-luacheck
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: lintsh
@@ -109,9 +109,6 @@ jobs:
         name: check uncrustify
         run: |
           git diff --color --exit-code
-
-      - name: Cache dependencies
-        run: ./ci/before_cache.sh
 
   lintc:
     # This job tests two things: it lints the code but also builds neovim using
@@ -171,11 +168,7 @@ jobs:
         run: cmake --build build --target lintc-clint
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
-        name: check-single-includes
-        run: make check-single-includes
-
-      - name: Cache dependencies
-        run: ./ci/before_cache.sh
+        run: cmake --build build --target clang-tidy
 
   posix:
     name: ${{ matrix.runner }} ${{ matrix.flavor }} (cc=${{ matrix.cc }})
@@ -201,15 +194,11 @@ jobs:
 
             # functionaltest-lua is our dumping ground for non-mainline configurations.
             # 1. Check that the tests pass with PUC Lua instead of LuaJIT.
-            # 2. Use as oldest/minimum versions of dependencies/build tools we
-            #    still explicitly support so we don't accidentally rely on
-            #    features that is only available on later versions.
-            # 3. No treesitter parsers installed.
+            # 2. No treesitter parsers installed.
           - flavor: functionaltest-lua
             cc: gcc
             runner: ubuntu-22.04
             os: linux
-            cmake: minimum_required
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
@@ -224,24 +213,6 @@ jobs:
       - name: Install apt packages
         if: matrix.os == 'linux'
         run: ./.github/scripts/install_deps_ubuntu.sh
-
-      - name: Install minimum required version of cmake
-        if: matrix.cmake == 'minimum_required'
-        env:
-          CMAKE_URL: 'https://cmake.org/files/v3.10/cmake-3.10.0-Linux-x86_64.sh'
-          CMAKE_VERSION: '3.10.0'
-        shell: bash
-        run: |
-          curl --retry 5 --silent --show-error --fail -o /tmp/cmake-installer.sh "$CMAKE_URL"
-          mkdir -p "$HOME/.local/bin" /opt/cmake-custom
-          chmod a+x /tmp/cmake-installer.sh
-          /tmp/cmake-installer.sh --prefix=/opt/cmake-custom --skip-license
-          ln -sfn /opt/cmake-custom/bin/cmake "$HOME/.local/bin/cmake"
-          cmake_version="$(cmake --version | head -1)"
-          echo "$cmake_version" | grep -qF "cmake version $CMAKE_VERSION" || {
-            echo "Unexpected CMake version: $cmake_version"
-            exit 1
-          }
 
       - name: Install brew packages
         if: matrix.os == 'osx'
@@ -267,10 +238,12 @@ jobs:
 
       - if: matrix.flavor != 'tsan' && matrix.flavor != 'functionaltest-lua' && (success() || failure() && steps.abort_job.outputs.status == 'success')
         name: Unittests
+        timeout-minutes: 5
         run: ./ci/run_tests.sh unittests
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: Functionaltests
+        timeout-minutes: 15
         run: ./ci/run_tests.sh functionaltests
 
       - if: matrix.flavor != 'tsan' && (success() || failure() && steps.abort_job.outputs.status == 'success')
@@ -281,16 +254,52 @@ jobs:
         name: Install nvim
         run: ./ci/run_tests.sh install_nvim
 
-      - name: Cache dependencies
-        run: ./ci/before_cache.sh
+  old_cmake:
+    name: Test oldest supported cmake
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      CI_OS_NAME: linux
+      CMAKE_URL: 'https://cmake.org/files/v3.10/cmake-3.10.0-Linux-x86_64.sh'
+      CMAKE_VERSION: '3.10.0'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup common environment variables
+        run: ./.github/workflows/env.sh old_cmake
+
+      - name: Install apt packages
+        run: ./.github/scripts/install_deps_ubuntu.sh
+
+      - name: Install minimum required version of cmake
+        run: |
+          curl --retry 5 --silent --show-error --fail -o /tmp/cmake-installer.sh "$CMAKE_URL"
+          mkdir -p "$BIN_DIR" /opt/cmake-custom
+          chmod a+x /tmp/cmake-installer.sh
+          /tmp/cmake-installer.sh --prefix=/opt/cmake-custom --skip-license
+          ln -sfn /opt/cmake-custom/bin/cmake "$BIN_DIR/cmake"
+          cmake_version="$(cmake --version | head -1)"
+          echo "$cmake_version" | grep -qF "cmake version $CMAKE_VERSION" || {
+            echo "Unexpected CMake version: $cmake_version"
+            exit 1
+          }
+
+      - uses: ./.github/actions/cache
+
+      - name: Build dependencies
+        run: make deps
+
+      - name: Build
+        run: make CMAKE_FLAGS="-D CI_BUILD=ON -D CMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX -D MIN_LOG_LEVEL=3"
+
+      - name: Install
+        run: make install
 
   windows:
     runs-on: windows-2019
     timeout-minutes: 45
     env:
       DEPS_BUILD_DIR: ${{ github.workspace }}/nvim-deps
-      CACHE_NVIM_DEPS_DIR: ${{ github.workspace }}/nvim-deps
-      DEPS_PREFIX: ${{ github.workspace }}/nvim-deps/usr
     name: windows (MSVC_64)
     steps:
       - uses: actions/checkout@v3
@@ -302,12 +311,12 @@ jobs:
 
       - name: Build deps
         run: |
-          cmake -S cmake.deps -B $env:DEPS_BUILD_DIR -G Ninja -DCMAKE_BUILD_TYPE='RelWithDebInfo'
+          cmake -S cmake.deps -B $env:DEPS_BUILD_DIR -G Ninja -D CMAKE_BUILD_TYPE='RelWithDebInfo'
           cmake --build $env:DEPS_BUILD_DIR
 
       - name: Build nvim
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE='RelWithDebInfo' -DDEPS_PREFIX="$env:DEPS_PREFIX" -DCI_BUILD=ON
+          cmake -B build -G Ninja -D CMAKE_BUILD_TYPE='RelWithDebInfo' -D CI_BUILD=ON
           cmake --build build
 
       - name: Install test deps
@@ -341,6 +350,7 @@ jobs:
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: Run functionaltests
+        timeout-minutes: 15
         run: cmake --build build --target functionaltest
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
