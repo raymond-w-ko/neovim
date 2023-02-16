@@ -92,6 +92,13 @@ else()
     -Wmissing-noreturn
     -Wmissing-format-attribute
     -Wmissing-prototypes)
+
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(main_lib INTERFACE
+      $<$<CONFIG:Release>:-Wno-unused-result>
+      $<$<CONFIG:RelWithDebInfo>:-Wno-unused-result>
+      $<$<CONFIG:MinSizeRel>:-Wno-unused-result>)
+  endif()
 endif()
 
 # On FreeBSD 64 math.h uses unguarded C11 extension, which taints clang
@@ -412,6 +419,9 @@ else()
 endif()
 
 # Log level (MIN_LOG_LEVEL in log.h)
+if($ENV{CI} MATCHES "true")
+  set(MIN_LOG_LEVEL 3)
+endif()
 if("${MIN_LOG_LEVEL}" MATCHES "^$")
   # Minimize logging for release-type builds.
   target_compile_definitions(main_lib INTERFACE MIN_LOG_LEVEL=$<IF:$<CONFIG:Debug>,1,3>)

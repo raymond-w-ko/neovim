@@ -41,9 +41,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install dependencies
-        run: |
-          cmake -P ./.github/scripts/install_dependencies.cmake
-          sudo apt-get install -y lua-check
+        run: ./.github/scripts/install_deps.sh lua-check
 
       - name: Cache uncrustify
         id: cache-uncrustify
@@ -132,7 +130,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo add-apt-repository ppa:neovim-ppa/stable
-          cmake -P ./.github/scripts/install_dependencies.cmake
+          ./.github/scripts/install_deps.sh
           sudo apt-get install -y \
             libluajit-5.1-dev \
             libmsgpack-dev \
@@ -198,6 +196,10 @@ jobs:
             cc: gcc
             runner: ubuntu-22.04
             flags: -D UNSIGNED_CHAR=ON
+          - flavor: release
+            cc: gcc
+            runner: ubuntu-22.04
+            flags: -D CMAKE_BUILD_TYPE=Release
           - cc: clang
             runner: macos-12
 
@@ -225,7 +227,7 @@ jobs:
         run: mkdir -p "$LOG_DIR"
 
       - name: Install dependencies
-        run: cmake -D TEST_DEPS=ON -P ./.github/scripts/install_dependencies.cmake
+        run: ./.github/scripts/install_deps.sh cpanminus
 
       - name: Setup interpreter packages
         run: |
@@ -256,7 +258,7 @@ jobs:
 
       - name: Build
         run: |
-          cmake -B build -G Ninja -D CI_BUILD=ON -D CMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX -D MIN_LOG_LEVEL=3 ${{ matrix.flags }}
+          cmake -B build -G Ninja -D CI_BUILD=ON -D CMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX ${{ matrix.flags }}
           cmake --build build
 
       - if: "!cancelled()"
@@ -264,7 +266,7 @@ jobs:
         id: abort_job
         run: echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
 
-      - if: matrix.flavor != 'tsan' && matrix.flavor != 'functionaltest-lua' && (success() || failure() && steps.abort_job.outputs.status == 'success')
+      - if: matrix.flavor != 'tsan' && matrix.flavor != 'release' && matrix.flavor != 'functionaltest-lua' && (success() || failure() && steps.abort_job.outputs.status == 'success')
         name: Unittest
         timeout-minutes: 5
         run: cmake --build build --target unittest
@@ -364,7 +366,7 @@ jobs:
         run: echo "$BIN_DIR" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: cmake -P ./.github/scripts/install_dependencies.cmake
+        run: ./.github/scripts/install_deps.sh
 
       - name: Install minimum required version of cmake
         run: |
@@ -385,7 +387,7 @@ jobs:
         run: make deps
 
       - name: Build
-        run: make CMAKE_FLAGS="-D CI_BUILD=ON -D CMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX -D MIN_LOG_LEVEL=3"
+        run: make CMAKE_FLAGS="-D CI_BUILD=ON -D CMAKE_INSTALL_PREFIX:PATH=$INSTALL_PREFIX"
 
       - name: Install
         run: make install
