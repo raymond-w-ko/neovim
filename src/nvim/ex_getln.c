@@ -2456,7 +2456,7 @@ static bool cmdpreview_may_show(CommandLineState *s)
   CpInfo cpinfo;
   bool icm_split = *p_icm == 's';  // inccommand=split
   buf_T *cmdpreview_buf;
-  win_T *cmdpreview_win;
+  win_T *cmdpreview_win = NULL;
 
   emsg_silent++;                 // Block error reporting as the command may be incomplete,
                                  // but still update v:errmsg
@@ -2693,7 +2693,7 @@ char *getcmdline_prompt(const int firstc, const char *const prompt, const int at
 /// Read the 'wildmode' option, fill wim_flags[].
 int check_opt_wim(void)
 {
-  char_u new_wim_flags[4];
+  uint8_t new_wim_flags[4];
   int i;
   int idx = 0;
 
