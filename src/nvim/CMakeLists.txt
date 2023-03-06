@@ -14,12 +14,8 @@ else()
 endif()
 
 find_package(Libluv 1.43.0 REQUIRED)
-target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LIBLUV_INCLUDE_DIRS})
-# Use "luv" as imported library, to work around CMake using "-lluv" for
-# "luv.so".  #10407
-add_library(luv UNKNOWN IMPORTED)
-set_target_properties(luv PROPERTIES IMPORTED_LOCATION ${LIBLUV_LIBRARIES})
-target_link_libraries(main_lib INTERFACE luv)
+target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LIBLUV_INCLUDE_DIR})
+target_link_libraries(main_lib INTERFACE ${LIBLUV_LIBRARY})
 
 find_package(Iconv REQUIRED)
 find_package(Libtermkey 0.22 REQUIRED)
@@ -87,14 +83,14 @@ if(MSVC)
   target_sources(main_lib INTERFACE ${CMAKE_CURRENT_LIST_DIR}/os/nvim.manifest)
 else()
   target_compile_options(main_lib INTERFACE -Wall -Wextra -pedantic -Wno-unused-parameter
-    -Wstrict-prototypes -std=gnu99 -Wshadow -Wconversion
+    -Wstrict-prototypes -std=gnu99 -Wshadow -Wconversion -Wvla
     -Wdouble-promotion
     -Wmissing-noreturn
     -Wmissing-format-attribute
     -Wmissing-prototypes)
 
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(main_lib INTERFACE
+    target_compile_options(main_lib INTERFACE -fno-common
       $<$<CONFIG:Release>:-Wno-unused-result>
       $<$<CONFIG:RelWithDebInfo>:-Wno-unused-result>
       $<$<CONFIG:MinSizeRel>:-Wno-unused-result>)
@@ -142,17 +138,6 @@ if(MINGW)
 endif()
 if(WIN32)
   target_compile_definitions(main_lib INTERFACE _WIN32_WINNT=0x0602 MSWIN)
-endif()
-
-# OpenBSD's GCC (4.2.1) doesn't have -Wvla
-check_c_compiler_flag(-Wvla HAS_WVLA_FLAG)
-if(HAS_WVLA_FLAG)
-  target_compile_options(main_lib INTERFACE -Wvla)
-endif()
-
-check_c_compiler_flag(-fno-common HAVE_FNO_COMMON)
-if (HAVE_FNO_COMMON)
-  target_compile_options(main_lib INTERFACE -fno-common)
 endif()
 
 check_c_compiler_flag(-fdiagnostics-color=auto HAS_DIAG_COLOR_FLAG)
@@ -240,13 +225,15 @@ endif()
 if(UNIX)
   # -fstack-protector breaks non Unix builds even in Mingw-w64
   check_c_compiler_flag(-fstack-protector-strong HAS_FSTACK_PROTECTOR_STRONG_FLAG)
-  check_c_compiler_flag(-fstack-protector HAS_FSTACK_PROTECTOR_FLAG)
   if(HAS_FSTACK_PROTECTOR_STRONG_FLAG)
     target_compile_options(main_lib INTERFACE -fstack-protector-strong)
     target_link_libraries(main_lib INTERFACE -fstack-protector-strong)
-  elseif(HAS_FSTACK_PROTECTOR_FLAG)
-    target_compile_options(main_lib INTERFACE -fstack-protector --param ssp-buffer-size=4)
-    target_link_libraries(main_lib INTERFACE -fstack-protector --param ssp-buffer-size=4)
+  else()
+    check_c_compiler_flag(-fstack-protector HAS_FSTACK_PROTECTOR_FLAG)
+    if(HAS_FSTACK_PROTECTOR_FLAG)
+      target_compile_options(main_lib INTERFACE -fstack-protector --param ssp-buffer-size=4)
+      target_link_libraries(main_lib INTERFACE -fstack-protector --param ssp-buffer-size=4)
+    endif()
   endif()
 endif()
 
@@ -382,19 +369,16 @@ else()
     ${EXTERNAL_SOURCES} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -Wno-conversion -Wno-missing-noreturn -Wno-missing-format-attribute -Wno-double-promotion -Wno-strict-prototypes -Wno-misleading-indentation")
 endif()
 
-# Log level (MIN_LOG_LEVEL in log.h)
+# Log level (NVIM_LOG_DEBUG in log.h)
 if($ENV{CI})
-  set(MIN_LOG_LEVEL 3)
-endif()
-if("${MIN_LOG_LEVEL}" MATCHES "^$")
-  # Minimize logging for release-type builds.
-  target_compile_definitions(main_lib INTERFACE MIN_LOG_LEVEL=$<IF:$<CONFIG:Debug>,1,3>)
+  # Don't debug log on CI, it gets too verbose in the main build log.
+  # TODO(bfredl): debug log level also exposes some errors with EXITFREE in ASAN build.
+  set(LOG_DEBUG FALSE)
+elseif(LOG_DEBUG)
+  target_compile_definitions(nvim PRIVATE NVIM_LOG_DEBUG)
 else()
-  if(NOT MIN_LOG_LEVEL MATCHES "^[0-3]$")
-    message(FATAL_ERROR "invalid MIN_LOG_LEVEL: " ${MIN_LOG_LEVEL})
-  endif()
-  message(STATUS "MIN_LOG_LEVEL=${MIN_LOG_LEVEL}")
-  target_compile_definitions(main_lib INTERFACE MIN_LOG_LEVEL=${MIN_LOG_LEVEL})
+  # Minimize logging for release-type builds.
+  target_compile_definitions(nvim PRIVATE $<$<CONFIG:Debug>:NVIM_LOG_DEBUG>)
 endif()
 
 if(CLANG_ASAN_UBSAN OR CLANG_MSAN OR CLANG_TSAN)

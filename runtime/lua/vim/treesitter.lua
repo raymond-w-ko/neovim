@@ -2,6 +2,7 @@ local a = vim.api
 local query = require('vim.treesitter.query')
 local language = require('vim.treesitter.language')
 local LanguageTree = require('vim.treesitter.languagetree')
+local Range = require('vim.treesitter._range')
 
 ---@type table<integer,LanguageTree>
 local parsers = setmetatable({}, { __mode = 'v' })
@@ -47,7 +48,8 @@ function M._create_parser(bufnr, lang, opts)
 
   vim.fn.bufload(bufnr)
 
-  language.add(lang, { filetype = vim.bo[bufnr].filetype })
+  local ft = vim.bo[bufnr].filetype
+  language.add(lang, { filetype = ft ~= '' and ft or nil })
 
   local self = LanguageTree.new(bufnr, lang, opts)
 
@@ -189,20 +191,7 @@ end
 ---
 ---@return boolean True if the position is in node range
 function M.is_in_node_range(node, line, col)
-  local start_line, start_col, end_line, end_col = M.get_node_range(node)
-  if line >= start_line and line <= end_line then
-    if line == start_line and line == end_line then
-      return col >= start_col and col < end_col
-    elseif line == start_line then
-      return col >= start_col
-    elseif line == end_line then
-      return col < end_col
-    else
-      return true
-    end
-  else
-    return false
-  end
+  return M.node_contains(node, { line, col, line, col })
 end
 
 --- Determines if a node contains a range
@@ -212,11 +201,11 @@ end
 ---
 ---@return boolean True if the {node} contains the {range}
 function M.node_contains(node, range)
-  local start_row, start_col, end_row, end_col = node:range()
-  local start_fits = start_row < range[1] or (start_row == range[1] and start_col <= range[2])
-  local end_fits = end_row > range[3] or (end_row == range[3] and end_col >= range[4])
-
-  return start_fits and end_fits
+  vim.validate({
+    node = { node, 'userdata' },
+    range = { range, Range.validate, 'integer list with 4 or 6 elements' },
+  })
+  return Range.contains({ node:range() }, range)
 end
 
 --- Returns a list of highlight captures at the given position
@@ -506,8 +495,27 @@ function M.inspect_tree(opts)
   a.nvim_buf_set_keymap(b, 'n', 'a', '', {
     desc = 'Toggle anonymous nodes',
     callback = function()
+      local row, col = unpack(a.nvim_win_get_cursor(w))
+      local curnode = pg:get(row)
+      while curnode and not curnode.named do
+        row = row - 1
+        curnode = pg:get(row)
+      end
+
       pg.opts.anon = not pg.opts.anon
       pg:draw(b)
+
+      if not curnode then
+        return
+      end
+
+      local id = curnode.id
+      for i, node in pg:iter() do
+        if node.id == id then
+          a.nvim_win_set_cursor(w, { i, col })
+          break
+        end
+      end
     end,
   })
   a.nvim_buf_set_keymap(b, 'n', 'I', '', {

@@ -1413,7 +1413,7 @@ notify({msg}, {level}, {opts})                                  *vim.notify()*
 
     Parameters: ~
       • {msg}    (string) Content of the notification to show to the user.
-      • {level}  (number|nil) One of the values from |vim.log.levels|.
+      • {level}  (integer|nil) One of the values from |vim.log.levels|.
       • {opts}   (table|nil) Optional parameters. Unused by default.
 
 notify_once({msg}, {level}, {opts})                        *vim.notify_once()*
@@ -1424,7 +1424,7 @@ notify_once({msg}, {level}, {opts})                        *vim.notify_once()*
 
     Parameters: ~
       • {msg}    (string) Content of the notification to show to the user.
-      • {level}  (number|nil) One of the values from |vim.log.levels|.
+      • {level}  (integer|nil) One of the values from |vim.log.levels|.
       • {opts}   (table|nil) Optional parameters. Unused by default.
 
     Return: ~
@@ -1448,11 +1448,11 @@ on_key({fn}, {ns_id})                                           *vim.on_key()*
                  argument. On each key press, Nvim passes the key char to
                  fn(). |i_CTRL-V| If {fn} is nil, it removes the callback for
                  the associated {ns_id}
-      • {ns_id}  number? Namespace ID. If nil or 0, generates and returns a
+      • {ns_id}  integer? Namespace ID. If nil or 0, generates and returns a
                  new |nvim_create_namespace()| id.
 
     Return: ~
-        (number) Namespace id associated with {fn}. Or count of all callbacks
+        (integer) Namespace id associated with {fn}. Or count of all callbacks
         if on_key() is called without arguments.
 
     Note:
@@ -1507,7 +1507,7 @@ region({bufnr}, {pos1}, {pos2}, {regtype}, {inclusive})         *vim.region()*
     points
 
     Parameters: ~
-      • {bufnr}      (number) of buffer
+      • {bufnr}      (integer) number of buffer
       • {pos1}       integer[] (line, column) tuple marking beginning of
                      region
       • {pos2}       integer[] (line, column) tuple marking end of region
@@ -1542,11 +1542,11 @@ inspect_pos({bufnr}, {row}, {col}, {filter})               *vim.inspect_pos()*
     Can also be pretty-printed with `:Inspect!`.                   *:Inspect!*
 
     Parameters: ~
-      • {bufnr}   (number|nil) defaults to the current buffer
-      • {row}     (number|nil) row to inspect, 0-based. Defaults to the row of
-                  the current cursor
-      • {col}     (number|nil) col to inspect, 0-based. Defaults to the col of
-                  the current cursor
+      • {bufnr}   (integer|nil) defaults to the current buffer
+      • {row}     (integer|nil) row to inspect, 0-based. Defaults to the row
+                  of the current cursor
+      • {col}     (integer|nil) col to inspect, 0-based. Defaults to the col
+                  of the current cursor
       • {filter}  (table|nil) a table with key-value pairs to filter the items
                   • syntax (boolean): include syntax based highlight groups
                     (defaults to true)
@@ -1575,11 +1575,11 @@ show_pos({bufnr}, {row}, {col}, {filter})                     *vim.show_pos()*
     Can also be shown with `:Inspect`.                              *:Inspect*
 
     Parameters: ~
-      • {bufnr}   (number|nil) defaults to the current buffer
-      • {row}     (number|nil) row to inspect, 0-based. Defaults to the row of
-                  the current cursor
-      • {col}     (number|nil) col to inspect, 0-based. Defaults to the col of
-                  the current cursor
+      • {bufnr}   (integer|nil) defaults to the current buffer
+      • {row}     (integer|nil) row to inspect, 0-based. Defaults to the row
+                  of the current cursor
+      • {col}     (integer|nil) col to inspect, 0-based. Defaults to the col
+                  of the current cursor
       • {filter}  (table|nil) see |vim.inspect_pos()|
 
 
@@ -1678,8 +1678,8 @@ list_extend({dst}, {src}, {start}, {finish})               *vim.list_extend()*
     Parameters: ~
       • {dst}     (table) List which will be modified and appended to
       • {src}     (table) List from which values will be inserted
-      • {start}   (number|nil) Start index on src. Defaults to 1
-      • {finish}  (number|nil) Final index on src. Defaults to `#src`
+      • {start}   (integer|nil) Start index on src. Defaults to 1
+      • {finish}  (integer|nil) Final index on src. Defaults to `#src`
 
     Return: ~
         (table) dst
@@ -1693,8 +1693,8 @@ list_slice({list}, {start}, {finish})                       *vim.list_slice()*
 
     Parameters: ~
       • {list}    (list) Table
-      • {start}   (number|nil) Start range of slice
-      • {finish}  (number|nil) End range of slice
+      • {start}   (integer|nil) Start range of slice
+      • {finish}  (integer|nil) End range of slice
 
     Return: ~
         (list) Copy of table sliced from start to finish (inclusive)
@@ -1794,7 +1794,7 @@ tbl_count({t})                                               *vim.tbl_count()*
       • {t}  (table) Table
 
     Return: ~
-        (number) Number of non-nil values in table
+        (integer) Number of non-nil values in table
 
     See also: ~
         https://github.com/Tieske/Penlight/blob/master/lua/pl/tablex.lua
@@ -2007,7 +2007,7 @@ uri_from_bufnr({bufnr})                                 *vim.uri_from_bufnr()*
     Get a URI from a bufnr
 
     Parameters: ~
-      • {bufnr}  (number)
+      • {bufnr}  (integer)
 
     Return: ~
         (string) URI
@@ -2029,7 +2029,7 @@ uri_to_bufnr({uri})                                       *vim.uri_to_bufnr()*
       • {uri}  (string)
 
     Return: ~
-        (number) bufnr
+        (integer) bufnr
 
 uri_to_fname({uri})                                       *vim.uri_to_fname()*
     Get a filename from a URI
@@ -2496,5 +2496,72 @@ trust({opts})                                             *vim.secure.trust()*
         (boolean, string) success, msg:
         • true and full path of target file if operation was successful
         • false and error message on failure
+
+
+==============================================================================
+Lua module: version                                              *lua-version*
+
+cmp({v1}, {v2}, {opts})                                    *vim.version.cmp()*
+    Compares two strings ( `v1` and `v2` ) in semver format.
+
+    Parameters: ~
+      • {v1}    (string) Version.
+      • {v2}    (string) Version to compare with v1.
+      • {opts}  (table|nil) Optional keyword arguments:
+                • strict (boolean): see `semver.parse` for details. Defaults
+                  to false.
+
+    Return: ~
+        (integer) `-1` if `v1 < v2`, `0` if `v1 == v2`, `1` if `v1 > v2`.
+
+eq({v1}, {v2})                                              *vim.version.eq()*
+    Returns `true` if `v1` are `v2` are equal versions.
+
+    Parameters: ~
+      • {v1}  (string)
+      • {v2}  (string)
+
+    Return: ~
+        (boolean)
+
+gt({v1}, {v2})                                              *vim.version.gt()*
+    Returns `true` if `v1` is greater than `v2` .
+
+    Parameters: ~
+      • {v1}  (string)
+      • {v2}  (string)
+
+    Return: ~
+        (boolean)
+
+lt({v1}, {v2})                                              *vim.version.lt()*
+    Returns `true` if `v1` is less than `v2` .
+
+    Parameters: ~
+      • {v1}  (string)
+      • {v2}  (string)
+
+    Return: ~
+        (boolean)
+
+parse({version}, {opts})                                 *vim.version.parse()*
+    Parses a semantic version string.
+
+    Ignores leading "v" and surrounding whitespace, e.g. "
+    v1.0.1-rc1+build.2", "1.0.1-rc1+build.2", "v1.0.1-rc1+build.2" and
+    "v1.0.1-rc1+build.2 " are all parsed as: >
+
+       { major = 1, minor = 0, patch = 1, prerelease = "rc1", build = "build.2" }
+<
+
+    Parameters: ~
+      • {version}  (string) Version string to be parsed.
+      • {opts}     (table|nil) Optional keyword arguments:
+                   • strict (boolean): Default false. If `true` , no coercion is attempted on input not strictly
+                     conforming to semver v2.0.0 ( https://semver.org/spec/v2.0.0.html ). E.g. `parse("v1.2")` returns nil.
+
+    Return: ~
+        (table|nil) parsed_version Parsed version table or `nil` if `version`
+        is invalid.
 
  vim:tw=78:ts=8:sw=4:sts=4:et:ft=help:norl:

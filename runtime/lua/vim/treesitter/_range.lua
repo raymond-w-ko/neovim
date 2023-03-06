@@ -54,6 +54,26 @@ M.cmp_pos = {
 setmetatable(M.cmp_pos, { __call = cmp_pos })
 
 ---@private
+---Check if a variable is a valid range object
+---@param r any
+---@return boolean
+function M.validate(r)
+  if type(r) ~= 'table' or #r ~= 6 and #r ~= 4 then
+    return false
+  end
+
+  for _, e in
+    ipairs(r --[[@as any[] ]])
+  do
+    if type(e) ~= 'number' then
+      return false
+    end
+  end
+
+  return true
+end
+
+---@private
 ---@param r1 Range4|Range6
 ---@param r2 Range4|Range6
 ---@return boolean
@@ -61,7 +81,7 @@ function M.intercepts(r1, r2)
   local off_1 = #r1 == 6 and 1 or 0
   local off_2 = #r1 == 6 and 1 or 0
 
-  local srow_1, scol_1, erow_1, ecol_1 = r1[1], r2[2], r1[3 + off_1], r1[4 + off_1]
+  local srow_1, scol_1, erow_1, ecol_1 = r1[1], r1[2], r1[3 + off_1], r1[4 + off_1]
   local srow_2, scol_2, erow_2, ecol_2 = r2[1], r2[2], r2[3 + off_2], r2[4 + off_2]
 
   -- r1 is above r2
@@ -85,7 +105,7 @@ function M.contains(r1, r2)
   local off_1 = #r1 == 6 and 1 or 0
   local off_2 = #r1 == 6 and 1 or 0
 
-  local srow_1, scol_1, erow_1, ecol_1 = r1[1], r2[2], r1[3 + off_1], r1[4 + off_1]
+  local srow_1, scol_1, erow_1, ecol_1 = r1[1], r1[2], r1[3 + off_1], r1[4 + off_1]
   local srow_2, scol_2, erow_2, ecol_2 = r2[1], r2[2], r2[3 + off_2], r2[4 + off_2]
 
   -- start doesn't fit

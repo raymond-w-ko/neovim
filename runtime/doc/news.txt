@@ -55,6 +55,9 @@ NEW FEATURES                                                    *news-features*
 
 The following new APIs or features were added.
 
+• Added |vim.version| for parsing and comparing version strings conforming to
+  the semver specification, see |lua-version|.
+
 • A new environment variable named NVIM_APPNAME enables configuring the
   directories where Neovim should find its configuration and state files. See
   `:help $NVIM_APPNAME` .
@@ -87,7 +90,7 @@ The following new APIs or features were added.
   `semanticTokensProvider` from the LSP client's {server_capabilities} in the
   `LspAttach` callback.
 
-  See |lsp-semantic_tokens| for more information.
+  See |lsp-semantic-highlight| for more information.
 
 • |vim.treesitter.inspect_tree()| and |:InspectTree| opens a split window
   showing a text representation of the nodes in a language tree for the current
@@ -162,11 +165,10 @@ The following new APIs or features were added.
 • Treesitter captures can now be transformed by directives. This will allow
   more complicated dynamic language injections.
 
-• |vim.treesitter.query.get_node_text()| now accepts a `metadata` option for
-  writing custom directives using |vim.treesitter.query.add_directive()|.
+• |vim.treesitter.get_node_text()| now accepts a `metadata` option for
+  writing custom directives using |vim.treesitter.add_directive()|.
 
-• |vim.treesitter.language.add()| as a new replacement for
-  `vim.treesitter.language.require_language`.
+• |vim.treesitter.add()| replaces `vim.treesitter.language.require_language`.
 
 • `require'bit'` is now always available |lua-bit|
 
@@ -184,6 +186,11 @@ The following new APIs or features were added.
 
 • Vim's `has('gui_running')` is now supported as a way for plugins to check if
   a GUI (not the |TUI|) is attached to Nvim. |has()|
+
+• Added preliminary support for the `workspace/didChangeWatchedFiles` capability
+  to the LSP client to notify servers of file changes on disk. The feature is
+  disabled by default and can be enabled by setting the
+  `workspace.didChangeWatchedFiles.dynamicRegistration=true` capability.
 
 ==============================================================================
 CHANGED FEATURES                                                 *news-changes*
@@ -225,8 +232,7 @@ DEPRECATIONS                                                *news-deprecations*
 The following functions are now deprecated and will be removed in the next
 release.
 
-• `vim.treesitter.language.require_language()` has been deprecated in favour
-  of |vim.treesitter.language.add()|.
+• |vim.treesitter.add()| replaces `vim.treesitter.language.require_language()`
 
 • |vim.treesitter.get_node_at_pos()| and |vim.treesitter.get_node_at_cursor()|
   are both deprecated in favor of |vim.treesitter.get_node()|.
