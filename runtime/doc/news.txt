@@ -45,7 +45,7 @@ The following changes may require adaptations in user config or plugins.
     - `printheader`
     - `printmbcharset`
 
-• libiconv is now a required build dependency.
+• libiconv and intl are now required build dependencies.
 
 • Unsaved changes are now preserved rather than discarded when |channel-stdio|
   is closed.
@@ -162,6 +162,8 @@ The following new APIs or features were added.
 
 • |:highlight| now supports an additional attribute "altfont".
 
+• |:Man| manpage viewer supports manpage names containing spaces.
+
 • Treesitter captures can now be transformed by directives. This will allow
   more complicated dynamic language injections.
 
@@ -191,6 +193,8 @@ The following new APIs or features were added.
   to the LSP client to notify servers of file changes on disk. The feature is
   disabled by default and can be enabled by setting the
   `workspace.didChangeWatchedFiles.dynamicRegistration=true` capability.
+
+• Added an omnifunc implementation for lua, |vim.lua_omnifunc()|
 
 ==============================================================================
 CHANGED FEATURES                                                 *news-changes*
