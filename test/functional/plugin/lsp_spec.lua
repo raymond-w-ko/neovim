@@ -57,6 +57,7 @@ describe('LSP', function()
         return lsp.start_client {
           cmd_env = {
             NVIM_LOG_FILE = fake_lsp_logfile;
+            NVIM_APPNAME = "nvim_lsp_test";
           };
           cmd = {
             vim.v.progpath, '-l', fake_lsp_code, test_name;
@@ -1713,6 +1714,9 @@ describe('LSP', function()
       end)
 
       it('fix the cursor col', function()
+        -- append empty last line. See #22636
+        exec_lua('vim.api.nvim_buf_set_lines(...)', 1, -1, -1, true, {''})
+
         funcs.nvim_win_set_cursor(0, { 2, 11 })
         local edits = {
           make_edit(1, 7, 1, 11, '')
@@ -1724,6 +1728,7 @@ describe('LSP', function()
           'Third line of text';
           'Fourth line of text';
           'å å ɧ 汉语 ↥ 🤦 🦄';
+          '';
         }, buf_lines(1))
         eq({ 2, 7 }, funcs.nvim_win_get_cursor(0))
       end)
@@ -2195,7 +2200,22 @@ describe('LSP', function()
       eq(true, exists)
       os.remove(new)
     end)
-    it('Can rename a direcory', function()
+    it("Kills old buffer after renaming an existing file", function()
+      local old = helpers.tmpname()
+      write_file(old, 'Test content')
+      local new = helpers.tmpname()
+      os.remove(new)  -- only reserve the name, file must not exist for the test scenario
+      local lines = exec_lua([[
+        local old = select(1, ...)
+	local oldbufnr = vim.fn.bufadd(old)
+        local new = select(2, ...)
+        vim.lsp.util.rename(old, new)
+	return vim.fn.bufloaded(oldbufnr)
+      ]], old, new)
+      eq(0, lines)
+      os.remove(new)
+    end)
+    it('Can rename a directory', function()
       -- only reserve the name, file must not exist for the test scenario
       local old_dir = helpers.tmpname()
       local new_dir = helpers.tmpname()
@@ -2204,16 +2224,19 @@ describe('LSP', function()
 
       helpers.mkdir_p(old_dir)
 
-      local file = "file"
+      local file = 'file.txt'
       write_file(old_dir .. pathsep .. file, 'Test content')
 
-      exec_lua([[
+      local lines = exec_lua([[
         local old_dir = select(1, ...)
         local new_dir = select(2, ...)
+	local pathsep = select(3, ...)
+	local oldbufnr = vim.fn.bufadd(old_dir .. pathsep .. 'file')
 
         vim.lsp.util.rename(old_dir, new_dir)
-      ]], old_dir, new_dir)
-
+	return vim.fn.bufloaded(oldbufnr)
+      ]], old_dir, new_dir, pathsep)
+      eq(0, lines)
       eq(false, exec_lua('return vim.loop.fs_stat(...) ~= nil', old_dir))
       eq(true, exec_lua('return vim.loop.fs_stat(...) ~= nil', new_dir))
       eq(true, exec_lua('return vim.loop.fs_stat(...) ~= nil', new_dir .. pathsep .. file))
@@ -3553,6 +3576,7 @@ describe('LSP', function()
         vim.cmd.normal('v')
         vim.api.nvim_win_set_cursor(0, { 2, 3 })
         vim.lsp.buf.format({ bufnr = bufnr, false })
+        vim.lsp.stop_client(client_id)
         return server.messages
       ]])
       eq("textDocument/rangeFormatting", result[3].method)
@@ -3561,6 +3585,52 @@ describe('LSP', function()
         ['end'] = { line = 1, character = 4 },
       }
       eq(expected_range, result[3].params.range)
+    end)
+    it('format formats range in visual line mode', function()
+      exec_lua(create_server_definition)
+      local result = exec_lua([[
+        local server = _create_server({ capabilities = {
+          documentFormattingProvider = true,
+          documentRangeFormattingProvider = true,
+        }})
+        local bufnr = vim.api.nvim_get_current_buf()
+        local client_id = vim.lsp.start({ name = 'dummy', cmd = server.cmd })
+        vim.api.nvim_win_set_buf(0, bufnr)
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, {'foo', 'bar baz'})
+        vim.api.nvim_win_set_cursor(0, { 1, 2 })
+        vim.cmd.normal('V')
+        vim.api.nvim_win_set_cursor(0, { 2, 1 })
+        vim.lsp.buf.format({ bufnr = bufnr, false })
+
+        -- Format again with visual lines going from bottom to top
+        -- Must result in same formatting
+        vim.cmd.normal("<ESC>")
+        vim.api.nvim_win_set_cursor(0, { 2, 1 })
+        vim.cmd.normal('V')
+        vim.api.nvim_win_set_cursor(0, { 1, 2 })
+        vim.lsp.buf.format({ bufnr = bufnr, false })
+
+        vim.lsp.stop_client(client_id)
+        return server.messages
+      ]])
+      local expected_methods = {
+        "initialize",
+        "initialized",
+        "textDocument/rangeFormatting",
+        "$/cancelRequest",
+        "textDocument/rangeFormatting",
+        "$/cancelRequest",
+        "shutdown",
+        "exit",
+      }
+      eq(expected_methods, vim.tbl_map(function(x) return x.method end, result))
+      -- uses first column of start line and last column of end line
+      local expected_range = {
+        start = { line = 0, character = 0 },
+        ['end'] = { line = 1, character = 7 },
+      }
+      eq(expected_range, result[3].params.range)
+      eq(expected_range, result[5].params.range)
     end)
     it('Aborts with notify if no clients support requested method', function()
       exec_lua(create_server_definition)

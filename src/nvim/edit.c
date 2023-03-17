@@ -52,7 +52,6 @@
 #include "nvim/plines.h"
 #include "nvim/popupmenu.h"
 #include "nvim/pos.h"
-#include "nvim/screen.h"
 #include "nvim/search.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
@@ -138,7 +137,7 @@ static void insert_enter(InsertState *s)
   did_restart_edit = restart_edit;
   // sleep before redrawing, needed for "CTRL-O :" that results in an
   // error message
-  check_for_delay(true);
+  msg_check_for_delay(true);
   // set Insstart_orig to Insstart
   update_Insstart_orig = true;
 
@@ -1350,12 +1349,15 @@ void ins_redraw(bool ready)
   }
 
   pum_check_clear();
+  show_cursor_info_later(false);
   if (must_redraw) {
     update_screen();
-  } else if (clear_cmdline || redraw_cmdline) {
-    showmode();  // clear cmdline and show mode
+  } else {
+    redraw_statuslines();
+    if (clear_cmdline || redraw_cmdline || redraw_mode) {
+      showmode();  // clear cmdline and show mode
+    }
   }
-  show_cursor_info(false);
   setcursor();
   emsg_on_display = false;      // may remove error message now
 }
@@ -1510,14 +1512,14 @@ bool prompt_curpos_editable(void)
 // Undo the previous edit_putchar().
 void edit_unputchar(void)
 {
-  if (pc_status != PC_STATUS_UNSET && pc_row >= msg_scrolled) {
+  if (pc_status != PC_STATUS_UNSET) {
     if (pc_status == PC_STATUS_RIGHT) {
       curwin->w_wcol++;
     }
     if (pc_status == PC_STATUS_RIGHT || pc_status == PC_STATUS_LEFT) {
       redrawWinline(curwin, curwin->w_cursor.lnum);
     } else {
-      grid_puts(&curwin->w_grid, pc_bytes, pc_row - msg_scrolled, pc_col, pc_attr);
+      grid_puts(&curwin->w_grid, pc_bytes, pc_row, pc_col, pc_attr);
     }
   }
 }

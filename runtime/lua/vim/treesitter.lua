@@ -99,13 +99,28 @@ function M.get_parser(bufnr, lang, opts)
   if bufnr == nil or bufnr == 0 then
     bufnr = a.nvim_get_current_buf()
   end
+
   if lang == nil then
     local ft = vim.bo[bufnr].filetype
-    lang = language.get_lang(ft) or ft
-    -- TODO(lewis6991): we should error here and not default to ft
-    -- if not lang then
-    --   error(string.format('filetype %s of buffer %d is not associated with any lang', ft, bufnr))
-    -- end
+    if ft ~= '' then
+      lang = language.get_lang(ft) or ft
+      -- TODO(lewis6991): we should error here and not default to ft
+      -- if not lang then
+      --   error(string.format('filetype %s of buffer %d is not associated with any lang', ft, bufnr))
+      -- end
+    else
+      if parsers[bufnr] then
+        return parsers[bufnr]
+      end
+      error(
+        string.format(
+          'There is no parser available for buffer %d and one could not be'
+            .. ' created because lang could not be determined. Either pass lang'
+            .. ' or set the buffer filetype',
+          bufnr
+        )
+      )
+    end
   end
 
   if parsers[bufnr] == nil or parsers[bufnr]:lang() ~= lang then
@@ -424,7 +439,7 @@ end
 ---                      - winid (integer|nil): Window id to display the tree buffer in. If omitted,
 ---                        a new window is created with {command}.
 ---                      - command (string|nil): Vimscript command to create the window. Default
----                        value is "topleft 60vnew". Only used when {winid} is nil.
+---                        value is "60vnew". Only used when {winid} is nil.
 ---                      - title (string|fun(bufnr:integer):string|nil): Title of the window. If a
 ---                        function, it accepts the buffer number of the source buffer as its only
 ---                        argument and should return a string.
@@ -450,7 +465,7 @@ function M.inspect_tree(opts)
 
   local w = opts.winid
   if not w then
-    vim.cmd(opts.command or 'topleft 60vnew')
+    vim.cmd(opts.command or '60vnew')
     w = a.nvim_get_current_win()
   end
 
@@ -631,12 +646,6 @@ function M.inspect_tree(opts)
       end
     end,
   })
-end
-
----@deprecated
----@private
-function M.show_tree()
-  vim.deprecate('show_tree', 'inspect_tree', '0.9', nil, false)
 end
 
 --- Returns the fold level for {lnum} in the current buffer. Can be set directly to 'foldexpr':

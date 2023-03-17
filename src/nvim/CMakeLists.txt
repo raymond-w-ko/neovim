@@ -393,6 +393,7 @@ get_target_property(prop main_lib INTERFACE_INCLUDE_DIRECTORIES)
 foreach(gen_include ${prop})
   list(APPEND gen_cflags "-I${gen_include}")
 endforeach()
+list(APPEND gen_cflags "-I${DEPS_PREFIX}/include")
 if(APPLE AND CMAKE_OSX_SYSROOT)
   list(APPEND gen_cflags "-isysroot")
   list(APPEND gen_cflags "${CMAKE_OSX_SYSROOT}")
@@ -739,6 +740,7 @@ if(WIN32)
   set(EXTERNAL_BLOBS_SCRIPT
     "file(MAKE_DIRECTORY \"${PROJECT_BINARY_DIR}/windows_runtime_deps/platforms\")")
   foreach(DEP_FILE IN ITEMS
+      cat.exe
       curl-ca-bundle.crt
       curl.exe
       diff.exe

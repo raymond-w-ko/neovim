@@ -6,6 +6,7 @@ local nvim_prog = helpers.nvim_prog
 local funcs = helpers.funcs
 local meths = helpers.meths
 local command = helpers.command
+local dedent = helpers.dedent
 local insert = helpers.insert
 local clear = helpers.clear
 local eq = helpers.eq
@@ -124,6 +125,22 @@ describe('lua stdlib', function()
     eq(1, funcs.luaeval('vim.stricmp("\\0C\\0", "\\0b\\0")'))
     eq(1, funcs.luaeval('vim.stricmp("\\0c\\0", "\\0b\\0")'))
     eq(1, funcs.luaeval('vim.stricmp("\\0C\\0", "\\0B\\0")'))
+  end)
+
+  it('vim.deprecate', function()
+    -- vim.deprecate(name, alternative, version, plugin, backtrace)
+    eq(dedent[[
+      foo.bar() is deprecated, use zub.wooo{ok=yay} instead. :help deprecated
+      This feature will be removed in Nvim version 2.17]],
+      exec_lua('return vim.deprecate(...)', 'foo.bar()', 'zub.wooo{ok=yay}', '2.17'))
+    -- Same message, skipped.
+    eq(vim.NIL,
+      exec_lua('return vim.deprecate(...)', 'foo.bar()', 'zub.wooo{ok=yay}', '2.17'))
+    -- When `plugin` is specified, don't show ":help deprecated". #22235
+    eq(dedent[[
+      foo.bar() is deprecated, use zub.wooo{ok=yay} instead.
+      This feature will be removed in my-plugin.nvim version 0.3.0]],
+      exec_lua('return vim.deprecate(...)', 'foo.bar()', 'zub.wooo{ok=yay}', '0.3.0', 'my-plugin.nvim', false))
   end)
 
   it('vim.startswith', function()
@@ -2269,7 +2286,7 @@ describe('lua stdlib', function()
 
   describe('vim.region', function()
     it('charwise', function()
-      insert(helpers.dedent( [[
+      insert(dedent( [[
       text tααt tααt text
       text tαxt txtα tex
       text tαxt tαxt
@@ -2922,6 +2939,24 @@ describe('lua stdlib', function()
       {1:~                                                           }|
       {4:-- Omni completion (^O^N^P) }{5:match 1 of 2}                    |
     ]]}
+  end)
+
+  it('vim.print', function()
+    -- vim.print() returns its args.
+    eq({42, 'abc', { a = { b = 77 }}},
+      exec_lua[[return {vim.print(42, 'abc', { a = { b = 77 }})}]])
+
+    -- vim.print() pretty-prints the args.
+    eq(dedent[[
+
+      42
+      abc
+      {
+        a = {
+          b = 77
+        }
+      }]],
+      eval[[execute('lua vim.print(42, "abc", { a = { b = 77 }})')]])
   end)
 end)
 

@@ -72,7 +72,6 @@
 #include "nvim/quickfix.h"
 #include "nvim/regexp.h"
 #include "nvim/runtime.h"
-#include "nvim/screen.h"
 #include "nvim/search.h"
 #include "nvim/shada.h"
 #include "nvim/state.h"
@@ -5666,10 +5665,7 @@ static void ex_equal(exarg_T *eap)
 static void ex_sleep(exarg_T *eap)
 {
   if (cursor_valid()) {
-    int n = curwin->w_winrow + curwin->w_wrow - msg_scrolled;
-    if (n >= 0) {
-      ui_cursor_goto(n, curwin->w_wincol + curwin->w_wcol);
-    }
+    setcursor_mayforce(true);
   }
 
   long len = eap->line2;
