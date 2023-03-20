@@ -5519,6 +5519,9 @@ int win_signcol_configured(win_T *wp, int *is_fixed)
   if (*scl == 'n'
       && (*(scl + 1) == 'o' || (*(scl + 1) == 'u'
                                 && (wp->w_p_nu || wp->w_p_rnu)))) {
+    if (*wp->w_p_stc != NUL) {
+      buf_signcols(wp->w_buffer, 0);
+    }
     return 0;
   }
 

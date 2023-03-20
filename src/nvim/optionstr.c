@@ -1198,8 +1198,8 @@ static void did_set_statusline(win_T *win, char **varp, char **gvarp, char **err
   if (varp == &p_ruf) {       // reset ru_wid first
     ru_wid = 0;
   } else if (varp == &win->w_p_stc) {
-    win->w_nrwidth_line_count = 0;
-    win->w_statuscol_line_count = 0;
+    win->w_nrwidth_line_count = 0;    // make sure width is reset
+    win->w_statuscol_line_count = 0;  // make sure width is re-estimated
   }
   char *s = *varp;
   if (varp == &p_ruf && *s == '%') {
@@ -1578,7 +1578,9 @@ static void do_spelllang_source(win_T *win)
     }
   }
   if (p > q) {
-    vim_snprintf(fname, sizeof(fname), "spell/%.*s.\\(vim\\|lua\\)", (int)(p - q), q);
+    vim_snprintf(fname, sizeof(fname), "spell/%.*s.vim", (int)(p - q), q);
+    source_runtime(fname, DIP_ALL);
+    vim_snprintf(fname, sizeof(fname), "spell/%.*s.lua", (int)(p - q), q);
     source_runtime(fname, DIP_ALL);
   }
 }
