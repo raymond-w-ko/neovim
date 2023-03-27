@@ -1355,9 +1355,9 @@ cmd({command})                                                     *vim.cmd()*
     Parameters: ~
       • {command}  string|table Command(s) to execute. If a string, executes
                    multiple lines of Vim script at once. In this case, it is
-                   an alias to |nvim_exec()|, where `output` is set to false.
-                   Thus it works identical to |:source|. If a table, executes
-                   a single command. In this case, it is an alias to
+                   an alias to |nvim_exec2()|, where `opts.output` is set to
+                   false. Thus it works identical to |:source|. If a table,
+                   executes a single command. In this case, it is an alias to
                    |nvim_cmd()| where `opts` is empty.
 
     See also: ~
@@ -1510,7 +1510,8 @@ print({...})                                                     *vim.print()*
 
 region({bufnr}, {pos1}, {pos2}, {regtype}, {inclusive})         *vim.region()*
     Get a table of lines with start, end columns for a region marked by two
-    points
+    points. Input and output positions are (0,0)-indexed and indicate byte
+    positions.
 
     Parameters: ~
       • {bufnr}      (integer) number of buffer
@@ -1518,11 +1519,12 @@ region({bufnr}, {pos1}, {pos2}, {regtype}, {inclusive})         *vim.region()*
                      region
       • {pos2}       integer[] (line, column) tuple marking end of region
       • {regtype}    (string) type of selection, see |setreg()|
-      • {inclusive}  (boolean) indicating whether the selection is
-                     end-inclusive
+      • {inclusive}  (boolean) indicating whether column of pos2 is inclusive
 
     Return: ~
-        (table) region Table of the form `{linenr = {startcol,endcol}}`
+        (table) region Table of the form `{linenr = {startcol,endcol}}`.
+        `endcol` is exclusive, and whole lines are marked with
+        `{startcol,endcol} = {0,-1}`.
 
 schedule_wrap({cb})                                      *vim.schedule_wrap()*
     Defers callback `cb` until the Nvim API is safe to call.
@@ -2020,6 +2022,53 @@ validate({opt})                                               *vim.validate()*
                     an additional informative error message as the second
                     returned value.
                   • msg: (optional) error string if validation fails
+
+
+==============================================================================
+Lua module: loader                                                *lua-loader*
+
+disable()                                               *vim.loader.disable()*
+    Disables the experimental Lua module loader:
+    • removes the loaders
+    • adds the default Neovim loader
+
+enable()                                                 *vim.loader.enable()*
+    Enables the experimental Lua module loader:
+    • overrides loadfile
+    • adds the lua loader using the byte-compilation cache
+    • adds the libs loader
+    • removes the default Neovim loader
+
+find({modname}, {opts})                                    *vim.loader.find()*
+    Finds lua modules for the given module name.
+
+    Parameters: ~
+      • {modname}  (string) Module name, or `"*"` to find the top-level
+                   modules instead
+      • {opts}     (table|nil) Options for finding a module:
+                   • rtp: (boolean) Search for modname in the runtime path
+                     (defaults to `true`)
+                   • paths: (string[]) Extra paths to search for modname
+                     (defaults to `{}`)
+                   • patterns: (string[]) List of patterns to use when
+                     searching for modules. A pattern is a string added to the
+                     basename of the Lua module being searched. (defaults to
+                     `{"/init.lua", ".lua"}`)
+                   • all: (boolean) Return all matches instead of just the
+                     first one (defaults to `false`)
+
+    Return: ~
+        (list) A list of results with the following properties:
+        • modpath: (string) the path to the module
+        • modname: (string) the name of the module
+        • stat: (table|nil) the fs_stat of the module path. Won't be returned
+          for `modname="*"`
+
+reset({path})                                             *vim.loader.reset()*
+    Resets the topmods cache for the path, or all the paths if path is nil.
+
+    Parameters: ~
+      • {path}  string? path to reset
 
 
 ==============================================================================

@@ -60,10 +60,16 @@ The following changes may require adaptations in user config or plugins.
 
 • Renamed vim.pretty_print to vim.print. |deprecated|
 
+• |nvim_exec()| is now deprecated in favor of |nvim_exec2()|.
+
 ==============================================================================
 NEW FEATURES                                                    *news-features*
 
 The following new APIs or features were added.
+
+• Added a new experimental |lua-loader| that byte-compiles and caches lua files.
+  To enable the new loader, add the following at the top of your |init.lua|: >lua
+    vim.loader.enable()
 
 • Added |lua-version| for parsing and comparing version strings conforming to
   the semver specification.
