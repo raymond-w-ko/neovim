@@ -96,7 +96,7 @@ typedef enum {
   WEE_TRIGGER_LEAVE_AUTOCMDS = 0x10,
 } wee_flags_T;
 
-static char e_cannot_split_window_when_closing_buffer[]
+static const char e_cannot_split_window_when_closing_buffer[]
   = N_("E1159: Cannot split a window when closing the buffer");
 
 static char *m_onlyone = N_("Already only one window");
@@ -2417,7 +2417,7 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
   }
 }
 
-static void leaving_window(win_T *const win)
+void leaving_window(win_T *const win)
   FUNC_ATTR_NONNULL_ALL
 {
   // Only matters for a prompt window.
@@ -7422,7 +7422,7 @@ static int int_cmp(const void *a, const void *b)
 /// Handle setting 'colorcolumn' or 'textwidth' in window "wp".
 ///
 /// @return error message, NULL if it's OK.
-char *check_colorcolumn(win_T *wp)
+const char *check_colorcolumn(win_T *wp)
 {
   if (wp->w_buffer == NULL) {
     return NULL;      // buffer was closed

@@ -62,10 +62,24 @@ The following changes may require adaptations in user config or plugins.
 
 • |nvim_exec()| is now deprecated in favor of |nvim_exec2()|.
 
+• `help` treesitter parser was renamed to `vimdoc`. The only user-visible
+  change is that language-specific highlight groups need to be renamed from
+  `@foo.help` to `@foo.vimdoc`.
+
+• The default value of 'commentstring' is now empty instead of "/*%s*/".
+
 ==============================================================================
 NEW FEATURES                                                    *news-features*
 
 The following new APIs or features were added.
+
+• |nvim_eval_statusline()| supports evaluating the |'statuscolumn'| through a
+  new `opts` field: `use_statuscol`.
+
+• |nvim_buf_get_extmarks()| now accepts a -1 `ns_id` to request extmarks from
+  all namespaces and adds the namespace id to the details array.
+  Other missing properties have been added to the details array and marks can
+  be filtered by type.
 
 • Added a new experimental |lua-loader| that byte-compiles and caches lua files.
   To enable the new loader, add the following at the top of your |init.lua|: >lua
@@ -226,6 +240,9 @@ The following new APIs or features were added.
 
 • Added |nvim_get_hl()| for getting highlight group definitions in a format compatible with |nvim_set_hl()|.
 
+• |vim.diagnostic| now supports LSP DiagnosticsTag.
+  See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnosticTag
+
 ==============================================================================
 CHANGED FEATURES                                                 *news-changes*
 
@@ -245,7 +262,7 @@ The following changes to existing APIs or features add new behavior.
 • API calls now show more information about where an exception happened.
 
 • The `win_viewport` UI event now contains information about virtual lines,
-  meaning that smooth scrolling can now be implemented more consistenlty.
+  meaning that smooth scrolling can now be implemented more consistently.
 
 • The `:= {expr}` syntax can be used to evaluate a lua expression, as
   a shorter form of `:lua ={expr}`. `:=` and `:[range]=` without argument

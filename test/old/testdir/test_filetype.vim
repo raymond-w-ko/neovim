@@ -338,6 +338,7 @@ let s:filename_checks = {
     \ 'lite': ['file.lite', 'file.lt'],
     \ 'litestep': ['/LiteStep/any/file.rc', 'any/LiteStep/any/file.rc'],
     \ 'logcheck': ['/etc/logcheck/file.d-some/file', '/etc/logcheck/file.d/file', 'any/etc/logcheck/file.d-some/file', 'any/etc/logcheck/file.d/file'],
+    \ 'livebook': ['file.livemd'],
     \ 'loginaccess': ['/etc/login.access', 'any/etc/login.access'],
     \ 'logindefs': ['/etc/login.defs', 'any/etc/login.defs'],
     \ 'logtalk': ['file.lgt'],
@@ -1226,23 +1227,7 @@ func Test_fs_file()
   call assert_equal('forth', &filetype)
   bwipe!
 
-  call writefile(['.( Forth displayed inline comment )'], 'Xfile.fs')
-  split Xfile.fs
-  call assert_equal('forth', &filetype)
-  bwipe!
-
   call writefile(['\ Forth line comment'], 'Xfile.fs')
-  split Xfile.fs
-  call assert_equal('forth', &filetype)
-  bwipe!
-
-  " empty line comment - no space required
-  call writefile(['\'], 'Xfile.fs')
-  split Xfile.fs
-  call assert_equal('forth', &filetype)
-  bwipe!
-
-  call writefile(['\G Forth documentation comment '], 'Xfile.fs')
   split Xfile.fs
   call assert_equal('forth', &filetype)
   bwipe!

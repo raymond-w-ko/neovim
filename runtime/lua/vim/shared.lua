@@ -655,7 +655,7 @@ end
 ---  vim.validate{arg1={{'foo'}, {'table', 'string'}}, arg2={'foo', {'table', 'string'}}}
 ---     --> NOP (success)
 ---
----  vim.validate{arg1={1, {'string', table'}}}
+---  vim.validate{arg1={1, {'string', 'table'}}}
 ---     --> error('arg1: expected string|table, got number')
 ---
 --- </pre>
@@ -796,13 +796,15 @@ end
 --- a.b.c = 1
 --- </pre>
 ---
----@param create function|nil The function called to create a missing value.
+---@param create function?(key:any):any The function called to create a missing value.
 ---@return table Empty table with metamethod
 function vim.defaulttable(create)
-  create = create or vim.defaulttable
+  create = create or function(_)
+    return vim.defaulttable()
+  end
   return setmetatable({}, {
     __index = function(tbl, key)
-      rawset(tbl, key, create())
+      rawset(tbl, key, create(key))
       return rawget(tbl, key)
     end,
   })

@@ -21,7 +21,7 @@ find_package(Iconv REQUIRED)
 find_package(Libtermkey 0.22 REQUIRED)
 find_package(Libvterm 0.3 REQUIRED)
 find_package(Msgpack 1.0.0 REQUIRED)
-find_package(Treesitter REQUIRED)
+find_package(Treesitter 0.20.8 REQUIRED)
 find_package(Unibilium 2.0 REQUIRED)
 
 target_link_libraries(main_lib INTERFACE
@@ -273,6 +273,7 @@ set(LUA_EDITOR_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/_editor.lua)
 set(LUA_SHARED_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/shared.lua)
 set(LUA_LOADER_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/loader.lua)
 set(LUA_INSPECT_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/inspect.lua)
+set(LUA_FS_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/fs.lua)
 set(LUA_F_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/F.lua)
 set(LUA_META_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/_meta.lua)
 set(LUA_FILETYPE_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/filetype.lua)
@@ -505,6 +506,7 @@ add_custom_command(
       ${LUA_PRG} ${CHAR_BLOB_GENERATOR} -c ${VIM_MODULE_FILE}
       ${LUA_INIT_PACKAGES_MODULE_SOURCE} "vim._init_packages"
       ${LUA_INSPECT_MODULE_SOURCE} "vim.inspect"
+      ${LUA_FS_MODULE_SOURCE} "vim.fs"
       ${LUA_EDITOR_MODULE_SOURCE} "vim._editor"
       ${LUA_SHARED_MODULE_SOURCE} "vim.shared"
       ${LUA_LOADER_MODULE_SOURCE} "vim.loader"
@@ -744,15 +746,12 @@ if(WIN32)
     "file(MAKE_DIRECTORY \"${PROJECT_BINARY_DIR}/windows_runtime_deps/platforms\")")
   foreach(DEP_FILE IN ITEMS
       cat.exe
-      curl-ca-bundle.crt
-      curl.exe
       diff.exe
       tee.exe
       win32yank.exe
       xxd.exe
 
-      ${NVIMQT_DEPS}
-      )
+      ${NVIMQT_DEPS})
   get_filename_component(DEP_FILE_DIR ${DEP_FILE} DIRECTORY)
   set(EXTERNAL_BLOBS_SCRIPT "${EXTERNAL_BLOBS_SCRIPT}\n"
     "file(COPY \"${DEPS_PREFIX}/bin/${DEP_FILE}\"
@@ -795,7 +794,7 @@ target_compile_definitions(libnvim PRIVATE MAKE_LIB)
 target_link_libraries(libnvim PRIVATE main_lib PUBLIC libuv)
 
 if(ENABLE_ASAN_UBSAN)
-  message(STATUS "Enabling Clang address sanitizer and undefined behavior sanitizer for nvim.")
+  message(STATUS "Enabling address sanitizer and undefined behavior sanitizer for nvim.")
   if(CI_BUILD)
     # Try to recover from all sanitize issues so we get reports about all failures
     target_compile_options(nvim PRIVATE -fsanitize-recover=all)
@@ -809,7 +808,7 @@ if(ENABLE_ASAN_UBSAN)
     -fsanitize=undefined)
   target_link_libraries(nvim PRIVATE -fsanitize=address -fsanitize=undefined)
 elseif(ENABLE_MSAN)
-  message(STATUS "Enabling Clang memory sanitizer for nvim.")
+  message(STATUS "Enabling memory sanitizer for nvim.")
   target_compile_options(nvim PRIVATE
     -fsanitize=memory
     -fsanitize-memory-track-origins
@@ -817,7 +816,7 @@ elseif(ENABLE_MSAN)
     -fno-optimize-sibling-calls)
   target_link_libraries(nvim PRIVATE -fsanitize=memory -fsanitize-memory-track-origins)
 elseif(ENABLE_TSAN)
-  message(STATUS "Enabling Clang thread sanitizer for nvim.")
+  message(STATUS "Enabling thread sanitizer for nvim.")
   target_compile_options(nvim PRIVATE -fsanitize=thread -fPIE)
   target_link_libraries(nvim PRIVATE -fsanitize=thread)
 endif()

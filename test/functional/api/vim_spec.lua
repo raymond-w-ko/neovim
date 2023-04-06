@@ -1,6 +1,5 @@
 local helpers = require('test.functional.helpers')(after_each)
 local Screen = require('test.functional.ui.screen')
-local lfs = require('lfs')
 local luv = require('luv')
 
 local fmt = string.format
@@ -2080,6 +2079,46 @@ describe('API', function()
     end)
   end)
 
+  describe('nvim_err_writeln', function()
+    local screen
+
+    before_each(function()
+      screen = Screen.new(40, 8)
+      screen:attach()
+      screen:set_default_attr_ids({
+        [0] = {bold=true, foreground=Screen.colors.Blue},
+        [1] = {foreground = Screen.colors.White, background = Screen.colors.Red},
+        [2] = {bold = true, foreground = Screen.colors.SeaGreen},
+        [3] = {bold = true, reverse = true},
+      })
+    end)
+
+    it('shows only one return prompt after all lines are shown', function()
+      nvim_async('err_writeln', 'FAILURE\nERROR\nEXCEPTION\nTRACEBACK')
+      screen:expect([[
+                                                |
+        {0:~                                       }|
+        {3:                                        }|
+        {1:FAILURE}                                 |
+        {1:ERROR}                                   |
+        {1:EXCEPTION}                               |
+        {1:TRACEBACK}                               |
+        {2:Press ENTER or type command to continue}^ |
+      ]])
+      feed('<CR>')
+      screen:expect([[
+        ^                                        |
+        {0:~                                       }|
+        {0:~                                       }|
+        {0:~                                       }|
+        {0:~                                       }|
+        {0:~                                       }|
+        {0:~                                       }|
+                                                |
+      ]])
+    end)
+  end)
+
   describe('nvim_list_chans, nvim_get_chan_info', function()
     before_each(function()
       command('autocmd ChanOpen * let g:opened_event = deepcopy(v:event)')
@@ -2892,6 +2931,99 @@ describe('API', function()
     end)
   end)
 
+  describe('nvim_get_option_info2', function()
+    local fname
+    local bufs
+    local wins
+
+    before_each(function()
+      fname = tmpname()
+      write_file(fname, [[
+        setglobal dictionary=mydict " 1, global-local (buffer)
+        setlocal  formatprg=myprg   " 2, global-local (buffer)
+        setglobal equalprg=prg1     " 3, global-local (buffer)
+        setlocal  equalprg=prg2     " 4, global-local (buffer)
+        setglobal fillchars=stl:x   " 5, global-local (window)
+        setlocal  listchars=eol:c   " 6, global-local (window)
+        setglobal showbreak=aaa     " 7, global-local (window)
+        setlocal  showbreak=bbb     " 8, global-local (window)
+        setglobal completeopt=menu  " 9, global
+      ]])
+
+      exec_lua 'vim.cmd.vsplit()'
+      meths.create_buf(false, false)
+
+      bufs = meths.list_bufs()
+      wins = meths.list_wins()
+
+      meths.win_set_buf(wins[1].id, bufs[1].id)
+      meths.win_set_buf(wins[2].id, bufs[2].id)
+
+      meths.set_current_win(wins[2].id)
+      meths.exec('source ' .. fname, false)
+
+      meths.set_current_win(wins[1].id)
+    end)
+
+    after_each(function()
+      os.remove(fname)
+    end)
+
+    it('should return option information', function()
+      eq(meths.get_option_info('dictionary'),  meths.get_option_info2('dictionary',  {})) -- buffer
+      eq(meths.get_option_info('fillchars'),   meths.get_option_info2('fillchars',   {})) -- window
+      eq(meths.get_option_info('completeopt'), meths.get_option_info2('completeopt', {})) -- global
+    end)
+
+    describe('last set', function()
+      local tests = {
+        {desc="(buf option, global requested, global set) points to global",   linenr=1, sid=1, args={'dictionary', {scope='global'}}},
+        {desc="(buf option, global requested, local set) is not set",          linenr=0, sid=0, args={'formatprg',  {scope='global'}}},
+        {desc="(buf option, global requested, both set) points to global",     linenr=3, sid=1, args={'equalprg',   {scope='global'}}},
+        {desc="(buf option, local requested, global set) is not set",          linenr=0, sid=0, args={'dictionary', {scope='local'}}},
+        {desc="(buf option, local requested, local set) points to local",      linenr=2, sid=1, args={'formatprg',  {scope='local'}}},
+        {desc="(buf option, local requested, both set) points to local",       linenr=4, sid=1, args={'equalprg',   {scope='local'}}},
+        {desc="(buf option, fallback requested, global set) points to global", linenr=1, sid=1, args={'dictionary', {}}},
+        {desc="(buf option, fallback requested, local set) points to local",   linenr=2, sid=1, args={'formatprg',  {}}},
+        {desc="(buf option, fallback requested, both set) points to local",    linenr=4, sid=1, args={'equalprg',   {}}},
+        {desc="(win option, global requested, global set) points to global",   linenr=5, sid=1, args={'fillchars', {scope='global'}}},
+        {desc="(win option, global requested, local set) is not set",          linenr=0, sid=0, args={'listchars', {scope='global'}}},
+        {desc="(win option, global requested, both set) points to global",     linenr=7, sid=1, args={'showbreak', {scope='global'}}},
+        {desc="(win option, local requested, global set) is not set",          linenr=0, sid=0, args={'fillchars', {scope='local'}}},
+        {desc="(win option, local requested, local set) points to local",      linenr=6, sid=1, args={'listchars', {scope='local'}}},
+        {desc="(win option, local requested, both set) points to local",       linenr=8, sid=1, args={'showbreak', {scope='local'}}},
+        {desc="(win option, fallback requested, global set) points to global", linenr=5, sid=1, args={'fillchars', {}}},
+        {desc="(win option, fallback requested, local set) points to local",   linenr=6, sid=1, args={'listchars', {}}},
+        {desc="(win option, fallback requested, both set) points to local",    linenr=8, sid=1, args={'showbreak', {}}},
+        {desc="(global option, global requested) points to global",            linenr=9, sid=1, args={'completeopt', {scope='global'}}},
+        {desc="(global option, local requested) is not set",                   linenr=0, sid=0, args={'completeopt', {scope='local'}}},
+        {desc="(global option, fallback requested) points to global",          linenr=9, sid=1, args={'completeopt', {}}},
+      }
+
+      for _, t in pairs(tests) do
+        it(t.desc, function()
+          -- Switch to the target buffer/window so that curbuf/curwin are used.
+          meths.set_current_win(wins[2].id)
+          local info = meths.get_option_info2(unpack(t.args))
+          eq(t.linenr, info.last_set_linenr)
+          eq(t.sid, info.last_set_sid)
+        end)
+      end
+
+      it('is provided for cross-buffer requests', function()
+        local info = meths.get_option_info2('formatprg', {buf=bufs[2].id})
+        eq(2, info.last_set_linenr)
+        eq(1, info.last_set_sid)
+      end)
+
+      it('is provided for cross-window requests', function()
+        local info = meths.get_option_info2('listchars', {win=wins[2].id})
+        eq(6, info.last_set_linenr)
+        eq(1, info.last_set_sid)
+      end)
+    end)
+  end)
+
   describe('nvim_echo', function()
     local screen
 
@@ -3288,6 +3420,40 @@ describe('API', function()
           meths.eval_statusline(
             'TextWithNoHighlight%#WarningMsg#TextWithWarningHighlight',
             { use_winbar = true, highlights = true }))
+      end)
+      it('works with statuscolumn', function()
+        command([[
+          let &stc='%C%s%=%l '
+          set cul nu nuw=3 scl=yes:2 fdc=2
+          call setline(1, repeat(['aaaaa'], 5))
+          let g:ns = nvim_create_namespace('')
+          call sign_define('a', {'text':'aa', 'texthl':'IncSearch', 'numhl':'Normal'})
+          call sign_place(2, 1, 'a', bufnr(), {'lnum':4})
+          call nvim_buf_set_extmark(0, g:ns, 3, 1, { 'sign_text':'bb', 'sign_hl_group':'ErrorMsg' })
+          1,5fold | 1,5 fold | foldopen!
+        ]])
+        command('norm 4G')
+        command('let v:lnum=4')
+        eq({
+          str = '││aabb 4 ',
+          width = 9,
+          highlights = {
+            { group = 'CursorLineFold', start = 0 },
+            { group = 'Normal', start = 6 },
+            { group = 'IncSearch', start = 6 },
+            { group = 'ErrorMsg', start = 8 },
+            { group = 'Normal', start = 10 }
+          }
+        }, meths.eval_statusline('%C%s%=%l ', { use_statuscol = true, highlights = true }))
+        command('let v:lnum=3')
+        eq({
+          str = '3 ' ,
+          width = 2,
+          highlights = {
+            { group = 'LineNr', start = 0 },
+            { group = 'ErrorMsg', start = 1 }
+          }
+        }, meths.eval_statusline('%l%#ErrorMsg# ', { use_statuscol = true, highlights = true }))
       end)
       it('no memory leak with click functions', function()
         meths.eval_statusline('%@ClickFunc@StatusLineStringWithClickFunc%T', {})
@@ -4047,7 +4213,7 @@ describe('API', function()
          meths.cmd({ cmd = "buffers", mods = { filter = { pattern = "foo", force = true } } },
                    { output = true }))
 
-      -- with emsg_silent = true error is suppresed
+      -- with emsg_silent = true error is suppressed
       feed([[:lua vim.api.nvim_cmd({ cmd = 'call', mods = { emsg_silent = true } }, {})<CR>]])
       eq('', meths.cmd({ cmd = 'messages' }, { output = true }))
       -- error from the next command typed is not suppressed #21420
@@ -4060,7 +4226,7 @@ describe('API', function()
           vim.api.nvim_echo({{ opts.fargs[1] }}, false, {})
         end, { nargs = 1 })
       ]])
-      eq(lfs.currentdir(),
+      eq(luv.cwd(),
          meths.cmd({ cmd = "Foo", args = { '%:p:h' }, magic = { file = true } },
                    { output = true }))
     end)

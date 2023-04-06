@@ -2117,7 +2117,7 @@ static int command_line_handle_key(CommandLineState *s)
 
   // put the character in the command line
   if (IS_SPECIAL(s->c) || mod_mask != 0) {
-    put_on_cmdline((char *)get_special_key_name(s->c, mod_mask), -1, true);
+    put_on_cmdline(get_special_key_name(s->c, mod_mask), -1, true);
   } else {
     int j = utf_char2bytes(s->c, IObuff);
     IObuff[j] = NUL;                // exclude composing chars
@@ -2753,7 +2753,7 @@ void text_locked_msg(void)
   emsg(_(get_text_locked_msg()));
 }
 
-char *get_text_locked_msg(void)
+const char *get_text_locked_msg(void)
 {
   if (cmdwin_type != 0) {
     return e_cmdwin;
@@ -4274,7 +4274,7 @@ void cmdline_init(void)
 
 /// Check value of 'cedit' and set cedit_key.
 /// Returns NULL if value is OK, error message otherwise.
-char *check_cedit(void)
+const char *check_cedit(void)
 {
   if (*p_cedit == NUL) {
     cedit_key = -1;

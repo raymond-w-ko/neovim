@@ -145,10 +145,10 @@ PRAGMA_DIAG_POP
 PRAGMA_DIAG_POP
 #endif
 
-static char *e_listblobarg = N_("E899: Argument of %s must be a List or Blob");
-static char *e_invalwindow = N_("E957: Invalid window number");
-static char *e_reduceempty = N_("E998: Reduce of an empty %s with no initial value");
-static char e_using_number_as_bool_nr[]
+static const char *e_listblobarg = N_("E899: Argument of %s must be a List or Blob");
+static const char *e_invalwindow = N_("E957: Invalid window number");
+static const char *e_reduceempty = N_("E998: Reduce of an empty %s with no initial value");
+static const char e_using_number_as_bool_nr[]
   = N_("E1023: Using a Number as a Bool: %d");
 
 /// Dummy va_list for passing to vim_snprintf
@@ -4670,7 +4670,7 @@ static void find_some_match(typval_T *const argvars, typval_T *const rettv,
     }
   }
 
-  regmatch.regprog = vim_regcomp((char *)pat, RE_MAGIC + RE_STRING);
+  regmatch.regprog = vim_regcomp(pat, RE_MAGIC + RE_STRING);
   if (regmatch.regprog != NULL) {
     regmatch.rm_ic = p_ic;
 
@@ -6197,7 +6197,7 @@ static void f_resolve(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 # else
   char *v = os_realpath(fname, NULL);
-  rettv->vval.v_string = (char_u *)(v == NULL ? xstrdup(fname) : v);
+  rettv->vval.v_string = v == NULL ? xstrdup(fname) : v;
 # endif
 #endif
 
@@ -7557,7 +7557,7 @@ free_lstval:
 /// "settagstack()" function
 static void f_settagstack(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  static char *e_invact2 = N_("E962: Invalid action: '%s'");
+  static const char *e_invact2 = N_("E962: Invalid action: '%s'");
   char action = 'r';
 
   rettv->vval.v_number = -1;
@@ -7895,7 +7895,7 @@ static void f_split(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   regmatch_T regmatch = {
-    .regprog = vim_regcomp((char *)pat, RE_MAGIC + RE_STRING),
+    .regprog = vim_regcomp(pat, RE_MAGIC + RE_STRING),
     .startp = { NULL },
     .endp = { NULL },
     .rm_ic = false,
@@ -7906,7 +7906,7 @@ static void f_split(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       if (*str == NUL) {
         match = false;  // Empty item at the end.
       } else {
-        match = vim_regexec_nl(&regmatch, (char *)str, col);
+        match = vim_regexec_nl(&regmatch, str, col);
       }
       const char *end;
       if (match) {

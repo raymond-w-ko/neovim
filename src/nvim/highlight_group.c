@@ -218,6 +218,8 @@ static const char *highlight_init_both[] = {
   "default link DiagnosticSignInfo DiagnosticInfo",
   "default link DiagnosticSignHint DiagnosticHint",
   "default link DiagnosticSignOk DiagnosticOk",
+  "default DiagnosticDeprecated cterm=strikethrough gui=strikethrough guisp=Red",
+  "default link DiagnosticUnnecessary Comment",
 
   // Text
   "default link @text.literal Comment",
@@ -276,6 +278,7 @@ static const char *highlight_init_both[] = {
 
   // LSP semantic tokens
   "default link @lsp.type.class Structure",
+  "default link @lsp.type.comment Comment",
   "default link @lsp.type.decorator Function",
   "default link @lsp.type.enum Structure",
   "default link @lsp.type.enumMember Constant",
@@ -795,9 +798,9 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
   }
 
   HlGroup *g = &hl_table[idx];
+  g->sg_cleared = false;
 
   if (link_id > 0) {
-    g->sg_cleared = false;
     g->sg_link = link_id;
     g->sg_script_ctx = current_sctx;
     g->sg_script_ctx.sc_lnum += SOURCING_LNUM;
@@ -807,11 +810,10 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
       g->sg_deflink_sctx = current_sctx;
       g->sg_deflink_sctx.sc_lnum += SOURCING_LNUM;
     }
-    goto update;
+  } else {
+    g->sg_link = 0;
   }
 
-  g->sg_cleared = false;
-  g->sg_link = 0;
   g->sg_gui = attrs.rgb_ae_attr;
 
   g->sg_rgb_fg = attrs.rgb_fg_color;
@@ -863,7 +865,6 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
     }
   }
 
-update:
   if (!updating_screen) {
     redraw_all_later(UPD_NOT_VALID);
   }
@@ -1531,17 +1532,15 @@ static bool hlgroup2dict(Dictionary *hl, NS ns_id, int hl_id, Arena *arena)
   }
   HlAttrs attr =
     syn_attr2entry(ns_id == 0 ? sgp->sg_attr : ns_get_hl(&ns_id, hl_id, false, sgp->sg_set));
+  *hl = arena_dict(arena, HLATTRS_DICT_SIZE + 1);
   if (link > 0) {
-    *hl = arena_dict(arena, 1);
     PUT_C(*hl, "link", STRING_OBJ(cstr_as_string(hl_table[link - 1].sg_name)));
-  } else {
-    *hl = arena_dict(arena, HLATTRS_DICT_SIZE);
-    Dictionary hl_cterm = arena_dict(arena, HLATTRS_DICT_SIZE);
-    hlattrs2dict(hl, NULL, attr, true, true);
-    hlattrs2dict(hl, &hl_cterm, attr, false, true);
-    if (kv_size(hl_cterm)) {
-      PUT_C(*hl, "cterm", DICTIONARY_OBJ(hl_cterm));
-    }
+  }
+  Dictionary hl_cterm = arena_dict(arena, HLATTRS_DICT_SIZE);
+  hlattrs2dict(hl, NULL, attr, true, true);
+  hlattrs2dict(hl, &hl_cterm, attr, false, true);
+  if (kv_size(hl_cterm)) {
+    PUT_C(*hl, "cterm", DICTIONARY_OBJ(hl_cterm));
   }
   return true;
 }
@@ -1633,7 +1632,7 @@ static bool highlight_list_arg(const int id, bool didh, const int type, int iarg
     }
   }
 
-  (void)syn_list_header(didh, vim_strsize((char *)ts) + (int)strlen(name) + 1, id, false);
+  (void)syn_list_header(didh, vim_strsize(ts) + (int)strlen(name) + 1, id, false);
   didh = true;
   if (!got_int) {
     if (*name != NUL) {
@@ -1989,18 +1988,23 @@ static int syn_add_group(const char *name, size_t len)
 /// @see syn_attr2entry
 int syn_id2attr(int hl_id)
 {
-  return syn_ns_id2attr(-1, hl_id, false);
+  bool optional = false;
+  return syn_ns_id2attr(-1, hl_id, &optional);
 }
 
-int syn_ns_id2attr(int ns_id, int hl_id, bool optional)
+int syn_ns_id2attr(int ns_id, int hl_id, bool *optional)
+  FUNC_ATTR_NONNULL_ALL
 {
-  hl_id = syn_ns_get_final_id(&ns_id, hl_id);
+  if (syn_ns_get_final_id(&ns_id, &hl_id)) {
+    // If the namespace explicitly defines a group to be empty, it is not optional
+    *optional = false;
+  }
   HlGroup *sgp = &hl_table[hl_id - 1];  // index is ID minus one
 
   int attr = ns_get_hl(&ns_id, hl_id, false, sgp->sg_set);
 
   // if a highlight group is optional, don't use the global value
-  if (attr >= 0 || (optional && ns_id > 0)) {
+  if (attr >= 0 || (*optional && ns_id > 0)) {
     return attr;
   }
   return sgp->sg_attr;
@@ -2009,16 +2013,20 @@ int syn_ns_id2attr(int ns_id, int hl_id, bool optional)
 /// Translate a group ID to the final group ID (following links).
 int syn_get_final_id(int hl_id)
 {
-  int id = curwin->w_ns_hl_active;
-  return syn_ns_get_final_id(&id, hl_id);
+  int ns_id = curwin->w_ns_hl_active;
+  syn_ns_get_final_id(&ns_id, &hl_id);
+  return hl_id;
 }
 
-int syn_ns_get_final_id(int *ns_id, int hl_id)
+bool syn_ns_get_final_id(int *ns_id, int *hl_idp)
 {
   int count;
+  int hl_id = *hl_idp;
+  bool used = false;
 
   if (hl_id > highlight_ga.ga_len || hl_id < 1) {
-    return 0;  // Can be called from eval!!
+    *hl_idp = 0;
+    return false;  // Can be called from eval!!
   }
 
   // Follow links until there is no more.
@@ -2031,8 +2039,10 @@ int syn_ns_get_final_id(int *ns_id, int hl_id)
     // syn_id2attr time
     int check = ns_get_hl(ns_id, hl_id, true, sgp->sg_set);
     if (check == 0) {
-      return hl_id;  // how dare! it broke the link!
+      *hl_idp = hl_id;
+      return true;  // how dare! it broke the link!
     } else if (check > 0) {
+      used = true;
       hl_id = check;
       continue;
     }
@@ -2046,7 +2056,8 @@ int syn_ns_get_final_id(int *ns_id, int hl_id)
     }
   }
 
-  return hl_id;
+  *hl_idp = hl_id;
+  return used;
 }
 
 /// Refresh the color attributes of all highlight groups.
@@ -2129,7 +2140,8 @@ void highlight_changed(void)
       abort();
     }
     int ns_id = -1;
-    int final_id = syn_ns_get_final_id(&ns_id, id);
+    int final_id = id;
+    syn_ns_get_final_id(&ns_id, &final_id);
     if (hlf == HLF_SNC) {
       id_SNC = final_id;
     } else if (hlf == HLF_S) {
