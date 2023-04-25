@@ -56,7 +56,6 @@ static const char e_no_such_user_defined_command_in_current_buffer_str[]
 static const char *command_complete[] = {
   [EXPAND_ARGLIST] = "arglist",
   [EXPAND_AUGROUP] = "augroup",
-  [EXPAND_BEHAVE] = "behave",
   [EXPAND_BUFFERS] = "buffer",
   [EXPAND_CHECKHEALTH] = "checkhealth",
   [EXPAND_COLORS] = "color",
@@ -234,7 +233,7 @@ const char *set_context_in_user_cmd(expand_T *xp, const char *arg_in)
   // Check for attributes
   while (*arg == '-') {
     arg++;  // Skip "-".
-    p = (const char *)skiptowhite(arg);
+    p = skiptowhite(arg);
     if (*p == NUL) {
       // Cursor is still in the attribute.
       p = strchr(arg, '=');
@@ -262,11 +261,11 @@ const char *set_context_in_user_cmd(expand_T *xp, const char *arg_in)
       }
       return NULL;
     }
-    arg = (const char *)skipwhite(p);
+    arg = skipwhite(p);
   }
 
   // After the attributes comes the new command name.
-  p = (const char *)skiptowhite(arg);
+  p = skiptowhite(arg);
   if (*p == NUL) {
     xp->xp_context = EXPAND_USER_COMMANDS;
     xp->xp_pattern = (char *)arg;
@@ -274,7 +273,7 @@ const char *set_context_in_user_cmd(expand_T *xp, const char *arg_in)
   }
 
   // And finally comes a normal command.
-  return (const char *)skipwhite(p);
+  return skipwhite(p);
 }
 
 /// Set the completion context for the argument of a user defined command.
@@ -292,7 +291,7 @@ const char *set_context_in_user_cmdarg(const char *cmd FUNC_ATTR_UNUSED, const c
   }
 
   if (context == EXPAND_MENUS) {
-    return (const char *)set_context_in_menu_cmd(xp, cmd, (char *)arg, forceit);
+    return set_context_in_menu_cmd(xp, cmd, (char *)arg, forceit);
   }
   if (context == EXPAND_COMMANDS) {
     return arg;
@@ -470,7 +469,7 @@ static void uc_list(char *name, size_t name_len)
       }
 
       // Special cases
-      int len = 4;
+      size_t len = 4;
       if (a & EX_BANG) {
         msg_putchar('!');
         len--;
@@ -492,7 +491,7 @@ static void uc_list(char *name, size_t name_len)
       }
 
       msg_outtrans_attr(cmd->uc_name, HL_ATTR(HLF_D));
-      len = (int)strlen(cmd->uc_name) + 4;
+      len = strlen(cmd->uc_name) + 4;
 
       do {
         msg_putchar(' ');
@@ -501,7 +500,7 @@ static void uc_list(char *name, size_t name_len)
 
       // "over" is how much longer the name is than the column width for
       // the name, we'll try to align what comes after.
-      const int over = len - 22;
+      const int64_t over = (int64_t)len - 22;
       len = 0;
 
       // Arguments
@@ -525,20 +524,22 @@ static void uc_list(char *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 5 - over);
+      } while ((int64_t)len < 5 - over);
 
       // Address / Range
       if (a & (EX_RANGE | EX_COUNT)) {
         if (a & EX_COUNT) {
           // -count=N
-          snprintf(IObuff + len, IOSIZE, "%" PRId64 "c", cmd->uc_def);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%" PRId64 "c", cmd->uc_def);
+          assert(rc > 0);
+          len += (size_t)rc;
         } else if (a & EX_DFLALL) {
           IObuff[len++] = '%';
         } else if (cmd->uc_def >= 0) {
           // -range=N
-          snprintf(IObuff + len, IOSIZE, "%" PRId64 "", cmd->uc_def);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%" PRId64 "", cmd->uc_def);
+          assert(rc > 0);
+          len += (size_t)rc;
         } else {
           IObuff[len++] = '.';
         }
@@ -546,32 +547,34 @@ static void uc_list(char *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 8 - over);
+      } while ((int64_t)len < 8 - over);
 
       // Address Type
       for (j = 0; addr_type_complete[j].expand != ADDR_NONE; j++) {
         if (addr_type_complete[j].expand != ADDR_LINES
             && addr_type_complete[j].expand == cmd->uc_addr_type) {
-          STRCPY(IObuff + len, addr_type_complete[j].shortname);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%s", addr_type_complete[j].shortname);
+          assert(rc > 0);
+          len += (size_t)rc;
           break;
         }
       }
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 13 - over);
+      } while ((int64_t)len < 13 - over);
 
       // Completion
       char *cmd_compl = get_command_complete(cmd->uc_compl);
       if (cmd_compl != NULL) {
-        STRCPY(IObuff + len, get_command_complete(cmd->uc_compl));
-        len += (int)strlen(IObuff + len);
+        int rc = snprintf(IObuff + len, IOSIZE - len, "%s", get_command_complete(cmd->uc_compl));
+        assert(rc > 0);
+        len += (size_t)rc;
       }
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 25 - over);
+      } while ((int64_t)len < 25 - over);
 
       IObuff[len] = '\0';
       msg_outtrans(IObuff);
@@ -861,7 +864,7 @@ char *uc_validate_name(char *name)
 ///
 /// @return  OK if the command is created, FAIL otherwise.
 int uc_add_command(char *name, size_t name_len, const char *rep, uint32_t argt, int64_t def,
-                   int flags, int compl, char *compl_arg, LuaRef compl_luaref,
+                   int flags, int context, char *compl_arg, LuaRef compl_luaref,
                    LuaRef preview_luaref, cmd_addr_T addr_type, LuaRef luaref, bool force)
   FUNC_ATTR_NONNULL_ARG(1, 3)
 {
@@ -944,7 +947,7 @@ int uc_add_command(char *name, size_t name_len, const char *rep, uint32_t argt, 
   cmd->uc_rep = rep_buf;
   cmd->uc_argt = argt;
   cmd->uc_def = def;
-  cmd->uc_compl = compl;
+  cmd->uc_compl = context;
   cmd->uc_script_ctx = current_sctx;
   cmd->uc_script_ctx.sc_lnum += SOURCING_LNUM;
   nlua_set_sctx(&cmd->uc_script_ctx);
@@ -974,7 +977,7 @@ void ex_command(exarg_T *eap)
   uint32_t argt = 0;
   long def = -1;
   int flags = 0;
-  int compl = EXPAND_NOTHING;
+  int context = EXPAND_NOTHING;
   char *compl_arg = NULL;
   cmd_addr_T addr_type_arg = ADDR_NONE;
   int has_attr = (eap->arg[0] == '-');
@@ -986,7 +989,7 @@ void ex_command(exarg_T *eap)
   while (*p == '-') {
     p++;
     end = skiptowhite(p);
-    if (uc_scan_attr(p, (size_t)(end - p), &argt, &def, &flags, &compl, &compl_arg,
+    if (uc_scan_attr(p, (size_t)(end - p), &argt, &def, &flags, &context, &compl_arg,
                      &addr_type_arg) == FAIL) {
       goto theend;
     }
@@ -1011,10 +1014,10 @@ void ex_command(exarg_T *eap)
     emsg(_("E183: User defined commands must start with an uppercase letter"));
   } else if (name_len <= 4 && strncmp(name, "Next", name_len) == 0) {
     emsg(_("E841: Reserved name, cannot be used for user defined command"));
-  } else if (compl > 0 && (argt & EX_EXTRA) == 0) {
+  } else if (context > 0 && (argt & EX_EXTRA) == 0) {
     emsg(_(e_complete_used_without_allowing_arguments));
   } else {
-    uc_add_command(name, name_len, p, argt, def, flags, compl, compl_arg, LUA_NOREF, LUA_NOREF,
+    uc_add_command(name, name_len, p, argt, def, flags, context, compl_arg, LUA_NOREF, LUA_NOREF,
                    addr_type_arg, LUA_NOREF, eap->forceit);
 
     return;  // success

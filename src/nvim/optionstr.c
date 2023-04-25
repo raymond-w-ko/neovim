@@ -67,6 +67,8 @@ static const char e_backupext_and_patchmode_are_equal[]
   = N_("E589: 'backupext' and 'patchmode' are equal");
 static const char e_showbreak_contains_unprintable_or_wide_character[]
   = N_("E595: 'showbreak' contains unprintable or wide character");
+static const char e_internal_error_shortmess_too_long[]
+  = N_("E1336: Internal error: shortmess too long");
 
 static char *(p_ambw_values[]) = { "single", "double", NULL };
 static char *(p_bg_values[]) = { "light", "dark", NULL };
@@ -1200,8 +1202,8 @@ static void did_set_statusline(win_T *win, char **varp, char **gvarp, const char
   if (varp == &p_ruf) {       // reset ru_wid first
     ru_wid = 0;
   } else if (varp == &win->w_p_stc) {
-    win->w_nrwidth_line_count = 0;    // make sure width is reset
-    win->w_statuscol_line_count = 0;  // make sure width is re-estimated
+    // reset 'statuscolumn' width
+    win->w_nrwidth_line_count = 0;
   }
   char *s = *varp;
   if (varp == &p_ruf && *s == '%') {
@@ -1939,6 +1941,37 @@ static int opt_strings_flags(char *val, char **values, unsigned *flagp, bool lis
 int check_ff_value(char *p)
 {
   return check_opt_strings(p, p_ff_values, false);
+}
+
+static char shm_buf[SHM_LEN];
+static int set_shm_recursive = 0;
+
+/// Save the acutal shortmess Flags and clear them
+/// temporarily to avoid that file messages
+/// overwrites any output from the following commands.
+///
+/// Caller must make sure to first call save_clear_shm_value() and then
+/// restore_shm_value() exactly the same number of times.
+void save_clear_shm_value(void)
+{
+  if (strlen(p_shm) >= SHM_LEN) {
+    iemsg(e_internal_error_shortmess_too_long);
+    return;
+  }
+
+  if (++set_shm_recursive == 1) {
+    STRCPY(shm_buf, p_shm);
+    set_option_value_give_err("shm", 0L, "", 0);
+  }
+}
+
+/// Restore the shortmess Flags set from the save_clear_shm_value() function.
+void restore_shm_value(void)
+{
+  if (--set_shm_recursive == 0) {
+    set_option_value_give_err("shm", 0L, shm_buf, 0);
+    memset(shm_buf, 0, SHM_LEN);
+  }
 }
 
 static const char e_conflicts_with_value_of_listchars[]

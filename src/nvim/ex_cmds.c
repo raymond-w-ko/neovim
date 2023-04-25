@@ -23,6 +23,7 @@
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
+#include "nvim/bufwrite.h"
 #include "nvim/change.h"
 #include "nvim/channel.h"
 #include "nvim/charset.h"
@@ -150,7 +151,7 @@ void do_ascii(const exarg_T *const eap)
     if (vim_isprintc_strict(c) && (c < ' ' || c > '~')) {
       char buf3[7];
       transchar_nonprint(curbuf, buf3, c);
-      vim_snprintf(buf1, sizeof(buf1), "  <%s>", (char *)buf3);
+      vim_snprintf(buf1, sizeof(buf1), "  <%s>", buf3);
     } else {
       buf1[0] = NUL;
     }
@@ -933,6 +934,17 @@ void free_prev_shellcmd(void)
 
 #endif
 
+/// Check that "prevcmd" is not NULL.  If it is NULL then give an error message
+/// and return false.
+static int prevcmd_is_set(void)
+{
+  if (prevcmd == NULL) {
+    emsg(_(e_noprev));
+    return false;
+  }
+  return true;
+}
+
 /// Handle the ":!cmd" command.  Also for ":r !cmd" and ":w !cmd"
 /// Bangs in the argument are replaced with the previously entered command.
 /// Remember the argument.
@@ -974,8 +986,7 @@ void do_bang(int addr_count, exarg_T *eap, bool forceit, bool do_in, bool do_out
       len += strlen(newcmd);
     }
     if (ins_prevcmd) {
-      if (prevcmd == NULL) {
-        emsg(_(e_noprev));
+      if (!prevcmd_is_set()) {
         xfree(newcmd);
         return;
       }
@@ -1012,10 +1023,20 @@ void do_bang(int addr_count, exarg_T *eap, bool forceit, bool do_in, bool do_out
     }
   } while (trailarg != NULL);
 
-  xfree(prevcmd);
-  prevcmd = newcmd;
+  // Only set "prevcmd" if there is a command to run, otherwise keep te one
+  // we have.
+  if (strlen(newcmd) > 0) {
+    xfree(prevcmd);
+    prevcmd = newcmd;
+  } else {
+    free_newcmd = true;
+  }
 
   if (bangredo) {  // put cmd in redo buffer for ! command
+    if (!prevcmd_is_set()) {
+      goto theend;
+    }
+
     // If % or # appears in the command, it must have been escaped.
     // Reescape them, so that redoing them does not substitute them by the
     // buffername.
@@ -1028,6 +1049,9 @@ void do_bang(int addr_count, exarg_T *eap, bool forceit, bool do_in, bool do_out
   }
   // Add quotes around the command, for shells that need them.
   if (*p_shq != NUL) {
+    if (free_newcmd) {
+      xfree(newcmd);
+    }
     newcmd = xmalloc(strlen(prevcmd) + 2 * strlen(p_shq) + 1);
     STRCPY(newcmd, p_shq);
     STRCAT(newcmd, prevcmd);
@@ -1050,6 +1074,8 @@ void do_bang(int addr_count, exarg_T *eap, bool forceit, bool do_in, bool do_out
     do_filter(line1, line2, eap, newcmd, do_in, do_out);
     apply_autocmds(EVENT_SHELLFILTERPOST, NULL, NULL, false, curbuf);
   }
+
+theend:
   if (free_newcmd) {
     xfree(newcmd);
   }
@@ -1361,12 +1387,12 @@ char *make_filter_cmd(char *cmd, char *itmp, char *otmp)
 {
   bool is_fish_shell =
 #if defined(UNIX)
-    strncmp((char *)invocation_path_tail(p_sh, NULL), "fish", 4) == 0;
+    strncmp(invocation_path_tail(p_sh, NULL), "fish", 4) == 0;
 #else
     false;
 #endif
-  bool is_pwsh = strncmp((char *)invocation_path_tail(p_sh, NULL), "pwsh", 4) == 0
-                 || strncmp((char *)invocation_path_tail(p_sh, NULL), "powershell",
+  bool is_pwsh = strncmp(invocation_path_tail(p_sh, NULL), "pwsh", 4) == 0
+                 || strncmp(invocation_path_tail(p_sh, NULL), "powershell",
                             10) == 0;
 
   size_t len = strlen(cmd) + 1;  // At least enough space for cmd + NULL.
@@ -1388,7 +1414,7 @@ char *make_filter_cmd(char *cmd, char *itmp, char *otmp)
   if (is_pwsh) {
     if (itmp != NULL) {
       xstrlcpy(buf, "& { Get-Content ", len - 1);  // FIXME: should we add "-Encoding utf8"?
-      xstrlcat(buf, (const char *)itmp, len - 1);
+      xstrlcat(buf, itmp, len - 1);
       xstrlcat(buf, " | & ", len - 1);  // FIXME: add `&` ourself or leave to user?
       xstrlcat(buf, cmd, len - 1);
       xstrlcat(buf, " }", len - 1);
@@ -1409,7 +1435,7 @@ char *make_filter_cmd(char *cmd, char *itmp, char *otmp)
 
     if (itmp != NULL) {
       xstrlcat(buf, " < ", len - 1);
-      xstrlcat(buf, (const char *)itmp, len - 1);
+      xstrlcat(buf, itmp, len - 1);
     }
 #else
     // For shells that don't understand braces around commands, at least allow
@@ -1426,9 +1452,9 @@ char *make_filter_cmd(char *cmd, char *itmp, char *otmp)
         }
       }
       xstrlcat(buf, " < ", len);
-      xstrlcat(buf, (const char *)itmp, len);
+      xstrlcat(buf, itmp, len);
       if (*p_shq == NUL) {
-        const char *const p = find_pipe((const char *)cmd);
+        const char *const p = find_pipe(cmd);
         if (p != NULL) {
           xstrlcat(buf, " ", len - 1);  // Insert a space before the '|' for DOS
           xstrlcat(buf, p, len - 1);
@@ -4288,7 +4314,7 @@ bool do_sub_msg(bool count_only)
                                 "%" PRId64 " matches on %" PRId64 " lines", sub_nsubs)
                      : NGETTEXT("%" PRId64 " substitution on %" PRId64 " lines",
                                 "%" PRId64 " substitutions on %" PRId64 " lines", sub_nsubs);
-    vim_snprintf_add((char *)msg_buf, sizeof(msg_buf),
+    vim_snprintf_add(msg_buf, sizeof(msg_buf),
                      NGETTEXT(msg_single, msg_plural, sub_nlines),
                      (int64_t)sub_nsubs, (int64_t)sub_nlines);
     if (msg(msg_buf)) {
@@ -4745,7 +4771,7 @@ void ex_oldfiles(exarg_T *eap)
     if (!message_filtered(fname)) {
       msg_outnum(nr);
       msg_puts(": ");
-      msg_outtrans((char *)tv_get_string(TV_LIST_ITEM_TV(li)));
+      msg_outtrans(tv_get_string(TV_LIST_ITEM_TV(li)));
       msg_clr_eos();
       msg_putchar('\n');
       os_breakcheck();

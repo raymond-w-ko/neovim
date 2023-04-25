@@ -119,10 +119,9 @@ endfunc
 
 " Test the ":wincmd ^" and "<C-W>^" commands.
 func Test_window_split_edit_alternate()
-
   " Test for failure when the alternate buffer/file no longer exists.
   edit Xfoo | %bw
-  call assert_fails(':wincmd ^', 'E23')
+  call assert_fails(':wincmd ^', 'E23:')
 
   " Test for the expected behavior when we have two named buffers.
   edit Xfoo | edit Xbar
@@ -152,12 +151,11 @@ endfunc
 
 " Test the ":[count]wincmd ^" and "[count]<C-W>^" commands.
 func Test_window_split_edit_bufnr()
-
   %bwipeout
   let l:nr = bufnr('%') + 1
-  call assert_fails(':execute "normal! ' . l:nr . '\<C-W>\<C-^>"', 'E92')
-  call assert_fails(':' . l:nr . 'wincmd ^', 'E16')
-  call assert_fails(':0wincmd ^', 'E16')
+  call assert_fails(':execute "normal! ' . l:nr . '\<C-W>\<C-^>"', 'E92:')
+  call assert_fails(':' . l:nr . 'wincmd ^', 'E16:')
+  call assert_fails(':0wincmd ^', 'E16:')
 
   edit Xfoo | edit Xbar | edit Xbaz
   let l:foo_nr = bufnr('Xfoo')
@@ -737,7 +735,7 @@ func Test_relative_cursor_position_in_one_line_window()
 
   only!
   bwipe!
-  call assert_fails('call winrestview(v:_null_dict)', 'E474:')
+  call assert_fails('call winrestview(v:_null_dict)', 'E1297:')
 endfunc
 
 func Test_relative_cursor_position_after_move_and_resize()
@@ -938,7 +936,7 @@ func Test_winrestview()
   call assert_equal(view, winsaveview())
 
   bwipe!
-  call assert_fails('call winrestview(v:_null_dict)', 'E474:')
+  call assert_fails('call winrestview(v:_null_dict)', 'E1297:')
 endfunc
 
 func Test_win_splitmove()
@@ -969,7 +967,7 @@ func Test_win_splitmove()
   call assert_equal(bufname(winbufnr(2)), 'b')
   call assert_equal(bufname(winbufnr(3)), 'a')
   call assert_equal(bufname(winbufnr(4)), 'd')
-  call assert_fails('call win_splitmove(winnr(), winnr("k"), v:_null_dict)', 'E474:')
+  call assert_fails('call win_splitmove(winnr(), winnr("k"), v:_null_dict)', 'E1297:')
   only | bd
 
   call assert_fails('call win_splitmove(winnr(), 123)', 'E957:')

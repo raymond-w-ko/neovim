@@ -504,6 +504,9 @@ newwindow:
   case Ctrl_F: {
 wingotofile:
     CHECK_CMDWIN;
+    if (check_text_or_curbuf_locked(NULL)) {
+      break;
+    }
 
     linenr_T lnum = -1;
     char *ptr = grab_file_name(Prenum1, &lnum);
@@ -899,7 +902,7 @@ void win_check_anchored_floats(win_T *win)
 /// Return the number of fold columns to display
 int win_fdccol_count(win_T *wp)
 {
-  const char *fdc = (const char *)wp->w_p_fdc;
+  const char *fdc = wp->w_p_fdc;
 
   // auto:<NUM>
   if (strncmp(fdc, "auto", 4) == 0) {
@@ -1068,10 +1071,10 @@ int win_split(int size, int flags)
   return win_split_ins(size, flags, NULL, 0);
 }
 
-// When "new_wp" is NULL: split the current window in two.
-// When "new_wp" is not NULL: insert this window at the far
-// top/left/right/bottom.
-// return FAIL for failure, OK otherwise
+/// When "new_wp" is NULL: split the current window in two.
+/// When "new_wp" is not NULL: insert this window at the far
+/// top/left/right/bottom.
+/// @return  FAIL for failure, OK otherwise
 int win_split_ins(int size, int flags, win_T *new_wp, int dir)
 {
   win_T *wp = new_wp;
@@ -3739,12 +3742,7 @@ static void frame_add_hsep(const frame_T *frp)
 {
   if (frp->fr_layout == FR_LEAF) {
     win_T *wp = frp->fr_win;
-    if (wp->w_hsep_height == 0) {
-      if (wp->w_height > 0) {            // don't make it negative
-        wp->w_height++;
-      }
-      wp->w_hsep_height = 1;
-    }
+    wp->w_hsep_height = 1;
   } else if (frp->fr_layout == FR_ROW) {
     // Handle all the frames in the row.
     FOR_ALL_FRAMES(frp, frp->fr_child) {
@@ -6095,7 +6093,7 @@ static void frame_setwidth(frame_T *curfrp, int width)
 }
 
 // Check 'winminheight' for a valid value and reduce it if needed.
-void win_setminheight(void)
+void did_set_winminheight(void)
 {
   bool first = true;
 
@@ -6115,7 +6113,7 @@ void win_setminheight(void)
 }
 
 // Check 'winminwidth' for a valid value and reduce it if needed.
-void win_setminwidth(void)
+void did_set_winminwidth(void)
 {
   bool first = true;
 

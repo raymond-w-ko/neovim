@@ -97,7 +97,7 @@ static int toggle_Magic(int x)
 #define EMSG2_RET_NULL(m, c) \
   return (semsg((m), (c) ? "" : "\\"), rc_did_emsg = true, (void *)NULL)
 #define EMSG3_RET_NULL(m, c, a) \
-  return (semsg((const char *)(m), (c) ? "" : "\\", (a)), rc_did_emsg = true, (void *)NULL)
+  return (semsg((m), (c) ? "" : "\\", (a)), rc_did_emsg = true, (void *)NULL)
 #define EMSG2_RET_FAIL(m, c) \
   return (semsg((m), (c) ? "" : "\\"), rc_did_emsg = true, FAIL)
 #define EMSG_ONE_RET_NULL EMSG2_RET_NULL(_("E369: invalid item in %s%%[]"), reg_magic == MAGIC_ALL)
@@ -989,6 +989,8 @@ typedef struct {
   // flag in the regexp.  Defaults to false, always.
   bool reg_icombine;
 
+  bool reg_nobreak;
+
   // Copy of "rmm_maxcol": maximum column to search for a match.  Zero when
   // there is no maximum.
   colnr_T reg_maxcol;
@@ -1010,6 +1012,13 @@ typedef struct {
 
 static regexec_T rex;
 static bool rex_in_use = false;
+
+static void reg_breakcheck(void)
+{
+  if (!rex.reg_nobreak) {
+    fast_breakcheck();
+  }
+}
 
 // Return true if character 'c' is included in 'iskeyword' option for
 // "reg_buf" buffer.
@@ -1221,7 +1230,7 @@ static void reg_nextline(void)
 {
   rex.line = (uint8_t *)reg_getline(++rex.lnum);
   rex.input = rex.line;
-  fast_breakcheck();
+  reg_breakcheck();
 }
 
 // Check whether a backreference matches.
@@ -1812,7 +1821,7 @@ static int vim_regsub_both(char *source, typval_T *expr, char *dest, int destlen
         }
         tv_clear(&rettv);
       } else {
-        eval_result[nested] = eval_to_string(source + 2, NULL, true);
+        eval_result[nested] = eval_to_string(source + 2, true);
       }
       nesting--;
 
@@ -2237,12 +2246,12 @@ list_T *reg_submatch_list(int no)
       tv_list_append_string(list, s, ecol);
     }
   } else {
-    s = (const char *)rsm.sm_match->startp[no];
+    s = rsm.sm_match->startp[no];
     if (s == NULL || rsm.sm_match->endp[no] == NULL) {
       return NULL;
     }
     list = tv_list_alloc(1);
-    tv_list_append_string(list, s, (const char *)rsm.sm_match->endp[no] - s);
+    tv_list_append_string(list, s, rsm.sm_match->endp[no] - s);
   }
 
   tv_list_ref(list);
@@ -2265,6 +2274,7 @@ static void init_regexec_multi(regmmatch_T *rmp, win_T *win, buf_T *buf, linenr_
   rex.reg_line_lbr = false;
   rex.reg_ic = rmp->rmm_ic;
   rex.reg_icombine = false;
+  rex.reg_nobreak = rmp->regprog->re_flags & RE_NOBREAK;
   rex.reg_maxcol = rmp->rmm_maxcol;
 }
 

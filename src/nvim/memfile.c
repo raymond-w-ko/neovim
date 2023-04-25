@@ -300,7 +300,12 @@ bhdr_T *mf_get(memfile_T *mfp, blocknr_T nr, unsigned page_count)
 
     // could check here if the block is in the free list
 
-    hp = mf_alloc_bhdr(mfp, page_count);
+    if (page_count > 0) {
+      hp = mf_alloc_bhdr(mfp, page_count);
+    }
+    if (hp == NULL) {
+      return NULL;
+    }
 
     hp->bh_bnum = nr;
     hp->bh_flags = 0;
@@ -800,7 +805,7 @@ static bool mf_do_open(memfile_T *mfp, char *fname, int flags)
     emsg(_("E300: Swap file already exists (symlink attack?)"));
   } else {
     // try to open the file
-    mfp->mf_fd = MCH_OPEN_RW((char *)mfp->mf_fname, flags | O_NOFOLLOW);
+    mfp->mf_fd = MCH_OPEN_RW(mfp->mf_fname, flags | O_NOFOLLOW);
   }
 
   // If the file cannot be opened, use memory only

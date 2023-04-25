@@ -223,7 +223,7 @@ getreg([{regname} [, 1 [, {list}]]])
 				String or List   contents of a register
 getreginfo([{regname}])		Dict	information about a register
 getregtype([{regname}])		String	type of a register
-getscriptinfo()		List	list of sourced scripts
+getscriptinfo([{opts}])		List	list of sourced scripts
 gettabinfo([{expr}])		List	list of tab pages
 gettabvar({nr}, {varname} [, {def}])
 				any	variable {varname} in tab {nr} or {def}
@@ -506,6 +506,7 @@ submatch({nr} [, {list}])	String or List
 					specific match in ":s" or substitute()
 substitute({expr}, {pat}, {sub}, {flags})
 				String	all {pat} in {expr} replaced with {sub}
+swapfilelist()			List	swap files found in 'directory'
 swapinfo({fname})		Dict	information about swap file {fname}
 swapname({buf})			String	swap file of buffer {buf}
 synID({lnum}, {col}, {trans})	Number	syntax ID at {lnum} and {col}
@@ -545,7 +546,8 @@ undotree()			List	undo file tree
 uniq({list} [, {func} [, {dict}]])
 				List	remove adjacent duplicates from a list
 values({dict})			List	values in {dict}
-virtcol({expr})			Number	screen column of cursor or mark
+virtcol({expr} [, {list}])	Number or List
+					screen column of cursor or mark
 virtcol2col({winid}, {lnum}, {col})
 				Number  byte index of a character on screen
 visualmode([expr])		String	last visual mode used
@@ -636,6 +638,7 @@ add({object}, {expr})					*add()*
 and({expr}, {expr})					*and()*
 		Bitwise AND on the two arguments.  The arguments are converted
 		to a number.  A List, Dict or Float argument causes an error.
+		Also see `or()` and `xor()`.
 		Example: >
 			:let flag = and(bits, 0x80)
 <		Can also be used as a |method|: >
@@ -1841,6 +1844,7 @@ execute({command} [, {silent}])				*execute()*
 		Execute {command} and capture its output.
 		If {command} is a |String|, returns {command} output.
 		If {command} is a |List|, returns concatenated outputs.
+		Line continuations in {command} are not recognized.
 		Examples: >
 			echo execute('echon "foo"')
 <			foo >
@@ -2523,7 +2527,7 @@ funcref({name} [, {arglist}] [, {dict}])
 		Can also be used as a |method|: >
 			GetFuncname()->funcref([arg])
 <
-				*function()* *partial* *E700* *E922* *E923*
+				*function()* *partial* *E700* *E923*
 function({name} [, {arglist}] [, {dict}])
 		Return a |Funcref| variable that refers to function {name}.
 		{name} can be the name of a user defined function or an
@@ -3003,7 +3007,6 @@ getcompletion({pat}, {type} [, {filtered}])		*getcompletion()*
 		arglist		file names in argument list
 		augroup		autocmd groups
 		buffer		buffer names
-		behave		|:behave| suboptions
 		breakpoint	|:breakadd| and |:breakdel| suboptions
 		cmdline		|cmdline-completion| result
 		color		color schemes
@@ -3577,16 +3580,42 @@ getregtype([{regname}])					*getregtype()*
 		Can also be used as a |method|: >
 			GetRegname()->getregtype()
 
-getscriptinfo()					*getscriptinfo()*
+getscriptinfo([{opts}])					*getscriptinfo()*
 		Returns a |List| with information about all the sourced Vim
-		scripts in the order they were sourced.
+		scripts in the order they were sourced, like what
+		`:scriptnames` shows.
+
+		The optional Dict argument {opts} supports the following
+		optional items:
+		    name	Script name match pattern. If specified,
+				and "sid" is not specified, information about
+				scripts with a name that match the pattern
+				"name" are returned.
+		    sid		Script ID |<SID>|.  If specified, only
+				information about the script with ID "sid" is
+				returned and "name" is ignored.
 
 		Each item in the returned List is a |Dict| with the following
 		items:
-		    autoload	always set to FALSE.
-		    name	vim script file name.
-		    sid		script ID |<SID>|.
+		    autoload	Always set to FALSE.
+		    functions   List of script-local function names defined in
+				the script.  Present only when a particular
+				script is specified using the "sid" item in
+				{opts}.
+		    name	Vim script file name.
+		    sid		Script ID |<SID>|.
+		    variables   A dictionary with the script-local variables.
+				Present only when the a particular script is
+				specified using the "sid" item in {opts}.
+				Note that this is a copy, the value of
+				script-local variables cannot be changed using
+				this dictionary.
+		    version	Vimscript version, always 1
 
+		Examples: >
+			:echo getscriptinfo({'name': 'myscript'})
+			:echo getscriptinfo({'sid': 15}).variables
+<
 gettabinfo([{tabnr}])					*gettabinfo()*
 		If {tabnr} is not specified, then information about all the
 		tab pages is returned as a |List|. Each List item is a
@@ -4969,7 +4998,7 @@ maparg({name} [, {mode} [, {abbr} [, {dict}]]])			*maparg()*
 			     "!"     Insert and Commandline mode
 				     (|mapmode-ic|)
 		  "sid"	     The script local ID, used for <sid> mappings
-			     (|<SID>|).
+			     (|<SID>|).  Negative for special contexts.
 		  "lnum"     The line number in "sid", zero if unknown.
 		  "nowait"   Do not wait for other, longer mappings.
 			     (|:map-<nowait>|).
@@ -5547,8 +5576,24 @@ mkdir({name} [, {flags} [, {prot}]])
 		When {flags} is present it must be a string.  An empty string
 		has no effect.
 
-		If {flags} is "p" then intermediate directories are created as
-		necessary.
+		If {flags} contains "p" then intermediate directories are
+		created as necessary.
+
+		If {flags} contains "D" then {name} is deleted at the end of
+		the current function, as with: >
+			defer delete({name}, 'd')
+<
+		If {flags} contains "R" then {name} is deleted recursively at
+		the end of the current function, as with: >
+			defer delete({name}, 'rf')
+<		Note that when {name} has more than one part and "p" is used
+		some directories may already exist.  Only the first one that
+		is created and what it contains is scheduled to be deleted.
+		E.g. when using: >
+			call mkdir('subdir/tmp/autoload', 'pR')
+<		and "subdir" already exists then "subdir/tmp" will be
+		scheduled for deletion, like with: >
+			defer delete('subdir/tmp', 'rf')
 
 		If {prot} is given it is used to set the protection bits of
 		the new directory.  The default is 0o755 (rwxr-xr-x: r/w for
@@ -8376,6 +8421,17 @@ substitute({string}, {pat}, {sub}, {flags})		*substitute()*
 		Can also be used as a |method|: >
 			GetString()->substitute(pat, sub, flags)
 
+swapfilelist()						*swapfilelist()*
+		Returns a list of swap file names, like what "vim -r" shows.
+		See the |-r| command argument.  The 'directory' option is used
+		for the directories to inspect.  If you only want to get a
+		list of swap files in the current directory then temporarily
+		set 'directory' to a dot: >
+			let save_dir = &directory
+			let &directory = '.'
+			let swapfiles = swapfilelist()
+			let &directory = save_dir
+
 swapinfo({fname})					*swapinfo()*
 		The result is a dictionary, which holds information about the
 		swapfile {fname}. The available fields are:
@@ -9016,7 +9072,7 @@ values({dict})						*values()*
 		Can also be used as a |method|: >
 			mydict->values()
 
-virtcol({expr})						*virtcol()*
+virtcol({expr} [, {list}])				*virtcol()*
 		The result is a Number, which is the screen column of the file
 		position given with {expr}.  That is, the last screen position
 		occupied by the character at that position, when the screen
@@ -9025,13 +9081,17 @@ virtcol({expr})						*virtcol()*
 		the <Tab>.  For example, for a <Tab> in column 1, with 'ts'
 		set to 8, it returns 8. |conceal| is ignored.
 		For the byte position use |col()|.
+
 		For the use of {expr} see |col()|.
-		When 'virtualedit' is used {expr} can be [lnum, col, off], where
-		"off" is the offset in screen columns from the start of the
-		character.  E.g., a position within a <Tab> or after the last
-		character.  When "off" is omitted zero is used.
-		When Virtual editing is active in the current mode, a position
-		beyond the end of the line can be returned. |'virtualedit'|
+
+		When 'virtualedit' is used {expr} can be [lnum, col, off],
+		where "off" is the offset in screen columns from the start of
+		the character.  E.g., a position within a <Tab> or after the
+		last character.  When "off" is omitted zero is used.  When
+		Virtual editing is active in the current mode, a position
+		beyond the end of the line can be returned.  Also see
+		|'virtualedit'|
+
 		The accepted positions are:
 		    .	    the cursor position
 		    $	    the end of the cursor line (the result is the
@@ -9043,11 +9103,22 @@ virtcol({expr})						*virtcol()*
 			    cursor is the end).  When not in Visual mode
 			    returns the cursor position.  Differs from |'<| in
 			    that it's updated right away.
+
+		If {list} is present and non-zero then virtcol() returns a List
+		with the first and last screen position occupied by the
+		character.
+
 		Note that only marks in the current file can be used.
 		Examples: >
-  virtcol(".")	   with text "foo^Lbar", with cursor on the "^L", returns 5
-  virtcol("$")	   with text "foo^Lbar", returns 9
-  virtcol("'t")    with text "	  there", with 't at 'h', returns 6
+			" With text "foo^Lbar" and cursor on the "^L":
+
+			virtcol(".")	" returns 5
+			virtcol(".", 1)	" returns [4, 5]
+			virtcol("$")	" returns 9
+
+			" With text "	  there", with 't at 'h':
+
+			virtcol("'t")	" returns 6
 <		The first column is 1.  0 is returned for an error.
 		A more advanced example that echoes the maximum length of
 		all lines: >
@@ -9482,31 +9553,43 @@ writefile({object}, {fname} [, {flags}])
 		When {object} is a |List| write it to file {fname}.  Each list
 		item is separated with a NL.  Each list item must be a String
 		or Number.
-		When {flags} contains "b" then binary mode is used: There will
-		not be a NL after the last list item.  An empty item at the
-		end does cause the last line in the file to end in a NL.
-
-		When {object} is a |Blob| write the bytes to file {fname}
-		unmodified.
-
-		When {flags} contains "a" then append mode is used, lines are
-		appended to the file: >
-			:call writefile(["foo"], "event.log", "a")
-			:call writefile(["bar"], "event.log", "a")
-<
-		When {flags} contains "S" fsync() call is not used, with "s"
-		it is used, 'fsync' option applies by default. No fsync()
-		means that writefile() will finish faster, but writes may be
-		left in OS buffers and not yet written to disk. Such changes
-		will disappear if system crashes before OS does writing.
-
 		All NL characters are replaced with a NUL character.
 		Inserting CR characters needs to be done before passing {list}
 		to writefile().
+
+		When {object} is a |Blob| write the bytes to file {fname}
+		unmodified, also when binary mode is not specified.
+
+		{flags} must be a String.  These characters are recognized:
+
+		'b'  Binary mode is used: There will not be a NL after the
+		     last list item.  An empty item at the end does cause the
+		     last line in the file to end in a NL.
+
+		'a'  Append mode is used, lines are appended to the file: >
+			:call writefile(["foo"], "event.log", "a")
+			:call writefile(["bar"], "event.log", "a")
+<
+		'D'  Delete the file when the current function ends.  This
+		     works like: >
+			:defer delete({fname})
+<		     Fails when not in a function.  Also see |:defer|.
+
+		's'  fsync() is called after writing the file.  This flushes
+		     the file to disk, if possible.  This takes more time but
+		     avoids losing the file if the system crashes.
+
+		'S'  fsync() is not called, even when 'fsync' is set.
+
+		     When {flags} does not contain "S" or "s" then fsync() is
+		     called if the 'fsync' option is set.
+
 		An existing file is overwritten, if possible.
+
 		When the write fails -1 is returned, otherwise 0.  There is an
 		error message if the file can't be created or when writing
 		fails.
+
 		Also see |readfile()|.
 		To copy a file byte for byte: >
 			:let fl = readfile("foo", "b")

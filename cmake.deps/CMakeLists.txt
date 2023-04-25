@@ -17,7 +17,8 @@ set(DEPS_CMAKE_ARGS
   -D CMAKE_C_STANDARD=99
   -D CMAKE_GENERATOR=${CMAKE_GENERATOR}
   -D CMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-  -D CMAKE_POSITION_INDEPENDENT_CODE=ON)
+  -D CMAKE_POSITION_INDEPENDENT_CODE=ON
+  -D CMAKE_FIND_FRAMEWORK=${CMAKE_FIND_FRAMEWORK})
 
 set(DEPS_CMAKE_CACHE_ARGS -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES})
 
@@ -139,8 +140,8 @@ set(MSGPACK_URL https://github.com/msgpack/msgpack-c/releases/download/c-6.0.0/m
 set(MSGPACK_SHA256 3654f5e2c652dc52e0a993e270bb57d5702b262703f03771c152bba51602aeba)
 
 # https://github.com/LuaJIT/LuaJIT/tree/v2.1
-set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/505e2c03de35e2718eef0d2d3660712e06dadf1f.tar.gz)
-set(LUAJIT_SHA256 67c88399b901a22e9a236f4b77e6fe39af00f6b7144ce9dd6f51141d921f1076)
+set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/1c279127050e86e99970100e9c42e0f09cd54ab7.tar.gz)
+set(LUAJIT_SHA256 c62f6e6d5bff89e4718709841cd6be71ad419ac9fa780c91abf1635cda923f8f)
 
 set(LUA_URL https://www.lua.org/ftp/lua-5.1.5.tar.gz)
 set(LUA_SHA256 2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
@@ -163,11 +164,9 @@ set(LUV_SHA256 222b38b6425f0926218e14e7da81481fdde6f9660c1feac25a53e6fb52e886e6)
 set(LUA_COMPAT53_URL https://github.com/keplerproject/lua-compat-5.3/archive/v0.9.tar.gz)
 set(LUA_COMPAT53_SHA256 ad05540d2d96a48725bb79a1def35cf6652a4e2ec26376e2617c8ce2baa6f416)
 
-# Windows only: cat.exe diff.exe tee.exe xxd.exe
+# Windows only: cat.exe tee.exe xxd.exe
 set(CAT_URL https://github.com/neovim/deps/raw/21c5e8bdda33521a6ed497b315e03265a2785cbc/opt/cat.exe)
 set(CAT_SHA256 93b8d307bb15af3968920bdea3beb869a49d166f9164853c58a4e6ffdcae61c6)
-set(DIFF_URL https://github.com/neovim/deps/raw/21c5e8bdda33521a6ed497b315e03265a2785cbc/opt/diff.exe)
-set(DIFF_SHA256 4ceceebc8150422c6d8d9a06c2e9686d5a5d90f1033f60ad92ab81fe810e2a28)
 set(TEE_URL https://github.com/neovim/deps/raw/21c5e8bdda33521a6ed497b315e03265a2785cbc/opt/tee.exe)
 set(TEE_SHA256 950eea4e17fa3a7e89fa2c55374037b5797b3f1a54fea1304634884ab42ec14d)
 set(XXD_URL https://github.com/neovim/deps/raw/21c5e8bdda33521a6ed497b315e03265a2785cbc/opt/xxd.exe)
@@ -195,8 +194,8 @@ set(TREESITTER_VIMDOC_URL https://github.com/neovim/tree-sitter-vimdoc/archive/v
 set(TREESITTER_VIMDOC_SHA256 1ff8f4afd3a9599dd4c3ce87c155660b078c1229704d1a254433e33794b8f274)
 set(TREESITTER_QUERY_URL https://github.com/nvim-treesitter/tree-sitter-query/archive/v0.1.0.tar.gz)
 set(TREESITTER_QUERY_SHA256 e2b806f80e8bf1c4f4e5a96248393fe6622fc1fc6189d6896d269658f67f914c)
-set(TREESITTER_URL https://github.com/tree-sitter/tree-sitter/archive/v0.20.8.tar.gz)
-set(TREESITTER_SHA256 6181ede0b7470bfca37e293e7d5dc1d16469b9485d13f13a605baec4a8b1f791)
+set(TREESITTER_URL https://github.com/tree-sitter/tree-sitter/archive/321a652626c63bfea3ea320083a4b14863b80270.tar.gz)
+set(TREESITTER_SHA256 8f780289d9524a680e548d891c07dab025241fffdea86f8b55921e4024a84757)
 
 if(USE_EXISTING_SRC_DIR)
   get_cmake_property(VARS VARIABLES)
@@ -266,7 +265,6 @@ if(WIN32)
   include(GetBinaryDeps)
 
   GetExecutable(TARGET cat)
-  GetExecutable(TARGET diff)
   GetExecutable(TARGET tee)
   GetExecutable(TARGET xxd)
 

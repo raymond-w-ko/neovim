@@ -30,6 +30,7 @@
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/userfunc.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/event/stream.h"
 #include "nvim/ex_cmds.h"
@@ -172,10 +173,9 @@ bool event_teardown(void)
 
 /// Performs early initialization.
 ///
-/// Needed for unit tests. Must be called after `time_init()`.
+/// Needed for unit tests.
 void early_init(mparm_T *paramp)
 {
-  env_init();
   estack_init();
   cmdline_init();
   eval_init();          // init global variables
@@ -261,7 +261,6 @@ int main(int argc, char **argv)
   mparm_T params;         // various parameters passed between
                           // main() and other functions.
   char *cwd = NULL;       // current working dir on startup
-  time_init();
 
   // Many variables are in `params` so that we can pass them around easily.
   // `argc` and `argv` are also copied, so that they can be changed.
@@ -465,7 +464,7 @@ int main(int argc, char **argv)
   // Recovery mode without a file name: List swap files.
   // Uses the 'dir' option, therefore it must be after the initializations.
   if (recoverymode && fname == NULL) {
-    recover_names(NULL, true, 0, NULL);
+    recover_names(NULL, true, NULL, 0, NULL);
     os_exit(0);
   }
 
@@ -692,6 +691,9 @@ void getout(int exitval)
 
   // Position the cursor on the last screen line, below all the text
   ui_cursor_goto(Rows - 1, 0);
+
+  // Invoked all deferred functions in the function stack.
+  invoke_all_defer();
 
   // Optionally print hashtable efficiency.
   hash_debug_results();
@@ -2122,7 +2124,7 @@ static int execute_env(char *env)
   current_sctx.sc_sid = SID_ENV;
   current_sctx.sc_seq = 0;
   current_sctx.sc_lnum = 0;
-  do_cmdline_cmd((char *)initstr);
+  do_cmdline_cmd(initstr);
 
   estack_pop();
   current_sctx = save_current_sctx;

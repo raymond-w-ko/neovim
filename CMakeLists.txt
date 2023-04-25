@@ -35,6 +35,10 @@ if(CCACHE_PRG)
   set(CMAKE_C_COMPILER_LAUNCHER ${CMAKE_COMMAND} -E env CCACHE_SLOPPINESS=pch_defines,time_macros ${CCACHE_PRG})
 endif()
 
+if(NOT CI_BUILD)
+  set(CMAKE_INSTALL_MESSAGE NEVER)
+endif()
+
 # Prefer our bundled versions of dependencies.
 if(DEFINED ENV{DEPS_BUILD_DIR})
   set(DEPS_PREFIX "$ENV{DEPS_BUILD_DIR}/usr" CACHE PATH "Path prefix for finding dependencies")
@@ -105,23 +109,16 @@ set_default_buildtype()
 # If not in a git repo (e.g., a tarball) these tokens define the complete
 # version string, else they are combined with the result of `git describe`.
 set(NVIM_VERSION_MAJOR 0)
-set(NVIM_VERSION_MINOR 9)
+set(NVIM_VERSION_MINOR 10)
 set(NVIM_VERSION_PATCH 0)
 set(NVIM_VERSION_PRERELEASE "-dev") # for package maintainers
 
 # API level
-set(NVIM_API_LEVEL 11)         # Bump this after any API change.
+set(NVIM_API_LEVEL 11)        # Bump this after any API change.
 set(NVIM_API_LEVEL_COMPAT 0)  # Adjust this after a _breaking_ API change.
-set(NVIM_API_PRERELEASE true)
-
-# Default to -O2 on release builds.
-if(CMAKE_C_FLAGS_RELEASE MATCHES "-O3")
-  message(STATUS "Replacing -O3 in CMAKE_C_FLAGS_RELEASE with -O2")
-  string(REPLACE "-O3" "-O2" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
-endif()
+set(NVIM_API_PRERELEASE false)
 
 # Build-type: RelWithDebInfo
-
 # /Og means something different in MSVC
 if(CMAKE_C_COMPILER_ID MATCHES "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
    set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -Og -g")
@@ -163,7 +160,7 @@ foreach(CFGNAME ${CMAKE_CONFIGURATION_TYPES})
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CFGNAME} ${CMAKE_BINARY_DIR}/lib)
 endforeach()
 
-set(LUA_DEPENDENCIES lpeg mpack bit)
+set(LUA_DEPENDENCIES lpeg)
 if(NOT LUA_PRG)
   foreach(CURRENT_LUA_PRG luajit lua5.1 lua5.2 lua)
     unset(_CHECK_LUA_PRG CACHE)
@@ -262,9 +259,7 @@ add_glob_target(
   TOUCH_STRATEGY SINGLE)
 
 add_custom_target(lintcommit
-  COMMAND ${PROJECT_BINARY_DIR}/bin/nvim -u NONE -es -c [[lua require('scripts.lintcommit').main({trace=false})]]
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-  VERBATIM)
+  COMMAND $<TARGET_FILE:nvim> -u NONE -l ${PROJECT_SOURCE_DIR}/scripts/lintcommit.lua main)
 add_dependencies(lintcommit nvim)
 
 add_custom_target(lint)

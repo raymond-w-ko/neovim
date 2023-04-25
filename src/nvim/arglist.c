@@ -1071,12 +1071,19 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   aall.alist->al_refcount++;
   arglist_locked = true;
 
+  tabpage_T *const new_lu_tp = curtab;
+
   // Try closing all windows that are not in the argument list.
   // Also close windows that are not full width;
   // When 'hidden' or "forceit" set the buffer becomes hidden.
   // Windows that have a changed buffer and can't be hidden won't be closed.
   // When the ":tab" modifier was used do this for all tab pages.
   arg_all_close_unused_windows(&aall);
+
+  // Now set the last used tabpage to where we started.
+  if (valid_tabpage(new_lu_tp)) {
+    lastused_tabpage = new_lu_tp;
+  }
 
   // Open a window for files in the argument list that don't have one.
   // ARGCOUNT may change while doing this, because of autocommands.
@@ -1230,8 +1237,7 @@ static void get_arglist_as_rettv(aentry_T *arglist, int argcount, typval_T *rett
   tv_list_alloc_ret(rettv, argcount);
   if (arglist != NULL) {
     for (int idx = 0; idx < argcount; idx++) {
-      tv_list_append_string(rettv->vval.v_list,
-                            (const char *)alist_name(&arglist[idx]), -1);
+      tv_list_append_string(rettv->vval.v_list, alist_name(&arglist[idx]), -1);
     }
   }
 }
@@ -1267,7 +1273,7 @@ void f_argv(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   rettv->vval.v_string = NULL;
   int idx = (int)tv_get_number_chk(&argvars[0], NULL);
   if (arglist != NULL && idx >= 0 && idx < argcount) {
-    rettv->vval.v_string = xstrdup((const char *)alist_name(&arglist[idx]));
+    rettv->vval.v_string = xstrdup(alist_name(&arglist[idx]));
   } else if (idx == -1) {
     get_arglist_as_rettv(arglist, argcount, rettv);
   }

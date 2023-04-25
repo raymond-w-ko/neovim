@@ -8,8 +8,6 @@ jobs:
   lint-commits:
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -18,4 +16,4 @@ jobs:
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
-      - run: nvim --clean -es +"lua require('scripts.lintcommit').main({trace=false})"
+      - run: nvim --clean -l scripts/lintcommit.lua main
