@@ -833,7 +833,7 @@ void buf_freeall(buf_T *buf, int flags)
 /// itself (not the file, that must have been done already).
 static void free_buffer(buf_T *buf)
 {
-  pmap_del(handle_T)(&buffer_handles, buf->b_fnum);
+  pmap_del(int)(&buffer_handles, buf->b_fnum, NULL);
   buf_free_count++;
   // b:changedtick uses an item in buf_T.
   free_buffer_stuff(buf, kBffClearWinInfo);
@@ -1084,11 +1084,11 @@ char *do_bufdel(int command, char *arg, int addr_count, int start_bnr, int end_b
 
     if (deleted == 0) {
       if (command == DOBUF_UNLOAD) {
-        STRCPY(IObuff, _("E515: No buffers were unloaded"));
+        xstrlcpy(IObuff, _("E515: No buffers were unloaded"), IOSIZE);
       } else if (command == DOBUF_DEL) {
-        STRCPY(IObuff, _("E516: No buffers were deleted"));
+        xstrlcpy(IObuff, _("E516: No buffers were deleted"), IOSIZE);
       } else {
-        STRCPY(IObuff, _("E517: No buffers were wiped out"));
+        xstrlcpy(IObuff, _("E517: No buffers were wiped out"), IOSIZE);
       }
       errormsg = IObuff;
     } else if (deleted >= p_report) {
@@ -1459,16 +1459,11 @@ int do_buffer(int action, int start, int dir, int count, int forceit)
 
   // make "buf" the current buffer
   if (action == DOBUF_SPLIT) {      // split window first
-    // If 'switchbuf' contains "useopen": jump to first window containing
-    // "buf" if one exists
-    if ((swb_flags & SWB_USEOPEN) && buf_jump_open_win(buf)) {
+    // If 'switchbuf' is set jump to the window containing "buf".
+    if (swbuf_goto_win_with_buf(buf) != NULL) {
       return OK;
     }
-    // If 'switchbuf' contains "usetab": jump to first window in any tab
-    // page containing "buf" if one exists
-    if ((swb_flags & SWB_USETAB) && buf_jump_open_tab(buf)) {
-      return OK;
-    }
+
     if (win_split(0, 0) == FAIL) {
       return FAIL;
     }
@@ -1687,7 +1682,7 @@ void enter_buffer(buf_T *buf)
   // May need to set the spell language.  Can only do this after the buffer
   // has been properly setup.
   if (!curbuf->b_help && curwin->w_p_spell && *curwin->w_s->b_p_spl != NUL) {
-    (void)did_set_spelllang(curwin);
+    (void)parse_spelllang(curwin);
   }
   curbuf->b_last_used = time(NULL);
 
@@ -1870,7 +1865,7 @@ buf_T *buflist_new(char *ffname_arg, char *sfname_arg, linenr_T lnum, int flags)
     lastbuf = buf;
 
     buf->b_fnum = top_file_num++;
-    pmap_put(handle_T)(&buffer_handles, buf->b_fnum, buf);
+    pmap_put(int)(&buffer_handles, buf->b_fnum, buf);
     if (top_file_num < 0) {  // wrap around (may cause duplicates)
       emsg(_("W14: Warning: List of file names overflow"));
       if (emsg_silent == 0 && !in_assert_fails) {
@@ -2072,17 +2067,8 @@ int buflist_getfile(int n, linenr_T lnum, int options, int forceit)
   }
 
   if (options & GETF_SWITCH) {
-    // If 'switchbuf' contains "useopen": jump to first window containing
-    // "buf" if one exists
-    if (swb_flags & SWB_USEOPEN) {
-      wp = buf_jump_open_win(buf);
-    }
-
-    // If 'switchbuf' contains "usetab": jump to first window in any tab
-    // page containing "buf" if one exists
-    if (wp == NULL && (swb_flags & SWB_USETAB)) {
-      wp = buf_jump_open_tab(buf);
-    }
+    // If 'switchbuf' is set jump to the window containing "buf".
+    wp = swbuf_goto_win_with_buf(buf);
 
     // If 'switchbuf' contains "split", "vsplit" or "newtab" and the
     // current buffer isn't empty: open new tab or window
@@ -3470,8 +3456,8 @@ void free_titles(void)
 
 #endif
 
-/// Get relative cursor position in window into "buf[buflen]", in the form 99%,
-/// using "Top", "Bot" or "All" when appropriate.
+/// Get relative cursor position in window into "buf[buflen]", in the localized
+/// percentage form like %99, 99%; using "Top", "Bot" or "All" when appropriate.
 void get_rel_pos(win_T *wp, char *buf, int buflen)
 {
   // Need at least 3 chars for writing.
@@ -3495,9 +3481,20 @@ void get_rel_pos(win_T *wp, char *buf, int buflen)
   } else if (above <= 0) {
     xstrlcpy(buf, _("Top"), (size_t)buflen);
   } else {
-    vim_snprintf(buf, (size_t)buflen, "%2d%%", above > 1000000L
-                 ? (int)(above / ((above + below) / 100L))
-                 : (int)(above * 100L / (above + below)));
+    int perc = (above > 1000000L
+                ? (int)(above / ((above + below) / 100L))
+                : (int)(above * 100L / (above + below)));
+
+    char *p = buf;
+    size_t l = (size_t)buflen;
+    if (perc < 10) {
+      // prepend one space
+      buf[0] = ' ';
+      p++;
+      l--;
+    }
+    // localized percentage value
+    vim_snprintf(p, l, _("%d%%"), perc);
   }
 }
 

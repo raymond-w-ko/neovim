@@ -52,6 +52,10 @@
 
 static const char *e_letunexp = N_("E18: Unexpected characters in :let");
 static const char *e_lock_unlock = N_("E940: Cannot lock or unlock variable %s");
+static const char e_setting_str_to_value_with_wrong_type[]
+  = N_("E963: Setting %s to value with wrong type");
+static const char e_cannot_use_heredoc_here[]
+  = N_("E991: Cannot use =<< here");
 
 /// Evaluate one Vim expression {expr} in string "p" and append the
 /// resulting string to "gap".  "p" points to the opening "{".
@@ -155,17 +159,21 @@ char *eval_all_expr_in_str(char *str)
 /// marker, then the leading indentation before the lines (matching the
 /// indentation in the 'cmd' line) is stripped.
 ///
+/// When getting lines for an embedded script (e.g. python, lua, perl, ruby,
+/// tcl, mzscheme), "script_get" is set to true. In this case, if the marker is
+/// missing, then '.' is accepted as a marker.
+///
 /// @return  a List with {lines} or NULL on failure.
-static list_T *heredoc_get(exarg_T *eap, char *cmd)
+list_T *heredoc_get(exarg_T *eap, char *cmd, bool script_get)
 {
   char *marker;
-  char *p;
   int marker_indent_len = 0;
   int text_indent_len = 0;
   char *text_indent = NULL;
+  char dot[] = ".";
 
   if (eap->getline == NULL) {
-    emsg(_("E991: cannot use =<< here"));
+    emsg(_(e_cannot_use_heredoc_here));
     return NULL;
   }
 
@@ -182,7 +190,7 @@ static list_T *heredoc_get(exarg_T *eap, char *cmd)
       // The amount of indentation trimmed is the same as the indentation
       // of the first line after the :let command line.  To find the end
       // marker the indent of the :let command line is trimmed.
-      p = *eap->cmdlinep;
+      char *p = *eap->cmdlinep;
       while (ascii_iswhite(*p)) {
         p++;
         marker_indent_len++;
@@ -203,19 +211,25 @@ static list_T *heredoc_get(exarg_T *eap, char *cmd)
   // The marker is the next word.
   if (*cmd != NUL && *cmd != '"') {
     marker = skipwhite(cmd);
-    p = skiptowhite(marker);
+    char *p = skiptowhite(marker);
     if (*skipwhite(p) != NUL && *skipwhite(p) != '"') {
       semsg(_(e_trailing_arg), p);
       return NULL;
     }
     *p = NUL;
-    if (islower((uint8_t)(*marker))) {
+    if (!script_get && islower((uint8_t)(*marker))) {
       emsg(_("E221: Marker cannot start with lower case letter"));
       return NULL;
     }
   } else {
-    emsg(_("E172: Missing marker"));
-    return NULL;
+    // When getting lines for an embedded script, if the marker is missing,
+    // accept '.' as the marker.
+    if (script_get) {
+      marker = dot;
+    } else {
+      emsg(_("E172: Missing marker"));
+      return NULL;
+    }
   }
 
   char *theline = NULL;
@@ -227,7 +241,9 @@ static list_T *heredoc_get(exarg_T *eap, char *cmd)
     xfree(theline);
     theline = eap->getline(NUL, eap->cookie, 0, false);
     if (theline == NULL) {
-      semsg(_("E990: Missing end marker '%s'"), marker);
+      if (!script_get) {
+        semsg(_("E990: Missing end marker '%s'"), marker);
+      }
       break;
     }
 
@@ -249,7 +265,7 @@ static list_T *heredoc_get(exarg_T *eap, char *cmd)
 
     if (text_indent_len == -1 && *theline != NUL) {
       // set the text indent from the first line.
-      p = theline;
+      char *p = theline;
       text_indent_len = 0;
       while (ascii_iswhite(*p)) {
         p++;
@@ -353,7 +369,7 @@ void ex_let(exarg_T *eap)
 
   if (expr[0] == '=' && expr[1] == '<' && expr[2] == '<') {
     // HERE document
-    list_T *l = heredoc_get(eap, expr + 3);
+    list_T *l = heredoc_get(eap, expr + 3, false);
     if (l != NULL) {
       tv_list_set_ret(&rettv, l);
       if (!eap->skip) {
@@ -1445,7 +1461,7 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
         }
         return;
       } else if (v->di_tv.v_type != tv->v_type) {
-        semsg(_("E963: setting %s to value with wrong type"), name);
+        semsg(_(e_setting_str_to_value_with_wrong_type), name);
         return;
       }
     }

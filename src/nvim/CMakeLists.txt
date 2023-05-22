@@ -9,7 +9,7 @@ if(TARGET libuv::uv_a)
 else()
   # Fall back to find module for older libuv versions that don't provide config file
   find_package(Libuv 1.28.0 REQUIRED MODULE)
-  target_include_directories(libuv SYSTEM BEFORE INTERFACE ${LIBUV_INCLUDE_DIRS})
+  target_include_directories(libuv SYSTEM BEFORE INTERFACE ${LIBUV_INCLUDE_DIR})
   target_link_libraries(libuv INTERFACE ${LIBUV_LIBRARIES})
 endif()
 
@@ -21,11 +21,12 @@ elseif(APPLE)
   set_target_properties(nlua0 PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
 endif()
 
-find_package(Libluv 1.43.0 REQUIRED)
-target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LIBLUV_INCLUDE_DIR})
-target_link_libraries(main_lib INTERFACE ${LIBLUV_LIBRARY})
+find_package(Luv 1.43.0 REQUIRED)
+target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LUV_INCLUDE_DIR})
+target_link_libraries(main_lib INTERFACE ${LUV_LIBRARY})
 
 find_package(Iconv REQUIRED)
+find_package(Lpeg REQUIRED)
 find_package(Libtermkey 0.22 REQUIRED)
 find_package(Libvterm 0.3 REQUIRED)
 find_package(Msgpack 1.0.0 REQUIRED)
@@ -38,7 +39,9 @@ target_link_libraries(main_lib INTERFACE
   libvterm
   msgpack
   treesitter
-  unibilium)
+  unibilium
+  lpeg)
+target_link_libraries(nlua0 PUBLIC lpeg)
 
 # Libintl (not Intl) selects our FindLibintl.cmake script. #8464
 find_package(Libintl REQUIRED)
@@ -58,11 +61,11 @@ if(PREFER_LUA)
   find_package(Luajit)
 else()
   find_package(Luajit REQUIRED)
-  target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LUAJIT_INCLUDE_DIRS})
-  target_link_libraries(main_lib INTERFACE ${LUAJIT_LIBRARIES})
-  target_include_directories(nlua0 SYSTEM BEFORE PUBLIC ${LUAJIT_INCLUDE_DIRS})
+  target_include_directories(main_lib SYSTEM BEFORE INTERFACE ${LUAJIT_INCLUDE_DIR})
+  target_link_libraries(main_lib INTERFACE ${LUAJIT_LIBRARY})
+  target_include_directories(nlua0 SYSTEM BEFORE PUBLIC ${LUAJIT_INCLUDE_DIR})
   if(WIN32)
-    target_link_libraries(nlua0 PUBLIC ${LUAJIT_LIBRARIES})
+    target_link_libraries(nlua0 PUBLIC ${LUAJIT_LIBRARY})
   endif()
 endif()
 
@@ -289,6 +292,7 @@ set(LUA_FILETYPE_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/filetype.lu
 set(LUA_INIT_PACKAGES_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/_init_packages.lua)
 set(LUA_KEYMAP_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/keymap.lua)
 set(CHAR_BLOB_GENERATOR ${GENERATOR_DIR}/gen_char_blob.lua)
+set(LUAJIT_RUNTIME_DIR ${DEPS_PREFIX}/share/luajit-2.1.0-beta3/jit)
 
 glob_wrapper(UNICODE_FILES ${UNICODE_DIR}/*.txt)
 glob_wrapper(API_HEADERS api/*.h)
@@ -324,6 +328,7 @@ if(PREFER_LUA)
 endif()
 
 list(APPEND NLUA0_SOURCES ${PROJECT_SOURCE_DIR}/src/nlua0.c)
+
 foreach(subdir
         os
         api
@@ -443,6 +448,9 @@ add_custom_command(
     "${NVIM_VERSION_DEF_H}"
   DEPENDS "${PROJECT_BINARY_DIR}/cmake.config/auto/versiondef-$<CONFIG>.h")
 
+set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} $<TARGET_FILE:nlua0>)
+set(LUA_GEN_DEPS ${GENERATOR_PRELOAD} $<TARGET_FILE:nlua0>)
+
 # NVIM_GENERATED_FOR_HEADERS: generated headers to be included in headers
 # NVIM_GENERATED_FOR_SOURCES: generated headers to be included in sources
 # NVIM_GENERATED_SOURCES: generated source files
@@ -476,7 +484,7 @@ foreach(sfile ${NVIM_SOURCES}
     set(PREPROC_OUTPUT -E -o ${gf_i})
   endif()
 
-  set(depends "${HEADER_GENERATOR}" "${sfile}")
+  set(depends "${HEADER_GENERATOR}" "${sfile}" "${LUA_GEN_DEPS}")
   if("${f}" STREQUAL "version.c")
     # Ensure auto/versiondef_git.h exists after "make clean".
     list(APPEND depends update_version_stamp "${NVIM_VERSION_GIT_H}" "${NVIM_VERSION_DEF_H}")
@@ -484,7 +492,7 @@ foreach(sfile ${NVIM_SOURCES}
   add_custom_command(
     OUTPUT "${gf_c_h}" "${gf_h_h}"
     COMMAND ${CMAKE_C_COMPILER} ${sfile} ${PREPROC_OUTPUT} ${gen_cflags}
-    COMMAND "${LUA_PRG}" "${HEADER_GENERATOR}" "${sfile}" "${gf_c_h}" "${gf_h_h}" "${gf_i}"
+    COMMAND ${LUA_GEN} "${HEADER_GENERATOR}" "${sfile}" "${gf_c_h}" "${gf_h_h}" "${gf_i}"
     DEPENDS ${depends})
   list(APPEND NVIM_GENERATED_FOR_SOURCES "${gf_c_h}")
   list(APPEND NVIM_GENERATED_FOR_HEADERS "${gf_h_h}")
@@ -501,9 +509,6 @@ add_custom_command(OUTPUT ${GENERATED_UNICODE_TABLES}
     ${UNICODE_TABLES_GENERATOR}
     ${UNICODE_FILES}
 )
-
-set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} $<TARGET_FILE:nlua0>)
-set(LUA_GEN_DEPS ${GENERATOR_PRELOAD} $<TARGET_FILE:nlua0>)
 
 add_custom_command(
   OUTPUT ${GENERATED_API_DISPATCH} ${GENERATED_FUNCS_METADATA}
@@ -794,6 +799,15 @@ install(DIRECTORY ${BINARY_LIB_DIR}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/nvim/
   USE_SOURCE_PERMISSIONS)
 
+if(NOT PREFER_LUA)
+  # install luajit runtime files if bundled
+  if(EXISTS ${LUAJIT_RUNTIME_DIR})
+    install(DIRECTORY ${LUAJIT_RUNTIME_DIR}
+      DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/nvim/runtime/lua
+      USE_SOURCE_PERMISSIONS)
+  endif()
+endif()
+
 add_library(libnvim STATIC EXCLUDE_FROM_ALL)
 if(MSVC)
   set(LIBNVIM_NAME libnvim)
@@ -822,6 +836,7 @@ if(ENABLE_ASAN_UBSAN)
     -fsanitize=address
     -fsanitize=undefined)
   target_link_libraries(nvim PRIVATE -fsanitize=address -fsanitize=undefined)
+  target_compile_definitions(nvim PRIVATE ENABLE_ASAN_UBSAN)
 elseif(ENABLE_MSAN)
   message(STATUS "Enabling memory sanitizer for nvim.")
   target_compile_options(nvim PRIVATE
@@ -873,18 +888,13 @@ add_glob_target(
   EXCLUDE
     tui/terminfo_defs.h)
 
-add_custom_target(uncrustify-version
-  COMMAND ${CMAKE_COMMAND}
-    -D UNCRUSTIFY_PRG=${UNCRUSTIFY_PRG}
-    -D CONFIG_FILE=${PROJECT_SOURCE_DIR}/src/uncrustify.cfg
-    -P ${PROJECT_SOURCE_DIR}/cmake/CheckUncrustifyVersion.cmake)
-
+set(UNCRUSTIFY_PRG ${DEPS_BIN_DIR}/uncrustify)
 add_glob_target(
   TARGET lintc-uncrustify
   COMMAND ${UNCRUSTIFY_PRG}
   FLAGS -c "${PROJECT_SOURCE_DIR}/src/uncrustify.cfg" -q --check
   FILES ${LINT_NVIM_SOURCES})
-add_dependencies(lintc-uncrustify uncrustify-version)
+add_dependencies(lintc-uncrustify uncrustify)
 
 add_custom_target(lintc)
 add_dependencies(lintc lintc-clint lintc-uncrustify)
@@ -895,7 +905,7 @@ add_custom_target(formatc
     -D LANG=c
     -P ${PROJECT_SOURCE_DIR}/cmake/Format.cmake
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-add_dependencies(formatc uncrustify-version)
+add_dependencies(formatc uncrustify)
 
 add_custom_target(generated-sources DEPENDS
   ${NVIM_GENERATED_FOR_SOURCES}

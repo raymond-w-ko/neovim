@@ -579,6 +579,7 @@ local extension = {
   ['json-patch'] = 'json',
   json5 = 'json5',
   jsonc = 'jsonc',
+  jsonl = 'jsonl',
   jsonnet = 'jsonnet',
   libsonnet = 'jsonnet',
   jsp = 'jsp',
@@ -637,6 +638,7 @@ local extension = {
   nse = 'lua',
   rockspec = 'lua',
   lua = 'lua',
+  luau = 'luau',
   lrc = 'lyrics',
   m = function(path, bufnr)
     return require('vim.filetype.detect').m(bufnr)
@@ -996,7 +998,9 @@ local extension = {
   spi = 'spyce',
   spy = 'spyce',
   tyc = 'sql',
-  typ = 'sql',
+  typ = function(path, bufnr)
+    return require('vim.filetype.detect').typ(bufnr)
+  end,
   pkb = 'sql',
   tyb = 'sql',
   pks = 'sql',
@@ -1077,6 +1081,8 @@ local extension = {
   uit = 'uil',
   uil = 'uil',
   ungram = 'ungrammar',
+  usd = 'usd',
+  usda = 'usd',
   sba = 'vb',
   vb = 'vb',
   dsm = 'vb',

@@ -17,7 +17,7 @@ typedef struct {
 
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
-#include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/garray.h"
 #include "nvim/grid_defs.h"
 #include "nvim/hashtab.h"
@@ -192,6 +192,8 @@ typedef struct {
 #define w_p_rlc w_onebuf_opt.wo_rlc    // 'rightleftcmd'
   long wo_scr;
 #define w_p_scr w_onebuf_opt.wo_scr     // 'scroll'
+  int wo_sms;
+#define w_p_sms w_onebuf_opt.wo_sms     // 'smoothscroll'
   int wo_spell;
 #define w_p_spell w_onebuf_opt.wo_spell  // 'spell'
   int wo_cuc;
@@ -806,6 +808,7 @@ struct file_buffer {
 
   MarkTree b_marktree[1];
   Map(uint32_t, uint32_t) b_extmark_ns[1];         // extmark namespaces
+  size_t b_virt_text_inline;                       // number of inline virtual texts
   size_t b_virt_line_blocks;    // number of virt_line blocks
   size_t b_signs;               // number of sign extmarks
   size_t b_signs_with_text;     // number of sign extmarks with text
@@ -1163,11 +1166,12 @@ struct window_S {
   bool w_botfill;                   // true when filler lines are actually
                                     // below w_topline (at end of file)
   bool w_old_botfill;               // w_botfill at last redraw
-  colnr_T w_leftcol;                // window column number of the left most
+  colnr_T w_leftcol;                // screen column number of the left most
                                     // character in the window; used when
                                     // 'wrap' is off
-  colnr_T w_skipcol;                // starting column when a single line
-                                    // doesn't fit in the window
+  colnr_T w_skipcol;                // starting screen column for the first
+                                    // line in the window; used when 'wrap' is
+                                    // on; does not include win_col_off()
 
   // six fields that are only used when there is a WinScrolled autocommand
   linenr_T w_last_topline;          ///< last known value for w_topline
@@ -1220,6 +1224,7 @@ struct window_S {
   int w_valid;
   pos_T w_valid_cursor;             // last known position of w_cursor, used to adjust w_valid
   colnr_T w_valid_leftcol;          // last known w_leftcol
+  colnr_T w_valid_skipcol;          // last known w_skipcol
 
   bool w_viewport_invalid;
   linenr_T w_viewport_last_topline;  // topline when the viewport was last updated

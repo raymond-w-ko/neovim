@@ -29,6 +29,7 @@
 #include "nvim/edit.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
@@ -126,6 +127,7 @@ typedef struct command_line_state {
   int break_ctrl_c;
   expand_T xpc;
   long *b_im_ptr;
+  buf_T *b_im_ptr_buf;  ///< buffer where b_im_ptr is valid
 } CommandLineState;
 
 typedef struct cmdpreview_win_info {
@@ -503,6 +505,7 @@ static void may_do_incsearch_highlighting(int firstc, long count, incsearch_stat
   }
 
   validate_cursor();
+
   // May redraw the status line to show the cursor position.
   if (p_ru && (curwin->w_status_height > 0 || global_stl_height() > 0)) {
     curwin->w_redr_status = true;
@@ -597,6 +600,7 @@ static void finish_incsearch_highlighting(int gotesc, incsearch_state_T *s, bool
   magic_overruled = s->magic_overruled_save;
 
   validate_cursor();          // needed for TAB
+  status_redraw_all();
   redraw_all_later(UPD_SOME_VALID);
   if (call_update_screen) {
     update_screen();
@@ -733,7 +737,7 @@ static uint8_t *command_line_enter(int firstc, long count, int indent, bool clea
     } else {
       s->b_im_ptr = &curbuf->b_p_imsearch;
     }
-
+    s->b_im_ptr_buf = curbuf;
     if (*s->b_im_ptr == B_IMODE_LMAP) {
       State |= MODE_LANGMAP;
     }
@@ -1137,7 +1141,7 @@ static int command_line_execute(VimState *state, int key)
     } else if (s->c == K_COMMAND) {
       do_cmdline(NULL, getcmdkeycmd, NULL, DOCMD_NOWAIT);
     } else {
-      map_execute_lua();
+      map_execute_lua(false);
     }
 
     // nvim_select_popupmenu_item() can be called from the handling of
@@ -1535,20 +1539,21 @@ static int command_line_erase_chars(CommandLineState *s)
 /// language :lmap mappings and/or Input Method.
 static void command_line_toggle_langmap(CommandLineState *s)
 {
+  long *b_im_ptr = buf_valid(s->b_im_ptr_buf) ? s->b_im_ptr : NULL;
   if (map_to_exists_mode("", MODE_LANGMAP, false)) {
     // ":lmap" mappings exists, toggle use of mappings.
     State ^= MODE_LANGMAP;
-    if (s->b_im_ptr != NULL) {
+    if (b_im_ptr != NULL) {
       if (State & MODE_LANGMAP) {
-        *s->b_im_ptr = B_IMODE_LMAP;
+        *b_im_ptr = B_IMODE_LMAP;
       } else {
-        *s->b_im_ptr = B_IMODE_NONE;
+        *b_im_ptr = B_IMODE_NONE;
       }
     }
   }
 
-  if (s->b_im_ptr != NULL) {
-    if (s->b_im_ptr == &curbuf->b_p_iminsert) {
+  if (b_im_ptr != NULL) {
+    if (b_im_ptr == &curbuf->b_p_iminsert) {
       set_iminsert_global(curbuf);
     } else {
       set_imsearch_global(curbuf);
@@ -4277,7 +4282,7 @@ void cmdline_init(void)
 
 /// Check value of 'cedit' and set cedit_key.
 /// Returns NULL if value is OK, error message otherwise.
-const char *check_cedit(void)
+const char *did_set_cedit(optset_T *args)
 {
   if (*p_cedit == NUL) {
     cedit_key = -1;
@@ -4561,39 +4566,37 @@ bool is_in_cmdwin(void)
 char *script_get(exarg_T *const eap, size_t *const lenp)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_MALLOC
 {
-  const char *const cmd = eap->arg;
+  char *cmd = eap->arg;
 
   if (cmd[0] != '<' || cmd[1] != '<' || eap->getline == NULL) {
     *lenp = strlen(eap->arg);
     return eap->skip ? NULL : xmemdupz(eap->arg, *lenp);
   }
+  cmd += 2;
 
   garray_T ga = { .ga_data = NULL, .ga_len = 0 };
+
+  list_T *const l = heredoc_get(eap, cmd, true);
+  if (l == NULL) {
+    return NULL;
+  }
+
   if (!eap->skip) {
     ga_init(&ga, 1, 0x400);
   }
 
-  const char *const end_pattern = (cmd[2] != NUL ? skipwhite(cmd + 2) : ".");
-  while (true) {
-    char *const theline = eap->getline(eap->cstack->cs_looplevel > 0 ? -1 : NUL, eap->cookie, 0,
-                                       true);
-
-    if (theline == NULL || strcmp(end_pattern, theline) == 0) {
-      xfree(theline);
-      break;
-    }
-
+  TV_LIST_ITER_CONST(l, li, {
     if (!eap->skip) {
-      ga_concat(&ga, theline);
+      ga_concat(&ga, tv_get_string(TV_LIST_ITEM_TV(li)));
       ga_append(&ga, '\n');
     }
-    xfree(theline);
-  }
+  });
   *lenp = (size_t)ga.ga_len;  // Set length without trailing NUL.
   if (!eap->skip) {
     ga_append(&ga, NUL);
   }
 
+  tv_list_free(l);
   return (char *)ga.ga_data;
 }
 

@@ -1206,8 +1206,8 @@ static void decor_spell_nav_start(win_T *wp)
   decor_redraw_reset(wp, &decor_state);
 }
 
-static bool decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, int col,
-                                char **decor_error)
+static TriState decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, int col,
+                                    char **decor_error)
 {
   if (*decor_lnum != lnum) {
     decor_providers_invoke_spell(wp, lnum - 1, col, lnum - 1, -1, decor_error);
@@ -1215,7 +1215,7 @@ static bool decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, 
     *decor_lnum = lnum;
   }
   decor_redraw_col(wp, col, col, false, &decor_state);
-  return decor_state.spell == kTrue;
+  return decor_state.spell;
 }
 
 static inline bool can_syn_spell(win_T *wp, linenr_T lnum, int col)
@@ -1352,9 +1352,18 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
                             : p - buf) > wp->w_cursor.col)) {
             col = (colnr_T)(p - buf);
 
-            bool can_spell = (!has_syntax && (wp->w_s->b_p_spo_flags & SPO_NPBUFFER) == 0)
-                             || decor_spell_nav_col(wp, lnum, &decor_lnum, col, &decor_error)
-                             || (has_syntax && can_syn_spell(wp, lnum, col));
+            bool no_plain_buffer = (wp->w_s->b_p_spo_flags & SPO_NPBUFFER) != 0;
+            bool can_spell = !no_plain_buffer;
+            switch (decor_spell_nav_col(wp, lnum, &decor_lnum, col, &decor_error)) {
+            case kTrue:
+              can_spell = true; break;
+            case kFalse:
+              can_spell = false; break;
+            case kNone:
+              if (has_syntax) {
+                can_spell = can_syn_spell(wp, lnum, col);
+              }
+            }
 
             if (!can_spell) {
               attr = HLF_COUNT;
@@ -1851,7 +1860,7 @@ static int count_syllables(slang_T *slang, const char *word)
 
 /// Parse 'spelllang' and set w_s->b_langp accordingly.
 /// @return  NULL if it's OK, an untranslated error message otherwise.
-char *did_set_spelllang(win_T *wp)
+char *parse_spelllang(win_T *wp)
 {
   garray_T ga;
   char *splp;
@@ -2309,7 +2318,7 @@ void spell_reload(void)
     // window for this buffer in which 'spell' is set.
     if (*wp->w_s->b_p_spl != NUL) {
       if (wp->w_p_spell) {
-        (void)did_set_spelllang(wp);
+        (void)parse_spelllang(wp);
         break;
       }
     }
@@ -3612,7 +3621,7 @@ bool valid_spellfile(const char *val)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   for (const char *s = val; *s != NUL; s++) {
-    if (!vim_isfilec((uint8_t)(*s)) && *s != ',' && *s != ' ') {
+    if (!vim_is_fname_char((uint8_t)(*s))) {
       return false;
     }
   }
@@ -3637,7 +3646,7 @@ const char *did_set_spell_option(bool is_spellfile)
 
   FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
     if (wp->w_buffer == curbuf && wp->w_p_spell) {
-      errmsg = did_set_spelllang(wp);
+      errmsg = parse_spelllang(wp);
       break;
     }
   }

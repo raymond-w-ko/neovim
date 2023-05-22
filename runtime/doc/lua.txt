@@ -247,12 +247,12 @@ arguments separated by " " (space) instead of "\t" (tab).
         :lua =jit.version
 <
                                                                 *:lua-heredoc*
-:lua << [endmarker]
+:lua << [trim] [{endmarker}]
 {script}
 {endmarker}
-    Executes Lua script {script} from within Vimscript. {endmarker} must NOT
-    be preceded by whitespace. You can omit [endmarker] after the "<<" and use
-    a dot "." after {script} (similar to |:append|, |:insert|).
+    Executes Lua script {script} from within Vimscript. You can omit
+    [endmarker] after the "<<" and use a dot "." after {script} (similar to
+    |:append|, |:insert|). Refer to |let-heredoc| for more information.
 
     Example: >vim
         function! CurrentLineInfo()
@@ -321,20 +321,22 @@ Example: >vim
     :echo luaeval('string.match(_A, "[a-z]+")', 'XYXfoo123')
     " foo
 <
+                                                                    *lua-table*
 Lua tables are used as both dictionaries and lists, so it is impossible to
 determine whether empty table is meant to be empty list or empty dictionary.
 Additionally Lua does not have integer numbers. To distinguish between these
 cases there is the following agreement:
-
+                                                                     *lua-list*
 0. Empty table is empty list.
 1. Table with N incrementally growing integral numbers, starting from 1 and
    ending with N is considered to be a list.
+                                                                     *lua-dict*
 2. Table with string keys, none of which contains NUL byte, is considered to
    be a dictionary.
 3. Table with string keys, at least one of which contains NUL byte, is also
    considered to be a dictionary, but this time it is converted to
    a |msgpack-special-map|.
-                                                             *lua-special-tbl*
+                                                              *lua-special-tbl*
 4. Table with `vim.type_idx` key may be a dictionary, a list or floating-point
    value:
    - `{[vim.type_idx]=vim.types.float, [vim.val_idx]=1}` is converted to
@@ -399,7 +401,7 @@ For example consider the following Lua omnifunc handler: >lua
         return {'stuff', 'steam', 'strange things'}
       end
     end
-    vim.api.nvim_buf_set_option(0, 'omnifunc', 'v:lua.mymod.omnifunc')
+    vim.bo[buf].omnifunc = 'v:lua.mymod.omnifunc'
 
 Note: The module ("mymod" in the above example) must either be a Lua global,
 or use require() as shown above to access it from a package.
@@ -592,6 +594,8 @@ vim.highlight.on_yank({opts})                        *vim.highlight.on_yank()*
       - {on_macro} highlight when executing macro (default `false`)
       - {on_visual} highlight when yanking visual selection (default `true`)
       - {event} event structure (default |v:event|)
+      - {priority} priority of highlight (default |vim.highlight.priorities|`.user`)
+
 
 vim.highlight.range({bufnr}, {ns}, {hlgroup}, {start}, {finish}, {opts})
                                                        *vim.highlight.range()*
@@ -647,6 +651,14 @@ regex:match_line({bufnr}, {line_idx} [, {start}, {end}])  *regex:match_line()*
     are supplied, match only this byte index range. Otherwise see
     |regex:match_str()|. If {start} is used, then the returned byte indices
     will be relative {start}.
+
+------------------------------------------------------------------------------
+VIM.LPEG                                                            *lua-lpeg*
+
+                                                             *vim.lpeg* *vim.re*
+The Lpeg library for parsing expression grammars is being included as
+`vim.lpeg` (https://www.inf.puc-rio.br/~roberto/lpeg/). In addition, its regex-like
+interface is available as `vim.re` (https://www.inf.puc-rio.br/~roberto/lpeg/re.html).
 
 ------------------------------------------------------------------------------
 VIM.DIFF                                                            *lua-diff*
@@ -1422,7 +1434,7 @@ keycode({str})                                                 *vim.keycode()*
       • |nvim_replace_termcodes()|
 
 lua_omnifunc({find_start}, {_})                           *vim.lua_omnifunc()*
-    Omnifunc for completing lua values from from the runtime lua interpreter,
+    Omnifunc for completing lua values from the runtime lua interpreter,
     similar to the builtin completion for the `:lua` command.
 
     Activate using `set omnifunc=v:lua.vim.lua_omnifunc` in a lua buffer.
@@ -1871,7 +1883,7 @@ tbl_count({t})                                               *vim.tbl_count()*
       • https://github.com/Tieske/Penlight/blob/master/lua/pl/tablex.lua
 
 tbl_deep_extend({behavior}, {...})                     *vim.tbl_deep_extend()*
-    Merges recursively two or more map-like tables.
+    Merges recursively two or more tables.
 
     Parameters: ~
       • {behavior}  (string) Decides what to do if a key is found in more than
@@ -1879,7 +1891,7 @@ tbl_deep_extend({behavior}, {...})                     *vim.tbl_deep_extend()*
                     • "error": raise an error
                     • "keep": use value from the leftmost map
                     • "force": use value from the rightmost map
-      • {...}       (table) Two or more map-like tables
+      • {...}       (table) Two or more tables
 
     Return: ~
         (table) Merged table
@@ -1888,7 +1900,7 @@ tbl_deep_extend({behavior}, {...})                     *vim.tbl_deep_extend()*
       • |vim.tbl_extend()|
 
 tbl_extend({behavior}, {...})                               *vim.tbl_extend()*
-    Merges two or more map-like tables.
+    Merges two or more tables.
 
     Parameters: ~
       • {behavior}  (string) Decides what to do if a key is found in more than
@@ -1896,7 +1908,7 @@ tbl_extend({behavior}, {...})                               *vim.tbl_extend()*
                     • "error": raise an error
                     • "keep": use value from the leftmost map
                     • "force": use value from the rightmost map
-      • {...}       (table) Two or more map-like tables
+      • {...}       (table) Two or more tables
 
     Return: ~
         (table) Merged table
@@ -2564,6 +2576,16 @@ find({names}, {opts})                                          *vim.fs.find()*
         (table) Normalized paths |vim.fs.normalize()| of all matching files or
         directories
 
+joinpath({...})                                            *vim.fs.joinpath()*
+    Concatenate directories and/or file into a single path with normalization
+    (e.g., `"foo/"` and `"bar"` get joined to `"foo/bar"`)
+
+    Parameters: ~
+      • {...}  (string)
+
+    Return: ~
+        (string)
+
 normalize({path}, {opts})                                 *vim.fs.normalize()*
     Normalize a path to a standard format. A tilde (~) character at the
     beginning of the path is expanded to the user's home directory and any
@@ -2718,7 +2740,7 @@ versions (1.2.3-rc1) are not matched. >
 <
 
 cmp({v1}, {v2})                                            *vim.version.cmp()*
-    Parses and compares two version version objects (the result of
+    Parses and compares two version objects (the result of
     |vim.version.parse()|, or specified literally as a `{major, minor, patch}`
     tuple, e.g. `{1, 0, 3}`).
 
@@ -3072,7 +3094,7 @@ Iter:map({self}, {f})                                             *Iter:map()*
       • {f}  function(...):any Mapping function. Takes all values returned
              from the previous stage in the pipeline as arguments and returns
              one or more new values, which are used in the next pipeline
-             stage. Nil return values returned are filtered from the output.
+             stage. Nil return values are filtered from the output.
 
     Return: ~
         Iter

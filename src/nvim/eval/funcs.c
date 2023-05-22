@@ -148,6 +148,8 @@ PRAGMA_DIAG_POP
 
 static const char *e_listblobarg = N_("E899: Argument of %s must be a List or Blob");
 static const char *e_invalwindow = N_("E957: Invalid window number");
+static const char e_invalid_submatch_number_nr[]
+  = N_("E935: Invalid submatch number: %d");
 static const char *e_reduceempty = N_("E998: Reduce of an empty %s with no initial value");
 static const char e_missing_function_argument[]
   = N_("E1132: Missing function argument");
@@ -287,6 +289,9 @@ int call_internal_method(const char *const fname, const int argcount, typval_T *
 
   typval_T argv[MAX_FUNC_ARGS + 1];
   const ptrdiff_t base_index = fdef->base_arg == BASE_LAST ? argcount : fdef->base_arg - 1;
+  if (argcount < base_index) {
+    return FCERR_TOOFEW;
+  }
   memcpy(argv, argvars, (size_t)base_index * sizeof(typval_T));
   argv[base_index] = *basetv;
   memcpy(argv + base_index + 1, argvars + base_index,
@@ -925,7 +930,7 @@ static void f_count(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
           if (!error) {
             li = tv_list_find(l, (int)idx);
             if (li == NULL) {
-              semsg(_(e_listidx), idx);
+              semsg(_(e_list_index_out_of_range_nr), idx);
             }
           }
         }
@@ -1899,7 +1904,7 @@ static void extend(typval_T *argvars, typval_T *rettv, char *arg_errmsg, bool is
         } else {
           item = tv_list_find(l1, (int)before);
           if (item == NULL) {
-            semsg(_(e_listidx), (int64_t)before);
+            semsg(_(e_list_index_out_of_range_nr), (int64_t)before);
             return;
           }
         }
@@ -3726,7 +3731,7 @@ static void f_insert(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     if (before != tv_list_len(l)) {
       item = tv_list_find(l, (int)before);
       if (item == NULL) {
-        semsg(_(e_listidx), before);
+        semsg(_(e_list_index_out_of_range_nr), before);
         l = NULL;
       }
     }
@@ -7708,7 +7713,7 @@ static void f_spellbadword(typval_T *argvars, typval_T *rettv, EvalFuncData fptr
   const int wo_spell_save = curwin->w_p_spell;
 
   if (!curwin->w_p_spell) {
-    did_set_spelllang(curwin);
+    parse_spelllang(curwin);
     curwin->w_p_spell = true;
   }
 
@@ -7765,7 +7770,7 @@ static void f_spellsuggest(typval_T *argvars, typval_T *rettv, EvalFuncData fptr
   const int wo_spell_save = curwin->w_p_spell;
 
   if (!curwin->w_p_spell) {
-    did_set_spelllang(curwin);
+    parse_spelllang(curwin);
     curwin->w_p_spell = true;
   }
 
@@ -8024,7 +8029,7 @@ static void f_submatch(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   if (no < 0 || no >= NSUBEXP) {
-    semsg(_("E935: invalid submatch number: %d"), no);
+    semsg(_(e_invalid_submatch_number_nr), no);
     return;
   }
   int retList = 0;

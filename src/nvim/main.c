@@ -49,6 +49,7 @@
 #include "nvim/keycodes.h"
 #include "nvim/log.h"
 #include "nvim/lua/executor.h"
+#include "nvim/lua/secure.h"
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/mark.h"
@@ -443,8 +444,7 @@ int main(int argc, char **argv)
 
   // If using the runtime (-u is not NONE), enable syntax & filetype plugins.
   if (!vimrc_none || params.clean) {
-    // Sources filetype.lua and filetype.vim unless the user explicitly disabled it with :filetype
-    // off.
+    // Sources filetype.lua unless the user explicitly disabled it with :filetype off.
     filetype_maybe_enable();
     // Sources syntax/syntax.vim. We do this *after* the user startup scripts so that users can
     // disable syntax highlighting with `:syntax off` if they wish.
@@ -685,9 +685,6 @@ void getout(int exitval)
 
   set_vim_var_nr(VV_EXITING, exitval);
 
-  // Position the cursor on the last screen line, below all the text
-  ui_cursor_goto(Rows - 1, 0);
-
   // Invoked all deferred functions in the function stack.
   invoke_all_defer();
 
@@ -775,9 +772,6 @@ void getout(int exitval)
     // TODO(justinmk): this may call getout(0), clobbering exitval...
     wait_return(false);
   }
-
-  // Position the cursor again, the autocommands may have moved it
-  ui_cursor_goto(Rows - 1, 0);
 
   // Apply 'titleold'.
   if (p_title && *p_titleold != NUL) {
@@ -2229,3 +2223,17 @@ static void check_swap_exists_action(void)
   }
   handle_swap_exists(NULL);
 }
+
+#ifdef ENABLE_ASAN_UBSAN
+const char *__ubsan_default_options(void);
+const char *__ubsan_default_options(void)
+{
+  return "print_stacktrace=1";
+}
+
+const char *__asan_default_options(void);
+const char *__asan_default_options(void)
+{
+  return "handle_abort=1,handle_sigill=1";
+}
+#endif

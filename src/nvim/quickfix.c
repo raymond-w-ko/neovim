@@ -3885,11 +3885,12 @@ static buf_T *qf_find_buf(qf_info_T *qi)
 }
 
 /// Process the 'quickfixtextfunc' option value.
-void qf_process_qftf_option(const char **errmsg)
+const char *did_set_quickfixtextfunc(optset_T *args FUNC_ATTR_UNUSED)
 {
   if (option_set_callback_func(p_qftf, &qftf_cb) == FAIL) {
-    *errmsg = e_invarg;
+    return e_invarg;
   }
+  return NULL;
 }
 
 /// Update the w:quickfix_title variable in the quickfix/location list window in
@@ -5214,7 +5215,10 @@ static bool vgr_match_buflines(qf_list_T *qfl, char *fname, buf_T *buf, char *sp
   FUNC_ATTR_NONNULL_ARG(1, 3, 4, 5, 6)
 {
   bool found_match = false;
-  const size_t pat_len = strlen(spat);
+  size_t pat_len = strlen(spat);
+  if (pat_len > MAX_FUZZY_MATCHES) {
+    pat_len = MAX_FUZZY_MATCHES;
+  }
 
   for (linenr_T lnum = 1; lnum <= buf->b_ml.ml_line_count && *tomatch > 0; lnum++) {
     colnr_T col = 0;
@@ -5262,6 +5266,7 @@ static bool vgr_match_buflines(qf_list_T *qfl, char *fname, buf_T *buf, char *sp
       const size_t sz = sizeof(matches) / sizeof(matches[0]);
 
       // Fuzzy string match
+      CLEAR_FIELD(matches);
       while (fuzzy_match(str + col, spat, false, &score, matches, (int)sz) > 0) {
         // Pass the buffer number so that it gets used even for a
         // dummy buffer, unless duplicate_name is set, then the

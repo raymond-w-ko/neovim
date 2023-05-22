@@ -54,7 +54,6 @@
 #include "nvim/highlight_group.h"
 #include "nvim/indent.h"
 #include "nvim/input.h"
-#include "nvim/lua/executor.h"
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/mark.h"
@@ -125,6 +124,9 @@ typedef struct {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ex_cmds.c.generated.h"
 #endif
+
+static const char e_non_numeric_argument_to_z[]
+  = N_("E144: Non-numeric argument to :z");
 
 /// ":ascii" and "ga" implementation
 void do_ascii(const exarg_T *const eap)
@@ -346,10 +348,8 @@ static int linelen(int *has_tab)
        last > first && ascii_iswhite(last[-1]); last--) {}
   char save = *last;
   *last = NUL;
-  // Get line length.
-  len = linetabsize(line);
-  // Check for embedded TAB.
-  if (has_tab != NULL) {
+  len = linetabsize_str(line);  // Get line length.
+  if (has_tab != NULL) {        // Check for embedded TAB.
     *has_tab = vim_strchr(first, TAB) != NULL;
   }
   *last = save;
@@ -1925,6 +1925,9 @@ void do_wqall(exarg_T *eap)
   int save_forceit = eap->forceit;
 
   if (eap->cmdidx == CMD_xall || eap->cmdidx == CMD_wqall) {
+    if (before_quit_all(eap) == FAIL) {
+      return;
+    }
     exiting = true;
   }
 
@@ -2640,7 +2643,7 @@ int do_ecmd(int fnum, char *ffname, char *sfname, exarg_T *eap, linenr_T newlnum
   // If the window options were changed may need to set the spell language.
   // Can only do this after the buffer has been properly setup.
   if (did_get_winopts && curwin->w_p_spell && *curwin->w_s->b_p_spl != NUL) {
-    (void)did_set_spelllang(curwin);
+    (void)parse_spelllang(curwin);
   }
 
   if (command == NULL) {
@@ -2954,7 +2957,7 @@ void ex_z(exarg_T *eap)
 
   if (*x != 0) {
     if (!ascii_isdigit(*x)) {
-      emsg(_("E144: non-numeric argument to :z"));
+      emsg(_(e_non_numeric_argument_to_z));
       return;
     }
     bigness = atol(x);
@@ -4799,30 +4802,4 @@ void ex_oldfiles(exarg_T *eap)
       xfree(s);
     }
   }
-}
-
-void ex_trust(exarg_T *eap)
-{
-  const char *const p = skiptowhite(eap->arg);
-  char *arg1 = xmemdupz(eap->arg, (size_t)(p - eap->arg));
-  const char *action = "allow";
-  const char *path = skipwhite(p);
-
-  if (strcmp(arg1, "++deny") == 0) {
-    action = "deny";
-  } else if (strcmp(arg1, "++remove") == 0) {
-    action = "remove";
-  } else if (*arg1 != '\0') {
-    semsg(e_invarg2, arg1);
-    goto theend;
-  }
-
-  if (path[0] == '\0') {
-    path = NULL;
-  }
-
-  nlua_trust(action, path);
-
-theend:
-  xfree(arg1);
 }

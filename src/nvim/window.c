@@ -139,6 +139,32 @@ win_T *prevwin_curwin(void)
   return is_in_cmdwin() && prevwin != NULL ? prevwin : curwin;
 }
 
+/// If the 'switchbuf' option contains "useopen" or "usetab", then try to jump
+/// to a window containing "buf".
+/// Returns the pointer to the window that was jumped to or NULL.
+win_T *swbuf_goto_win_with_buf(buf_T *buf)
+{
+  win_T *wp = NULL;
+
+  if (buf == NULL) {
+    return wp;
+  }
+
+  // If 'switchbuf' contains "useopen": jump to first window in the current
+  // tab page containing "buf" if one exists.
+  if (swb_flags & SWB_USEOPEN) {
+    wp = buf_jump_open_win(buf);
+  }
+
+  // If 'switchbuf' contains "usetab": jump to first window in any tab page
+  // containing "buf" if one exists.
+  if (wp == NULL && (swb_flags & SWB_USETAB)) {
+    wp = buf_jump_open_tab(buf);
+  }
+
+  return wp;
+}
+
 /// all CTRL-W window commands are handled here, called from normal_cmd().
 ///
 /// @param xchar  extra char from ":wincmd gx" or NUL
@@ -514,17 +540,30 @@ wingotofile:
       tabpage_T *oldtab = curtab;
       win_T *oldwin = curwin;
       setpcmark();
-      if (win_split(0, 0) == OK) {
+
+      // If 'switchbuf' is set to 'useopen' or 'usetab' and the
+      // file is already opened in a window, then jump to it.
+      win_T *wp = NULL;
+      if ((swb_flags & (SWB_USEOPEN | SWB_USETAB))
+          && cmdmod.cmod_tab == 0) {
+        wp = swbuf_goto_win_with_buf(buflist_findname_exp(ptr));
+      }
+
+      if (wp == NULL && win_split(0, 0) == OK) {
         RESET_BINDING(curwin);
         if (do_ecmd(0, ptr, NULL, NULL, ECMD_LASTL, ECMD_HIDE, NULL) == FAIL) {
           // Failed to open the file, close the window opened for it.
           win_close(curwin, false, false);
           goto_tabpage_win(oldtab, oldwin);
-        } else if (nchar == 'F' && lnum >= 0) {
-          curwin->w_cursor.lnum = lnum;
-          check_cursor_lnum();
-          beginline(BL_SOL | BL_FIX);
+        } else {
+          wp = curwin;
         }
+      }
+
+      if (wp != NULL && nchar == 'F' && lnum >= 0) {
+        curwin->w_cursor.lnum = lnum;
+        check_cursor_lnum();
+        beginline(BL_SOL | BL_FIX);
       }
       xfree(ptr);
     }
@@ -670,6 +709,8 @@ void win_set_buf(Window window, Buffer buffer, bool noautocmd, Error *err)
 
   tabpage_T *tab = win_find_tabpage(win);
 
+  // no redrawing and don't set the window title
+  RedrawingDisabled++;
   if (noautocmd) {
     block_autocmds();
   }
@@ -699,6 +740,7 @@ void win_set_buf(Window window, Buffer buffer, bool noautocmd, Error *err)
   if (noautocmd) {
     unblock_autocmds();
   }
+  RedrawingDisabled--;
 }
 
 /// Create a new float.
@@ -1613,6 +1655,9 @@ static void win_init(win_T *newp, win_T *oldp, int flags)
                     ? NULL : xstrdup(oldp->w_prevdir);
 
   if (*p_spk != 'c') {
+    if (*p_spk == 't') {
+      newp->w_skipcol = oldp->w_skipcol;
+    }
     newp->w_botline = oldp->w_botline;
     newp->w_prev_height = oldp->w_height;
     newp->w_prev_winrow = oldp->w_winrow;
@@ -2272,6 +2317,9 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
         }
         if (hnc) {                  // add next_curwin size
           next_curwin_size -= (int)p_wiw - (m - n);
+          if (next_curwin_size < 0) {
+            next_curwin_size = 0;
+          }
           new_size += next_curwin_size;
           room -= new_size - next_curwin_size;
         } else {
@@ -4029,7 +4077,7 @@ static tabpage_T *alloc_tabpage(void)
   static int last_tp_handle = 0;
   tabpage_T *tp = xcalloc(1, sizeof(tabpage_T));
   tp->handle = ++last_tp_handle;
-  pmap_put(handle_T)(&tabpage_handles, tp->handle, tp);
+  pmap_put(int)(&tabpage_handles, tp->handle, tp);
 
   // Init t: variables.
   tp->tp_vars = tv_dict_alloc();
@@ -4042,7 +4090,7 @@ static tabpage_T *alloc_tabpage(void)
 
 void free_tabpage(tabpage_T *tp)
 {
-  pmap_del(handle_T)(&tabpage_handles, tp->handle);
+  pmap_del(int)(&tabpage_handles, tp->handle, NULL);
   diff_clear(tp);
   for (int idx = 0; idx < SNAP_COUNT; idx++) {
     clear_snapshot(tp, idx);
@@ -5014,7 +5062,7 @@ static win_T *win_alloc(win_T *after, bool hidden)
   win_T *new_wp = xcalloc(1, sizeof(win_T));
 
   new_wp->handle = ++last_win_id;
-  pmap_put(handle_T)(&window_handles, new_wp->handle, new_wp);
+  pmap_put(int)(&window_handles, new_wp->handle, new_wp);
 
   grid_assign_handle(&new_wp->w_grid_alloc);
 
@@ -5076,7 +5124,7 @@ void free_wininfo(wininfo_T *wip, buf_T *bp)
 /// @param tp  tab page "win" is in, NULL for current
 static void win_free(win_T *wp, tabpage_T *tp)
 {
-  pmap_del(handle_T)(&window_handles, wp->handle);
+  pmap_del(int)(&window_handles, wp->handle, NULL);
   clearFolding(wp);
 
   // reduce the reference count to the argument list.
@@ -6089,7 +6137,7 @@ static void frame_setwidth(frame_T *curfrp, int width)
 }
 
 // Check 'winminheight' for a valid value and reduce it if needed.
-void did_set_winminheight(void)
+const char *did_set_winminheight(optset_T *args FUNC_ATTR_UNUSED)
 {
   bool first = true;
 
@@ -6106,10 +6154,11 @@ void did_set_winminheight(void)
       first = false;
     }
   }
+  return NULL;
 }
 
 // Check 'winminwidth' for a valid value and reduce it if needed.
-void did_set_winminwidth(void)
+const char *did_set_winminwidth(optset_T *args FUNC_ATTR_UNUSED)
 {
   bool first = true;
 
@@ -6126,6 +6175,7 @@ void did_set_winminwidth(void)
       first = false;
     }
   }
+  return NULL;
 }
 
 /// Status line of dragwin is dragged "offset" lines down (negative is up).
@@ -6600,13 +6650,13 @@ void win_set_inner_size(win_T *wp, bool valid_cursor)
         set_fraction(wp);
       }
     }
-    wp->w_skipcol = 0;
     wp->w_height_inner = height;
     win_comp_scroll(wp);
 
     // There is no point in adjusting the scroll position when exiting.  Some
     // values might be invalid.
     if (valid_cursor && !exiting && *p_spk == 'c') {
+      wp->w_skipcol = 0;
       scroll_to_fraction(wp, prev_height);
     }
     redraw_later(wp, UPD_SOME_VALID);
@@ -6652,7 +6702,8 @@ static int win_border_width(win_T *wp)
 /// Set the width of a window.
 void win_new_width(win_T *wp, int width)
 {
-  wp->w_width = width;
+  // Should we give an error if width < 0?
+  wp->w_width = width < 0 ? 0 : width;
   wp->w_pos_changed = true;
   win_set_inner_size(wp, true);
 }

@@ -96,6 +96,9 @@ struct block_def {
 # include "ops.c.generated.h"
 #endif
 
+static const char e_search_pattern_and_expression_register_may_not_contain_two_or_more_lines[]
+  = N_("E883: Search pattern and expression register may not contain two or more lines");
+
 // Flags for third item in "opchars".
 #define OPF_LINES  1  // operator always works on lines
 #define OPF_CHANGE 2  // operator changes text
@@ -5043,8 +5046,7 @@ void write_reg_contents_lst(int name, char **strings, bool must_append, MotionTy
     if (strings[0] == NULL) {
       s = "";
     } else if (strings[1] != NULL) {
-      emsg(_("E883: search pattern and expression register may not "
-             "contain two or more lines"));
+      emsg(_(e_search_pattern_and_expression_register_may_not_contain_two_or_more_lines));
       return;
     }
     write_reg_contents_ex(name, s, -1, must_append, yank_type, block_len);
@@ -5503,7 +5505,7 @@ void cursor_pos_info(dict_T *dict)
         validate_virtcol();
         col_print(buf1, sizeof(buf1), (int)curwin->w_cursor.col + 1,
                   (int)curwin->w_virtcol + 1);
-        col_print(buf2, sizeof(buf2), (int)strlen(p), linetabsize(p));
+        col_print(buf2, sizeof(buf2), (int)strlen(p), linetabsize_str(p));
 
         if (char_count_cursor == byte_count_cursor
             && char_count == byte_count) {
@@ -5628,11 +5630,12 @@ static void op_colon(oparg_T *oap)
 static Callback opfunc_cb;
 
 /// Process the 'operatorfunc' option value.
-void set_operatorfunc_option(const char **errmsg)
+const char *did_set_operatorfunc(optset_T *args FUNC_ATTR_UNUSED)
 {
   if (option_set_callback_func(p_opfunc, &opfunc_cb) == FAIL) {
-    *errmsg = e_invarg;
+    return e_invarg;
   }
+  return NULL;
 }
 
 #if defined(EXITFREE)
@@ -5774,6 +5777,11 @@ typedef struct {
   int rv_arg;              ///< extra argument
 } redo_VIsual_T;
 
+static bool is_ex_cmdchar(cmdarg_T *cap)
+{
+  return cap->cmdchar == ':' || cap->cmdchar == K_COMMAND;
+}
+
 /// Handle an operator after Visual mode or when the movement is finished.
 /// "gui_yank" is true when yanking text for the clipboard.
 void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
@@ -5828,7 +5836,7 @@ void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
     if ((redo_yank || oap->op_type != OP_YANK)
         && ((!VIsual_active || oap->motion_force)
             // Also redo Operator-pending Visual mode mappings.
-            || ((cap->cmdchar == ':' || cap->cmdchar == K_COMMAND)
+            || ((is_ex_cmdchar(cap) || cap->cmdchar == K_LUA)
                 && oap->op_type != OP_COLON))
         && cap->cmdchar != 'D'
         && oap->op_type != OP_FOLD
@@ -5848,17 +5856,24 @@ void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
           AppendToRedobuffLit(cap->searchbuf, -1);
         }
         AppendToRedobuff(NL_STR);
-      } else if (cap->cmdchar == ':' || cap->cmdchar == K_COMMAND) {
+      } else if (is_ex_cmdchar(cap)) {
         // do_cmdline() has stored the first typed line in
         // "repeat_cmdline".  When several lines are typed repeating
         // won't be possible.
         if (repeat_cmdline == NULL) {
           ResetRedobuff();
         } else {
-          AppendToRedobuffLit(repeat_cmdline, -1);
+          if (cap->cmdchar == ':') {
+            AppendToRedobuffLit(repeat_cmdline, -1);
+          } else {
+            AppendToRedobuffSpec(repeat_cmdline);
+          }
           AppendToRedobuff(NL_STR);
           XFREE_CLEAR(repeat_cmdline);
         }
+      } else if (cap->cmdchar == K_LUA) {
+        AppendNumberToRedobuff(repeat_luaref);
+        AppendToRedobuff(NL_STR);
       }
     }
 
@@ -6014,7 +6029,7 @@ void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
           prep_redo(oap->regname, cap->count0,
                     get_op_char(oap->op_type), get_extra_op_char(oap->op_type),
                     oap->motion_force, cap->cmdchar, cap->nchar);
-        } else if (cap->cmdchar != ':' && cap->cmdchar != K_COMMAND) {
+        } else if (!is_ex_cmdchar(cap) && cap->cmdchar != K_LUA) {
           int opchar = get_op_char(oap->op_type);
           int extra_opchar = get_extra_op_char(oap->op_type);
           int nchar = oap->op_type == OP_REPLACE ? cap->nchar : NUL;

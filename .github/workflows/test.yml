@@ -1,9 +1,6 @@
 name: test
 on:
   push:
-    branches:
-      - 'master'
-      - 'release-[0-9]+.[0-9]+'
   pull_request:
     branches:
       - 'master'
@@ -12,60 +9,36 @@ on:
       - 'contrib/**'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.repository_owner == 'neovim' && github.sha || github.ref_name }}
   cancel-in-progress: true
 
 env:
-  ASAN_OPTIONS: detect_leaks=1:check_initialization_order=1:handle_abort=1:handle_sigill=1:log_path=${{ github.workspace }}/build/log/asan:intercept_tls_get_addr=0
+  ASAN_OPTIONS: detect_leaks=1:check_initialization_order=1:log_path=${{ github.workspace }}/build/log/asan:intercept_tls_get_addr=0
   BIN_DIR: ${{ github.workspace }}/bin
   BUILD_DIR: ${{ github.workspace }}/build
   INSTALL_PREFIX: ${{ github.workspace }}/nvim-install
   LOG_DIR: ${{ github.workspace }}/build/log
   NVIM_LOG_FILE: ${{ github.workspace }}/build/.nvimlog
   TSAN_OPTIONS: log_path=${{ github.workspace }}/build/log/tsan
-  UBSAN_OPTIONS: "print_stacktrace=1 log_path=${{ github.workspace }}/build/log/ubsan"
+  UBSAN_OPTIONS: log_path=${{ github.workspace }}/build/log/ubsan
   VALGRIND_LOG: ${{ github.workspace }}/build/log/valgrind-%p.log
   # TEST_FILE: test/functional/core/startup_spec.lua
   # TEST_FILTER: foo
 
 jobs:
   lint:
-    if: (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      CACHE_UNCRUSTIFY: ${{ github.workspace }}/.cache/uncrustify
-      UNCRUSTIFY_VERSION: uncrustify-0.76.0
     steps:
       - uses: actions/checkout@v3
 
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
       - name: Install dependencies
-        run: ./.github/scripts/install_deps.sh lua-check
-
-      - name: Cache uncrustify
-        id: cache-uncrustify
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.CACHE_UNCRUSTIFY }}
-          key: ${{ env.UNCRUSTIFY_VERSION }}
-
-      - name: Clone uncrustify
-        if: steps.cache-uncrustify.outputs.cache-hit != 'true'
-        uses: actions/checkout@v3
-        with:
-          repository: uncrustify/uncrustify
-          ref: ${{ env.UNCRUSTIFY_VERSION }}
-          path: uncrustify
-
-      - name: Install uncrustify
-        if: steps.cache-uncrustify.outputs.cache-hit != 'true'
         run: |
-          source_dir=uncrustify
-          build_dir=uncrustify/build
-          cmake -S $source_dir -B $build_dir -G Ninja -D CMAKE_BUILD_TYPE=Release
-          cmake --build $build_dir
-          mkdir -p .cache
-          cp $build_dir/uncrustify ${{ env.CACHE_UNCRUSTIFY }}
+          ./.github/scripts/install_deps.sh
+          brew install stylua
 
       - uses: ./.github/actions/cache
 
@@ -75,7 +48,6 @@ jobs:
           cmake --build .deps
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
-        name: configure
         run: cmake -B build -G Ninja
 
       - if: "!cancelled()"
@@ -84,12 +56,8 @@ jobs:
         run: echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
-        name: lintstylua
-        uses: JohnnyMorganz/stylua-action@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
-          args: --check runtime/
+        name: stylua
+        run: cmake --build build --target lintlua-stylua
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: luacheck
@@ -108,8 +76,7 @@ jobs:
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: uncrustify
-        run: |
-          ${{ env.CACHE_UNCRUSTIFY }} -c ./src/uncrustify.cfg -q --replace --no-backup $(find ./src/nvim -name "*.[ch]")
+        run: cmake --build build --target lintc-uncrustify
 
       - if: success() || failure() && steps.abort_job.outputs.status == 'success'
         name: suggester / uncrustify
@@ -170,9 +137,9 @@ jobs:
         run: mkdir -p "$LOG_DIR"
 
       - name: Install dependencies
-        run: ./.github/scripts/install_deps.sh cpanminus
+        run: ./.github/scripts/install_deps.sh --test
 
-      - name: Setup interpreter packages
+      - name: Set up interpreter packages
         run: |
           # Use default CC to avoid compilation problems when installing Python modules.
           echo "Install neovim module for Python."

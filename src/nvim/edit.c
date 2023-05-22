@@ -193,7 +193,7 @@ static void insert_enter(InsertState *s)
     }
   }
 
-  Insstart_textlen = (colnr_T)linetabsize(get_cursor_line_ptr());
+  Insstart_textlen = linetabsize_str(get_cursor_line_ptr());
   Insstart_blank_vcol = MAXCOL;
 
   if (!did_ai) {
@@ -232,7 +232,7 @@ static void insert_enter(InsertState *s)
   stop_insert_mode = false;
 
   // need to position cursor again when on a TAB
-  if (gchar_cursor() == TAB) {
+  if (gchar_cursor() == TAB || curbuf->b_virt_text_inline > 0) {
     curwin->w_valid &= ~(VALID_WROW|VALID_WCOL|VALID_VIRTCOL);
   }
 
@@ -876,12 +876,12 @@ static int insert_handle_key(InsertState *s)
     state_handle_k_event();
     goto check_pum;
 
-  case K_COMMAND:       // some command
+  case K_COMMAND:     // <Cmd>command<CR>
     do_cmdline(NULL, getcmdkeycmd, NULL, 0);
     goto check_pum;
 
   case K_LUA:
-    map_execute_lua();
+    map_execute_lua(false);
 
 check_pum:
     // nvim_select_popupmenu_item() can be called from the handling of
@@ -1528,8 +1528,9 @@ void edit_unputchar(void)
 
 // Called when p_dollar is set: display a '$' at the end of the changed text
 // Only works when cursor is in the line that changes.
-void display_dollar(colnr_T col)
+void display_dollar(colnr_T col_arg)
 {
+  colnr_T col = col_arg < 0 ? 0 : col_arg;
   colnr_T save_col;
 
   if (!redrawing()) {
@@ -2251,7 +2252,7 @@ int stop_arrow(void)
       // right, except when nothing was inserted yet.
       update_Insstart_orig = false;
     }
-    Insstart_textlen = (colnr_T)linetabsize(get_cursor_line_ptr());
+    Insstart_textlen = linetabsize_str(get_cursor_line_ptr());
 
     if (u_save_cursor() == OK) {
       arrow_used = false;
@@ -2449,6 +2450,7 @@ void beginline(int flags)
     }
     curwin->w_set_curswant = true;
   }
+  adjust_skipcol();
 }
 
 // oneright oneleft cursor_down cursor_up
@@ -2490,6 +2492,7 @@ int oneright(void)
   curwin->w_cursor.col += l;
 
   curwin->w_set_curswant = true;
+  adjust_skipcol();
   return OK;
 }
 
@@ -2525,6 +2528,7 @@ int oneleft(void)
     }
 
     curwin->w_set_curswant = true;
+    adjust_skipcol();
     return OK;
   }
 
@@ -2538,6 +2542,7 @@ int oneleft(void)
   // if the character on the left of the current cursor is a multi-byte
   // character, move to its first byte
   mb_adjust_cursor();
+  adjust_skipcol();
   return OK;
 }
 
@@ -3466,7 +3471,7 @@ static bool ins_esc(long *count, int cmdchar, bool nomove)
   State = MODE_NORMAL;
   may_trigger_modechanged();
   // need to position cursor again when on a TAB
-  if (gchar_cursor() == TAB) {
+  if (gchar_cursor() == TAB || curbuf->b_virt_text_inline > 0) {
     curwin->w_valid &= ~(VALID_WROW|VALID_WCOL|VALID_VIRTCOL);
   }
 

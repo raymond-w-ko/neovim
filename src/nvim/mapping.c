@@ -65,6 +65,17 @@ static mapblock_T *(maphash[MAX_MAPHASH]) = { 0 };
 # include "mapping.c.generated.h"
 #endif
 
+static const char e_global_abbreviation_already_exists_for_str[]
+  = N_("E224: Global abbreviation already exists for %s");
+static const char e_global_mapping_already_exists_for_str[]
+  = N_("E225: Global mapping already exists for %s");
+static const char e_abbreviation_already_exists_for_str[]
+  = N_("E226: Abbreviation already exists for %s");
+static const char e_mapping_already_exists_for_str[]
+  = N_("E227: Mapping already exists for %s");
+static const char e_entries_missing_in_mapset_dict_argument[]
+  = N_("E460: Entries missing in mapset() dict argument");
+
 /// Get the start of the hashed map list for "state" and first character "c".
 mapblock_T *get_maphash_list(int state, int c)
 {
@@ -645,10 +656,9 @@ static int buf_do_map(int maptype, MapArguments *args, int mode, bool is_abbrev,
               && mp->m_keylen == len
               && strncmp(mp->m_keys, lhs, (size_t)len) == 0) {
             if (is_abbrev) {
-              semsg(_("E224: global abbreviation already exists for %s"),
-                    mp->m_keys);
+              semsg(_(e_global_abbreviation_already_exists_for_str), mp->m_keys);
             } else {
-              semsg(_("E225: global mapping already exists for %s"), mp->m_keys);
+              semsg(_(e_global_mapping_already_exists_for_str), mp->m_keys);
             }
             retval = 5;
             goto theend;
@@ -761,9 +771,9 @@ static int buf_do_map(int maptype, MapArguments *args, int mode, bool is_abbrev,
                 break;
               } else if (args->unique) {
                 if (is_abbrev) {
-                  semsg(_("E226: abbreviation already exists for %s"), p);
+                  semsg(_(e_abbreviation_already_exists_for_str), p);
                 } else {
-                  semsg(_("E227: mapping already exists for %s"), p);
+                  semsg(_(e_mapping_already_exists_for_str), p);
                 }
                 retval = 5;
                 goto theend;
@@ -2226,7 +2236,7 @@ void f_mapset(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     api_free_object(callback_obj);
   }
   if (lhs == NULL || lhsraw == NULL || orig_rhs == NULL) {
-    emsg(_("E460: entries missing in mapset() dict argument"));
+    emsg(_(e_entries_missing_in_mapset_dict_argument));
     api_free_luaref(rhs_lua);
     return;
   }
@@ -2386,7 +2396,7 @@ void langmap_init(void)
 
 /// Called when langmap option is set; the language map can be
 /// changed at any time!
-void langmap_set(void)
+const char *did_set_langmap(optset_T *args)
 {
   char *p;
   char *p2;
@@ -2434,9 +2444,10 @@ void langmap_set(void)
         }
       }
       if (to == NUL) {
-        semsg(_("E357: 'langmap': Matching character missing for %s"),
-              transchar(from));
-        return;
+        snprintf(args->os_errbuf, args->os_errbuflen,
+                 _("E357: 'langmap': Matching character missing for %s"),
+                 transchar(from));
+        return args->os_errbuf;
       }
 
       if (from >= 256) {
@@ -2454,8 +2465,10 @@ void langmap_set(void)
           p = p2;
           if (p[0] != NUL) {
             if (p[0] != ',') {
-              semsg(_("E358: 'langmap': Extra characters after semicolon: %s"), p);
-              return;
+              snprintf(args->os_errbuf, args->os_errbuflen,
+                       _("E358: 'langmap': Extra characters after semicolon: %s"),
+                       p);
+              return args->os_errbuf;
             }
             p++;
           }
@@ -2464,6 +2477,8 @@ void langmap_set(void)
       }
     }
   }
+
+  return NULL;
 }
 
 static void do_exmap(exarg_T *eap, int isabbrev)

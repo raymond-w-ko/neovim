@@ -106,6 +106,7 @@ struct TUIData {
   bool bce;
   bool mouse_enabled;
   bool mouse_move_enabled;
+  bool title_enabled;
   bool busy, is_invisible, want_invisible;
   bool cork, overflow;
   bool set_cursor_color_as_str;
@@ -325,8 +326,6 @@ static void terminfo_start(TUIData *tui)
   // Enter alternate screen, save title, and clear.
   // NOTE: Do this *before* changing terminal settings. #6433
   unibi_out(tui, unibi_enter_ca_mode);
-  // Save title/icon to the "stack". #4063
-  unibi_out_ext(tui, tui->unibi_ext.save_title);
   unibi_out(tui, unibi_keypad_xmit);
   unibi_out(tui, unibi_clear_screen);
   // Ask the terminal to send us the background color.
@@ -383,8 +382,7 @@ static void terminfo_stop(TUIData *tui)
   // Disable extended keys before exiting alternate screen.
   unibi_out_ext(tui, tui->unibi_ext.disable_extended_keys);
   unibi_out(tui, unibi_exit_ca_mode);
-  // Restore title/icon from the "stack". #4063
-  unibi_out_ext(tui, tui->unibi_ext.restore_title);
+  tui_set_title(tui, (String)STRING_INIT);
   if (tui->cursor_color_changed) {
     unibi_out_ext(tui, tui->unibi_ext.reset_cursor_color);
   }
@@ -437,6 +435,8 @@ static void tui_terminal_stop(TUIData *tui)
   }
   tinput_stop(&tui->input);
   signal_watcher_stop(&tui->winch_handle);
+  // Position the cursor on the last screen line, below all the text
+  cursor_goto(tui, tui->height - 1, 0);
   terminfo_stop(tui);
 }
 
@@ -977,7 +977,7 @@ void tui_grid_clear(TUIData *tui, Integer g)
   UGrid *grid = &tui->grid;
   ugrid_clear(grid);
   kv_size(tui->invalid_regions) = 0;
-  clear_region(tui, 0, grid->height, 0, grid->width, 0);
+  clear_region(tui, 0, tui->height, 0, tui->width, 0);
 }
 
 void tui_grid_cursor_goto(TUIData *tui, Integer grid, Integer row, Integer col)
@@ -1361,13 +1361,24 @@ void tui_suspend(TUIData *tui)
 
 void tui_set_title(TUIData *tui, String title)
 {
-  if (!(title.data && unibi_get_str(tui->ut, unibi_to_status_line)
+  if (!(unibi_get_str(tui->ut, unibi_to_status_line)
         && unibi_get_str(tui->ut, unibi_from_status_line))) {
     return;
   }
-  unibi_out(tui, unibi_to_status_line);
-  out(tui, title.data, title.size);
-  unibi_out(tui, unibi_from_status_line);
+  if (title.size > 0) {
+    if (!tui->title_enabled) {
+      // Save title/icon to the "stack". #4063
+      unibi_out_ext(tui, tui->unibi_ext.save_title);
+      tui->title_enabled = true;
+    }
+    unibi_out(tui, unibi_to_status_line);
+    out(tui, title.data, title.size);
+    unibi_out(tui, unibi_from_status_line);
+  } else if (tui->title_enabled) {
+    // Restore title/icon from the "stack". #4063
+    unibi_out_ext(tui, tui->unibi_ext.restore_title);
+    tui->title_enabled = false;
+  }
 }
 
 void tui_set_icon(TUIData *tui, String icon)
@@ -1529,12 +1540,11 @@ void tui_guess_size(TUIData *tui)
     height = DFLT_ROWS;
   }
 
-  if (tui->width != width || tui->height != height) {
-    tui->width = width;
-    tui->height = height;
+  tui->width = width;
+  tui->height = height;
 
-    ui_client_set_size(width, height);
-  }
+  // Redraw on SIGWINCH event if size didn't change. #23411
+  ui_client_set_size(width, height);
 }
 
 static void unibi_goto(TUIData *tui, int row, int col)

@@ -248,7 +248,23 @@ typedef enum {
 # include "memline.c.generated.h"
 #endif
 
-static char e_warning_pointer_block_corrupted[]
+static const char e_ml_get_invalid_lnum_nr[]
+  = N_("E315: ml_get: Invalid lnum: %" PRId64);
+static const char e_ml_get_cannot_find_line_nr_in_buffer_nr_str[]
+  = N_("E316: ml_get: Cannot find line %" PRId64 "in buffer %d %s");
+static const char e_pointer_block_id_wrong[]
+  = N_("E317: Pointer block id wrong");
+static const char e_pointer_block_id_wrong_two[]
+  = N_("E317: Pointer block id wrong 2");
+static const char e_pointer_block_id_wrong_three[]
+  = N_("E317: Pointer block id wrong 3");
+static const char e_pointer_block_id_wrong_four[]
+  = N_("E317: Pointer block id wrong 4");
+static const char e_line_number_out_of_range_nr_past_the_end[]
+  = N_("E322: Line number out of range: %" PRId64 " past the end");
+static const char e_line_count_wrong_in_block_nr[]
+  = N_("E323: Line count wrong in block %" PRId64);
+static const char e_warning_pointer_block_corrupted[]
   = N_("E1364: Warning: Pointer block corrupted");
 
 #if __has_feature(address_sanitizer)
@@ -1070,11 +1086,12 @@ void ml_recover(bool checkext)
           ml_append(lnum++, _("???BLOCK MISSING"),
                     (colnr_T)0, true);
         } else {
-          // it is a data block
-          // Append all the lines in this block
+          // It is a data block.
+          // Append all the lines in this block.
           bool has_error = false;
-          // check length of block
-          // if wrong, use length in pointer block
+
+          // Check the length of the block.
+          // If wrong, use the length given in the pointer block.
           if (page_count * mfp->mf_page_size != dp->db_txt_end) {
             ml_append(lnum++,
                       _("??? from here until ???END lines" " may be messed up"),
@@ -1084,11 +1101,12 @@ void ml_recover(bool checkext)
             dp->db_txt_end = page_count * mfp->mf_page_size;
           }
 
-          // make sure there is a NUL at the end of the block
+          // Make sure there is a NUL at the end of the block so we
+          // don't go over the end when copying text.
           *((char *)dp + dp->db_txt_end - 1) = NUL;
 
-          // check number of lines in block
-          // if wrong, use count in data block
+          // Check the number of lines in the block.
+          // If wrong, use the count in the data block.
           if (line_count != dp->db_line_count) {
             ml_append(lnum++,
                       _("??? from here until ???END lines"
@@ -1098,13 +1116,27 @@ void ml_recover(bool checkext)
             has_error = true;
           }
 
+          bool did_questions = false;
           for (int i = 0; i < dp->db_line_count; i++) {
+            if ((char *)&(dp->db_index[i]) >= (char *)dp + dp->db_txt_start) {
+              // line count must be wrong
+              error++;
+              ml_append(lnum++, _("??? lines may be missing"), (colnr_T)0, true);
+              break;
+            }
+
             int txt_start = (dp->db_index[i] & DB_INDEX_MASK);
             if (txt_start <= (int)HEADER_SIZE
                 || txt_start >= (int)dp->db_txt_end) {
-              p = "???";
               error++;
+              // avoid lots of lines with "???"
+              if (did_questions) {
+                continue;
+              }
+              did_questions = true;
+              p = "???";
             } else {
+              did_questions = false;
               p = (char *)dp + txt_start;
             }
             ml_append(lnum++, p, (colnr_T)0, true);
@@ -1810,7 +1842,7 @@ char *ml_get_buf(buf_T *buf, linenr_T lnum, bool will_change)
       // Avoid giving this message for a recursive call, may happen when
       // the GUI redraws part of the text.
       recursive++;
-      siemsg(_("E315: ml_get: invalid lnum: %" PRId64), (int64_t)lnum);
+      siemsg(_(e_ml_get_invalid_lnum_nr), (int64_t)lnum);
       recursive--;
     }
     ml_flush_line(buf);
@@ -1845,7 +1877,7 @@ errorret:
         recursive++;
         get_trans_bufname(buf);
         shorten_dir(NameBuff);
-        siemsg(_("E316: ml_get: cannot find line %" PRId64 " in buffer %d %s"),
+        siemsg(_(e_ml_get_cannot_find_line_nr_in_buffer_nr_str),
                (int64_t)lnum, buf->b_fnum, NameBuff);
         recursive--;
       }
@@ -2212,7 +2244,7 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line, colnr_T len, boo
       }
       PTR_BL *pp = hp->bh_data;         // must be pointer block
       if (pp->pb_id != PTR_ID) {
-        iemsg(_("E317: pointer block id wrong 3"));
+        iemsg(_(e_pointer_block_id_wrong_three));
         mf_put(mfp, hp, false, false);
         return FAIL;
       }
@@ -2515,7 +2547,7 @@ static int ml_delete_int(buf_T *buf, linenr_T lnum, bool message)
       }
       PTR_BL *pp = hp->bh_data;         // must be pointer block
       if (pp->pb_id != PTR_ID) {
-        iemsg(_("E317: pointer block id wrong 4"));
+        iemsg(_(e_pointer_block_id_wrong_four));
         mf_put(mfp, hp, false, false);
         return FAIL;
       }
@@ -2881,7 +2913,7 @@ static bhdr_T *ml_find_line(buf_T *buf, linenr_T lnum, int action)
 
     pp = (PTR_BL *)(dp);                // must be pointer block
     if (pp->pb_id != PTR_ID) {
-      iemsg(_("E317: pointer block id wrong"));
+      iemsg(_(e_pointer_block_id_wrong));
       goto error_block;
     }
 
@@ -2919,10 +2951,10 @@ static bhdr_T *ml_find_line(buf_T *buf, linenr_T lnum, int action)
     }
     if (idx >= (int)pp->pb_count) {         // past the end: something wrong!
       if (lnum > buf->b_ml.ml_line_count) {
-        siemsg(_("E322: line number out of range: %" PRId64 " past the end"),
+        siemsg(_(e_line_number_out_of_range_nr_past_the_end),
                (int64_t)lnum - buf->b_ml.ml_line_count);
       } else {
-        siemsg(_("E323: line count wrong in block %" PRId64), bnum);
+        siemsg(_(e_line_count_wrong_in_block_nr), bnum);
       }
       goto error_block;
     }
@@ -2992,7 +3024,7 @@ static void ml_lineadd(buf_T *buf, int count)
     PTR_BL *pp = hp->bh_data;       // must be pointer block
     if (pp->pb_id != PTR_ID) {
       mf_put(mfp, hp, false, false);
-      iemsg(_("E317: pointer block id wrong 2"));
+      iemsg(_(e_pointer_block_id_wrong_two));
       break;
     }
     pp->pb_pointer[ip->ip_index].pe_line_count += count;

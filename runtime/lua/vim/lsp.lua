@@ -8,12 +8,8 @@ local sync = require('vim.lsp.sync')
 local semantic_tokens = require('vim.lsp.semantic_tokens')
 
 local api = vim.api
-local nvim_err_writeln, nvim_buf_get_lines, nvim_command, nvim_buf_get_option, nvim_exec_autocmds =
-  api.nvim_err_writeln,
-  api.nvim_buf_get_lines,
-  api.nvim_command,
-  api.nvim_buf_get_option,
-  api.nvim_exec_autocmds
+local nvim_err_writeln, nvim_buf_get_lines, nvim_command, nvim_exec_autocmds =
+  api.nvim_err_writeln, api.nvim_buf_get_lines, api.nvim_command, api.nvim_exec_autocmds
 local uv = vim.loop
 local tbl_isempty, tbl_extend = vim.tbl_isempty, vim.tbl_extend
 local validate = vim.validate
@@ -137,7 +133,7 @@ local format_line_ending = {
 ---@param bufnr (number)
 ---@return string
 local function buf_get_line_ending(bufnr)
-  return format_line_ending[nvim_buf_get_option(bufnr, 'fileformat')] or '\n'
+  return format_line_ending[vim.bo[bufnr].fileformat] or '\n'
 end
 
 local client_index = 0
@@ -319,7 +315,7 @@ end
 local function buf_get_full_text(bufnr)
   local line_ending = buf_get_line_ending(bufnr)
   local text = table.concat(nvim_buf_get_lines(bufnr, 0, -1, true), line_ending)
-  if nvim_buf_get_option(bufnr, 'eol') then
+  if vim.bo[bufnr].eol then
     text = text .. line_ending
   end
   return text
@@ -709,7 +705,7 @@ local function text_document_did_open_handler(bufnr, client)
   if not api.nvim_buf_is_loaded(bufnr) then
     return
   end
-  local filetype = nvim_buf_get_option(bufnr, 'filetype')
+  local filetype = vim.bo[bufnr].filetype
 
   local params = {
     textDocument = {
@@ -901,8 +897,8 @@ end
 --- Field `cmd` in {config} is required.
 ---
 ---@param config (table) Configuration for the server:
---- - cmd: (table|string|fun(dispatchers: table):table) command string or
----       list treated like |jobstart()|. The command must launch the language server
+--- - cmd: (string[]|fun(dispatchers: table):table) command a list of
+---       strings treated like |jobstart()|. The command must launch the language server
 ---       process. `cmd` can also be a function that creates an RPC client.
 ---       The function receives a dispatchers table and must return a table with the
 ---       functions `request`, `notify`, `is_closing` and `terminate`
@@ -913,7 +909,7 @@ end
 ---       the `cmd` process. Not related to `root_dir`.
 ---
 --- - cmd_env: (table) Environment flags to pass to the LSP on
----       spawn.  Must be specified using a map-like table.
+---       spawn.  Must be specified using a table.
 ---       Non-string values are coerced to string.
 ---       Example:
 ---       <pre>
@@ -2177,7 +2173,7 @@ end
 ---
 --- Currently only supports a single client. This can be set via
 --- `setlocal formatexpr=v:lua.vim.lsp.formatexpr()` but will typically or in `on_attach`
---- via ``vim.api.nvim_buf_set_option(bufnr, 'formatexpr', 'v:lua.vim.lsp.formatexpr(#{timeout_ms:250})')``.
+--- via ``vim.bo[bufnr].formatexpr = 'v:lua.vim.lsp.formatexpr(#{timeout_ms:250})'``.
 ---
 ---@param opts table options for customizing the formatting expression which takes the
 ---                   following optional keys:

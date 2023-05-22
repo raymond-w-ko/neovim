@@ -106,6 +106,10 @@ static int VIsual_mode_orig = NUL;              // saved Visual mode
 # include "normal.c.generated.h"
 #endif
 
+static const char e_changelist_is_empty[] = N_("E664: Changelist is empty");
+static const char e_cmdline_window_already_open[]
+  = N_("E1292: Command-line window is already open");
+
 static inline void normal_state_init(NormalState *s)
 {
   memset(s, 0, sizeof(NormalState));
@@ -956,7 +960,7 @@ normal_end:
     set_reg_var(get_default_register_name());
   }
 
-  s->c = finish_op;
+  const bool prev_finish_op = finish_op;
   if (s->oa.op_type == OP_NOP) {
     // Reset finish_op, in case it was set
     finish_op = false;
@@ -964,7 +968,7 @@ normal_end:
   }
   // Redraw the cursor with another shape, if we were in Operator-pending
   // mode or did a replace command.
-  if (s->c || s->ca.cmdchar == 'r'
+  if (prev_finish_op || s->ca.cmdchar == 'r'
       || (s->ca.cmdchar == 'g' && s->ca.nchar == 'r')) {
     ui_cursor_shape();                  // may show different cursor shape
   }
@@ -2158,9 +2162,8 @@ void check_scrollbind(linenr_T topline_diff, long leftcol_diff)
     }
 
     // do the horizontal scroll
-    if (want_hor && curwin->w_leftcol != tgt_leftcol) {
-      curwin->w_leftcol = tgt_leftcol;
-      leftcol_changed();
+    if (want_hor) {
+      (void)set_leftcol(tgt_leftcol);
     }
   }
 
@@ -2432,7 +2435,7 @@ bool find_decl(char *ptr, size_t len, bool locally, bool thisblock, int flags_ar
 /// @return  true if able to move cursor, false otherwise.
 static bool nv_screengo(oparg_T *oap, int dir, long dist)
 {
-  int linelen = linetabsize(get_cursor_line_ptr());
+  int linelen = linetabsize_str(get_cursor_line_ptr());
   bool retval = true;
   bool atend = false;
   int col_off1;                 // margin offset for first screen line
@@ -2494,7 +2497,7 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
             retval = false;
             break;
           }
-          linelen = linetabsize(get_cursor_line_ptr());
+          linelen = linetabsize_str(get_cursor_line_ptr());
           if (linelen > width1) {
             int w = (((linelen - width1 - 1) / width2) + 1) * width2;
             assert(curwin->w_curswant <= INT_MAX - w);
@@ -2525,7 +2528,7 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
           if (curwin->w_curswant >= width1) {
             curwin->w_curswant -= width2;
           }
-          linelen = linetabsize(get_cursor_line_ptr());
+          linelen = linetabsize_str(get_cursor_line_ptr());
         }
       }
     }
@@ -2566,6 +2569,8 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
   if (atend) {
     curwin->w_curswant = MAXCOL;            // stick in the last column
   }
+  adjust_skipcol();
+
   return retval;
 }
 
@@ -2633,6 +2638,7 @@ static void nv_scroll_line(cmdarg_T *cap)
 void scroll_redraw(int up, long count)
 {
   linenr_T prev_topline = curwin->w_topline;
+  int prev_skipcol = curwin->w_skipcol;
   int prev_topfill = curwin->w_topfill;
   linenr_T prev_lnum = curwin->w_cursor.lnum;
 
@@ -2640,7 +2646,7 @@ void scroll_redraw(int up, long count)
                scrollup(count, true) :
                scrolldown(count, true);
 
-  if (get_scrolloff_value(curwin)) {
+  if (get_scrolloff_value(curwin) > 0) {
     // Adjust the cursor position for 'scrolloff'.  Mark w_topline as
     // valid, otherwise the screen jumps back at the end of the file.
     cursor_correct();
@@ -2651,6 +2657,7 @@ void scroll_redraw(int up, long count)
     // we get stuck at one position.  Don't move the cursor up if the
     // first line of the buffer is already on the screen
     while (curwin->w_topline == prev_topline
+           && curwin->w_skipcol == prev_skipcol
            && curwin->w_topfill == prev_topfill) {
       if (up) {
         if (curwin->w_cursor.lnum > prev_lnum
@@ -2890,27 +2897,21 @@ static void nv_zet(cmdarg_T *cap)
   case 'h':
   case K_LEFT:
     if (!curwin->w_p_wrap) {
-      if ((colnr_T)cap->count1 > curwin->w_leftcol) {
-        curwin->w_leftcol = 0;
-      } else {
-        curwin->w_leftcol -= (colnr_T)cap->count1;
-      }
-      leftcol_changed();
+      (void)set_leftcol((colnr_T)cap->count1 > curwin->w_leftcol
+                        ? 0 : curwin->w_leftcol - (colnr_T)cap->count1);
     }
     break;
 
-  // "zL" - scroll screen left half-page
+  // "zL" - scroll window left half-page
   case 'L':
     cap->count1 *= curwin->w_width_inner / 2;
     FALLTHROUGH;
 
-  // "zl" - scroll screen to the left
+  // "zl" - scroll window to the left if not wrapping
   case 'l':
   case K_RIGHT:
     if (!curwin->w_p_wrap) {
-      // scroll the window left
-      curwin->w_leftcol += (colnr_T)cap->count1;
-      leftcol_changed();
+      (void)set_leftcol(curwin->w_leftcol + (colnr_T)cap->count1);
     }
     break;
 
@@ -3233,7 +3234,7 @@ static void nv_colon(cmdarg_T *cap)
   }
 
   if (is_lua) {
-    cmd_result = map_execute_lua();
+    cmd_result = map_execute_lua(true);
   } else {
     // get a command line and execute it
     cmd_result = do_cmdline(NULL, is_cmdkey ? getcmdkeycmd : getexline, NULL,
@@ -4966,7 +4967,7 @@ static void nv_pcmark(cmdarg_T *cap)
     move_res = nv_mark_move_to(cap, flags, fm);
   } else if (cap->cmdchar == 'g') {
     if (curbuf->b_changelistlen == 0) {
-      emsg(_("E664: changelist is empty"));
+      emsg(_(e_changelist_is_empty));
     } else if (cap->count1 < 0) {
       emsg(_("E662: At start of changelist"));
     } else {
@@ -5273,6 +5274,7 @@ static void nv_g_home_m_cmd(cmdarg_T *cap)
     curwin->w_valid &= ~VALID_WCOL;
   }
   curwin->w_set_curswant = true;
+  adjust_skipcol();
 }
 
 /// "g_": to the last non-blank character in the line or <count> lines downward.
@@ -5349,7 +5351,7 @@ static void nv_g_dollar_cmd(cmdarg_T *cap)
       colnr_T vcol;
 
       getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol);
-      if (vcol >= curwin->w_leftcol + curwin->w_width - col_off) {
+      if (vcol >= curwin->w_leftcol + curwin->w_width_inner - col_off) {
         curwin->w_cursor.col--;
       }
     }
@@ -5493,7 +5495,7 @@ static void nv_g_cmd(cmdarg_T *cap)
   case 'M':
     oap->motion_type = kMTCharWise;
     oap->inclusive = false;
-    i = linetabsize(get_cursor_line_ptr());
+    i = linetabsize_str(get_cursor_line_ptr());
     if (cap->count0 > 0 && cap->count0 <= 100) {
       coladvance((colnr_T)(i * cap->count0 / 100));
     } else {
@@ -6372,6 +6374,10 @@ static void nv_record(cmdarg_T *cap)
   }
 
   if (cap->nchar == ':' || cap->nchar == '/' || cap->nchar == '?') {
+    if (cmdwin_type != 0) {
+      emsg(_(e_cmdline_window_already_open));
+      return;
+    }
     stuffcharReadbuff(cap->nchar);
     stuffcharReadbuff(K_CMDWIN);
   } else {
