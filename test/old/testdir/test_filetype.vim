@@ -121,11 +121,12 @@ let s:filename_checks = {
     \ 'cobol': ['file.cbl', 'file.cob', 'file.lib'],
     \ 'coco': ['file.atg'],
     \ 'conaryrecipe': ['file.recipe'],
-    \ 'conf': ['auto.master'],
+    \ 'conf': ['auto.master', 'file.conf'],
     \ 'config': ['configure.in', 'configure.ac', '/etc/hostname.file', 'any/etc/hostname.file'],
     \ 'confini': ['/etc/pacman.conf', 'any/etc/pacman.conf', 'mpv.conf', 'any/.aws/config', 'any/.aws/credentials', 'file.nmconnection'],
     \ 'context': ['tex/context/any/file.tex', 'file.mkii', 'file.mkiv', 'file.mkvi', 'file.mkxl', 'file.mklx'],
     \ 'cook': ['file.cook'],
+    \ 'corn': ['file.corn'],
     \ 'cpon': ['file.cpon'],
     \ 'cpp': ['file.cxx', 'file.c++', 'file.hh', 'file.hxx', 'file.hpp', 'file.ipp', 'file.moc', 'file.tcc', 'file.inl', 'file.tlh', 'file.cppm', 'file.ccm', 'file.cxxm', 'file.c++m'],
     \ 'cqlang': ['file.cql'],
@@ -639,6 +640,7 @@ let s:filename_checks = {
     \ 'upstreamdat': ['upstream.dat', 'UPSTREAM.DAT', 'upstream.file.dat', 'UPSTREAM.FILE.DAT', 'file.upstream.dat', 'FILE.UPSTREAM.DAT'],
     \ 'upstreaminstalllog': ['upstreaminstall.log', 'UPSTREAMINSTALL.LOG', 'upstreaminstall.file.log', 'UPSTREAMINSTALL.FILE.LOG', 'file.upstreaminstall.log', 'FILE.UPSTREAMINSTALL.LOG'],
     \ 'upstreamlog': ['fdrupstream.log', 'upstream.log', 'UPSTREAM.LOG', 'upstream.file.log', 'UPSTREAM.FILE.LOG', 'file.upstream.log', 'FILE.UPSTREAM.LOG', 'UPSTREAM-file.log', 'UPSTREAM-FILE.LOG'],
+    \ 'urlshortcut': ['file.url'],
     \ 'usd': ['file.usda', 'file.usd'],
     \ 'usserverlog': ['usserver.log', 'USSERVER.LOG', 'usserver.file.log', 'USSERVER.FILE.LOG', 'file.usserver.log', 'FILE.USSERVER.LOG'],
     \ 'usw2kagtlog': ['usw2kagt.log', 'USW2KAGT.LOG', 'usw2kagt.file.log', 'USW2KAGT.FILE.LOG', 'file.usw2kagt.log', 'FILE.USW2KAGT.LOG'],
@@ -1444,6 +1446,12 @@ func Test_mod_file()
 
   " go.mod
   call writefile(['module example.com/M'], 'go.mod')
+  split go.mod
+  call assert_equal('gomod', &filetype)
+  bwipe!
+  call delete('go.mod')
+
+  call writefile(['module M'], 'go.mod')
   split go.mod
   call assert_equal('gomod', &filetype)
   bwipe!

@@ -882,7 +882,7 @@ describe('lua stdlib', function()
 
   it('vim.fn is allowed in "fast" context by some functions #18306', function()
     exec_lua([[
-      local timer = vim.loop.new_timer()
+      local timer = vim.uv.new_timer()
       timer:start(0, 0, function()
         timer:close()
         assert(vim.in_fast_event())
@@ -948,7 +948,7 @@ describe('lua stdlib', function()
     })
     screen:attach()
     exec_lua([[
-      timer = vim.loop.new_timer()
+      timer = vim.uv.new_timer()
       timer:start(20, 0, function ()
         -- notify ok (executed later when safe)
         vim.rpcnotify(chan, 'nvim_set_var', 'yy', {3, vim.NIL})
@@ -2481,7 +2481,7 @@ describe('lua stdlib', function()
         start_time = get_time()
 
         vim.g.timer_result = false
-        timer = vim.loop.new_timer()
+        timer = vim.uv.new_timer()
         timer:start(100, 0, vim.schedule_wrap(function()
           vim.g.timer_result = true
         end))
@@ -2503,7 +2503,7 @@ describe('lua stdlib', function()
         start_time = get_time()
 
         vim.g.timer_result = false
-        timer = vim.loop.new_timer()
+        timer = vim.uv.new_timer()
         timer:start(100, 0, vim.schedule_wrap(function()
           vim.g.timer_result = true
         end))
@@ -2546,17 +2546,17 @@ describe('lua stdlib', function()
 
     it('should allow waiting with no callback, explicit', function()
       eq(true, exec_lua [[
-        local start_time = vim.loop.hrtime()
+        local start_time = vim.uv.hrtime()
         vim.wait(50, nil)
-        return vim.loop.hrtime() - start_time > 25000
+        return vim.uv.hrtime() - start_time > 25000
       ]])
     end)
 
     it('should allow waiting with no callback, implicit', function()
       eq(true, exec_lua [[
-        local start_time = vim.loop.hrtime()
+        local start_time = vim.uv.hrtime()
         vim.wait(50)
-        return vim.loop.hrtime() - start_time > 25000
+        return vim.uv.hrtime() - start_time > 25000
       ]])
     end)
 
@@ -3039,6 +3039,46 @@ describe('lua stdlib', function()
     ]])
 
     eq(4, exec_lua [[ return vim.re.match("abcde", '[a-c]+') ]])
+  end)
+
+  it("vim.ringbuf", function()
+    local results = exec_lua([[
+      local ringbuf = vim.ringbuf(3)
+      ringbuf:push("a") -- idx: 0
+      local peeka1 = ringbuf:peek()
+      local peeka2 = ringbuf:peek()
+      local popa = ringbuf:pop()
+      local popnil = ringbuf:pop()
+      ringbuf:push("a") -- idx: 1
+      ringbuf:push("b") -- idx: 2
+
+      -- doesn't read last added item, but uses separate read index
+      local pop_after_add_b = ringbuf:pop()
+
+      ringbuf:push("c") -- idx: 3 wraps around, overrides idx: 0 "a"
+      ringbuf:push("d") -- idx: 4 wraps around, overrides idx: 1 "a"
+      return {
+        peeka1 = peeka1,
+        peeka2 = peeka2,
+        pop1 = popa,
+        pop2 = popnil,
+        pop3 = ringbuf:pop(),
+        pop4 = ringbuf:pop(),
+        pop5 = ringbuf:pop(),
+        pop_after_add_b = pop_after_add_b,
+      }
+    ]])
+    local expected = {
+      peeka1 = "a",
+      peeka2 = "a",
+      pop1 = "a",
+      pop2 = nil,
+      pop3 = "b",
+      pop4 = "c",
+      pop5 = "d",
+      pop_after_add_b = "a",
+    }
+    eq(expected, results)
   end)
 end)
 

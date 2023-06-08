@@ -241,6 +241,7 @@ local extension = {
   copyright = function(path, bufnr)
     return require('vim.filetype.detect').copyright(bufnr)
   end,
+  corn = 'corn',
   csh = function(path, bufnr)
     return require('vim.filetype.detect').csh(path, bufnr)
   end,
@@ -1081,6 +1082,7 @@ local extension = {
   uit = 'uil',
   uil = 'uil',
   ungram = 'ungrammar',
+  url = 'urlshortcut',
   usd = 'usd',
   usda = 'usd',
   sba = 'vb',

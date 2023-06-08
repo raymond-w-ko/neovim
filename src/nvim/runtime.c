@@ -1006,7 +1006,7 @@ static int add_pack_dir_to_rtp(char *fname, bool is_pack)
     xstrlcat(new_rtp, afterdir, new_rtp_capacity);
   }
 
-  set_option_value_give_err("rtp", 0L, new_rtp, 0);
+  set_option_value_give_err("rtp", CSTR_AS_OPTVAL(new_rtp), 0);
   xfree(new_rtp);
   retval = OK;
 
@@ -1926,8 +1926,8 @@ static void cmd_source_buffer(const exarg_T *const eap)
     .buf = ga.ga_data,
     .offset = 0,
   };
-  if (curbuf->b_fname
-      && path_with_extension(curbuf->b_fname, "lua")) {
+  if (strequal(curbuf->b_p_ft, "lua")
+      || (curbuf->b_fname && path_with_extension(curbuf->b_fname, "lua"))) {
     nlua_source_using_linegetter(get_str_line, (void *)&cookie, ":source (no file)");
   } else {
     source_using_linegetter((void *)&cookie, get_str_line, ":source (no file)");
