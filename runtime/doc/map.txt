@@ -349,7 +349,7 @@ Note:
 - The command is not echo'ed, no need for <silent>.
 - The {rhs} is not subject to abbreviations nor to other mappings, even if the
   mapping is recursive.
-- In Visual mode  you can use `line('v')` and `col('v')` to get one end of the
+- In Visual mode you can use `line('v')` and `col('v')` to get one end of the
   Visual area, the cursor is at the other end.
 
 							*E1255* *E1136*
@@ -1391,7 +1391,7 @@ completion can be enabled:
 	-complete=highlight	highlight groups
 	-complete=history	:history suboptions
 	-complete=locale	locale names (as output of locale -a)
-	-complete=lua		Lua expression
+	-complete=lua		Lua expression |:lua|
 	-complete=mapclear	buffer argument
 	-complete=mapping	mapping name
 	-complete=menu		menus
@@ -1546,6 +1546,7 @@ supports incremental command preview:
 	-- If invoked as a preview callback, performs 'inccommand' preview by
 	-- highlighting trailing whitespace in the current buffer.
 	local function trim_space_preview(opts, preview_ns, preview_buf)
+	  vim.cmd('hi clear Whitespace')
 	  local line1 = opts.line1
 	  local line2 = opts.line2
 	  local buf = vim.api.nvim_get_current_buf()

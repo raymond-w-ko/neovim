@@ -1167,11 +1167,13 @@ charidx({string}, {idx} [, {countcc} [, {utf16}]])
 		When {utf16} is present and TRUE, {idx} is used as the UTF-16
 		index in the String {expr} instead of as the byte index.
 
-		Returns -1 if the arguments are invalid or if {idx} is greater
-		than the index of the last byte in {string}.  An error is
-		given if the first argument is not a string, the second
-		argument is not a number or when the third argument is present
-		and is not zero or one.
+		Returns -1 if the arguments are invalid or if there are less
+		than {idx} bytes. If there are exactly {idx} bytes the length
+		of the string in characters is returned.
+
+		An error is given and -1 is returned if the first argument is
+		not a string, the second argument is not a number or when the
+		third argument is present and is not zero or one.
 
 		See |byteidx()| and |byteidxcomp()| for getting the byte index
 		from the character index and |utf16idx()| for getting the
@@ -1231,7 +1233,7 @@ clearmatches([{win}])					*clearmatches()*
 		Can also be used as a |method|: >
 			GetWin()->clearmatches()
 <
-col({expr} [, {winid})					*col()*
+col({expr} [, {winid}])					*col()*
 		The result is a Number, which is the byte index of the column
 		position given with {expr}.  The accepted positions are:
 		    .	    the cursor position
@@ -1294,7 +1296,7 @@ complete({startcol}, {matches})			*complete()* *E785*
 		Example: >
 	inoremap <F5> <C-R>=ListMonths()<CR>
 
-	func! ListMonths()
+	func ListMonths()
 	  call complete(col('.'), ['January', 'February', 'March',
 		\ 'April', 'May', 'June', 'July', 'August', 'September',
 		\ 'October', 'November', 'December'])
@@ -1538,7 +1540,7 @@ cursor({list})
 		This is like the return value of |getpos()| or |getcurpos()|,
 		but without the first item.
 
-		To position the cursor using the character count, use
+		To position the cursor using {col} as the character count, use
 		|setcursorcharpos()|.
 
 		Does not change the jumplist.
@@ -3635,7 +3637,7 @@ getscriptinfo([{opts}])					*getscriptinfo()*
 		    name	Vim script file name.
 		    sid		Script ID |<SID>|.
 		    variables   A dictionary with the script-local variables.
-				Present only when the a particular script is
+				Present only when a particular script is
 				specified using the "sid" item in {opts}.
 				Note that this is a copy, the value of
 				script-local variables cannot be changed using
@@ -4540,6 +4542,8 @@ jobresize({job}, {width}, {height})			*jobresize()*
 		Fails if the job was not started with `"pty":v:true`.
 
 jobstart({cmd} [, {opts}])				*jobstart()*
+		Note: Prefer |vim.system()| in Lua.
+
 		Spawns {cmd} as a job.
 		If {cmd} is a List it runs directly (no 'shell').
 		If {cmd} is a String it runs in the 'shell', like this: >
@@ -4595,11 +4599,9 @@ jobstart({cmd} [, {opts}])				*jobstart()*
 			      stdout data.
 		  |on_stderr|:  (function) Callback invoked when the job emits
 			      stderr data.
-		  overlapped: (boolean) Set FILE_FLAG_OVERLAPPED for the
-			      standard input/output passed to the child process.
-			      Normally you do not need to set this.
-			      (Only available on MS-Windows, On other
-			      platforms, this option is silently ignored.)
+		  overlapped: (boolean) Sets FILE_FLAG_OVERLAPPED for the
+			      stdio passed to the child process. Only on
+			      MS-Windows; ignored on other platforms.
 		  pty:	      (boolean) Connect the job to a new pseudo
 			      terminal, and its streams to the master file
 			      descriptor. `on_stdout` receives all output,
@@ -5624,7 +5626,7 @@ mkdir({name} [, {flags} [, {prot}]])
 <		and "subdir" already exists then "subdir/tmp" will be
 		scheduled for deletion, like with: >
 			defer delete('subdir/tmp', 'rf')
-
+<
 		If {prot} is given it is used to set the protection bits of
 		the new directory.  The default is 0o755 (rwxr-xr-x: r/w for
 		the user, readable for others).  Use 0o700 to make it
@@ -8663,6 +8665,8 @@ synstack({lnum}, {col})					*synstack()*
 		valid positions.
 
 system({cmd} [, {input}])				*system()* *E677*
+		Note: Prefer |vim.system()| in Lua.
+
 		Gets the output of {cmd} as a |string| (|systemlist()| returns
 		a |List|) and sets |v:shell_error| to the error code.
 		{cmd} is treated as in |jobstart()|:
@@ -8838,10 +8842,13 @@ termopen({cmd} [, {opts}])			*termopen()*
 		to the current (unmodified) buffer. Parameters and behavior
 		are the same as |jobstart()| except "pty", "width", "height",
 		and "TERM" are ignored: "height" and "width" are taken from
-		the current window.
-		Returns the same values as |jobstart()|.
+		the current window. Note that termopen() implies a "pty" arg
+		to jobstart(), and thus has the implications documented at
+		|jobstart()|.
 
-		Terminal environment is initialized as in ||jobstart-env|,
+		Returns the same values as jobstart().
+
+		Terminal environment is initialized as in |jobstart-env|,
 		except $TERM is set to "xterm-256color". Full behavior is
 		described in |terminal|.
 
@@ -9138,14 +9145,18 @@ uniq({list} [, {func} [, {dict}]])			*uniq()* *E882*
 <
 							*utf16idx()*
 utf16idx({string}, {idx} [, {countcc} [, {charidx}]])
-		Same as |charidx()| but returns the UTF-16 index of the byte
-		at {idx} in {string} (after converting it to UTF-16).
+		Same as |charidx()| but returns the UTF-16 code unit index of
+		the byte at {idx} in {string} (after converting it to UTF-16).
 
 		When {charidx} is present and TRUE, {idx} is used as the
 		character index in the String {string} instead of as the byte
 		index.
-		An {idx} in the middle of a UTF-8 sequence is rounded upwards
-		to the end of that sequence.
+		An {idx} in the middle of a UTF-8 sequence is rounded
+		downwards to the beginning of that sequence.
+
+		Returns -1 if the arguments are invalid or if there are less
+		than {idx} bytes in {string}. If there are exactly {idx} bytes
+		the length of the string in UTF-16 code units is returned.
 
 		See |byteidx()| and |byteidxcomp()| for getting the byte index
 		from the UTF-16 index and |charidx()| for getting the

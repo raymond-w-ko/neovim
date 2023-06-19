@@ -867,21 +867,6 @@ vim.schedule({callback})                                      *vim.schedule()*
     Schedules {callback} to be invoked soon by the main event-loop. Useful
     to avoid |textlock| or other temporary restrictions.
 
-
-vim.defer_fn({fn}, {timeout})                                   *vim.defer_fn*
-    Defers calling {fn} until {timeout} ms passes. Use to do a one-shot timer
-    that calls {fn}.
-
-    Note: The {fn} is |vim.schedule_wrap()|ped automatically, so API functions are
-    safe to call.
-
-    Parameters: ~
-      • {fn}        Callback to call once {timeout} expires
-      • {timeout}   Time in ms to wait before calling {fn}
-
-    Returns: ~
-        |vim.uv|.new_timer() object
-
 vim.wait({time} [, {callback}, {interval}, {fast_only}])          *vim.wait()*
     Wait for {time} in milliseconds until {callback} returns `true`.
 
@@ -1017,10 +1002,18 @@ Log levels are one of the values defined in `vim.log.levels`:
 ------------------------------------------------------------------------------
 LUA-VIMSCRIPT BRIDGE                                           *lua-vimscript*
 
-Nvim Lua provides an interface to Vimscript variables and functions, and
-editor commands and options.
+Nvim Lua provides an interface or "bridge" to Vimscript variables and
+functions, and editor commands and options.
 
-See also https://github.com/nanotee/nvim-lua-guide.
+Objects passed over this bridge are COPIED (marshalled): there are no
+"references". |lua-guide-variables| For example, using `vim.fn.remove()` on
+a Lua list copies the list object to Vimscript and does NOT modify the Lua
+list: >lua
+
+    local list = { 1, 2, 3 }
+    vim.fn.remove(list, 0)
+    vim.print(list)  --> "{ 1, 2, 3 }"
+
 
 vim.call({func}, {...})                                           *vim.call()*
     Invokes |vim-function| or |user-function| {func} with arguments {...}.
@@ -1376,10 +1369,10 @@ connection_failure_errmsg({consequence})
     TODO: Documentation
 
 defer_fn({fn}, {timeout})                                     *vim.defer_fn()*
-    Defers calling `fn` until `timeout` ms passes.
+    Defers calling {fn} until {timeout} ms passes.
 
-    Use to do a one-shot timer that calls `fn` Note: The {fn} is |vim.schedule_wrap()|ped automatically, so API functions
-    are safe to call.
+    Use to do a one-shot timer that calls {fn} Note: The {fn} is
+    |vim.schedule_wrap()|ped automatically, so API functions are safe to call.
 
     Parameters: ~
       • {fn}       (function) Callback to call once `timeout` expires
@@ -2071,8 +2064,8 @@ tbl_get({o}, {...})                                            *vim.tbl_get()*
 
     Parameters: ~
       • {o}    (table) Table to index
-      • {...}  (string) Optional strings (0 or more, variadic) via which to
-               index the table
+      • {...}  any Optional keys (0 or more, variadic) via which to index the
+               table
 
     Return: ~
         any Nested value indexed by key (if it exists), else nil
@@ -2551,8 +2544,8 @@ del({modes}, {lhs}, {opts})                                 *vim.keymap.del()*
 
     Parameters: ~
       • {opts}  (table|nil) A table of optional arguments:
-                • buffer: (number or boolean) Remove a mapping from the given
-                  buffer. When "true" or 0, use the current buffer.
+                • "buffer": (number|boolean) Remove a mapping from the given
+                  buffer. When `0` or `true`, use the current buffer.
 
     See also: ~
       • |vim.keymap.set()|
@@ -2563,7 +2556,7 @@ set({mode}, {lhs}, {rhs}, {opts})                           *vim.keymap.set()*
        -- Map to a Lua function:
        vim.keymap.set('n', 'lhs', function() print("real lua function") end)
        -- Map to multiple modes:
-       vim.keymap.set({'n', 'v'}, '<leader>lr', vim.lsp.buf.references, { buffer=true })
+       vim.keymap.set({'n', 'v'}, '<leader>lr', vim.lsp.buf.references, { buffer = true })
        -- Buffer-local mapping:
        vim.keymap.set('n', '<leader>w', "<cmd>w<cr>", { silent = true, buffer = 5 })
        -- Expr mapping:
@@ -2586,9 +2579,9 @@ set({mode}, {lhs}, {rhs}, {opts})                           *vim.keymap.set()*
                   • "noremap": inverse of "remap" (see below).
 
                 • Also accepts:
-                  • "buffer" number|boolean Creates buffer-local mapping, `0`
-                    or `true` for current buffer.
-                  • remap: (boolean) Make the mapping recursive. Inverses
+                  • "buffer": (number|boolean) Creates buffer-local mapping,
+                    `0` or `true` for current buffer.
+                  • "remap": (boolean) Make the mapping recursive. Inverse of
                     "noremap". Defaults to `false`.
 
     See also: ~
@@ -2697,8 +2690,8 @@ find({names}, {opts})                                          *vim.fs.find()*
         directories
 
 joinpath({...})                                            *vim.fs.joinpath()*
-    Concatenate directories and/or file into a single path with normalization
-    (e.g., `"foo/"` and `"bar"` get joined to `"foo/bar"`)
+    Concatenate directories and/or file paths into a single path with
+    normalization (e.g., `"foo/"` and `"bar"` get joined to `"foo/bar"`)
 
     Parameters: ~
       • {...}  (string)
@@ -2985,8 +2978,9 @@ range({spec})                                            *vim.version.range()*
 Lua module: iter                                                    *lua-iter*
 
 
-The *vim.iter* module provides a generic "iterator" interface over tables
-and iterator functions.
+The *vim.iter* module provides a generic interface for working with
+iterables: tables, lists, iterator functions, pair()/ipair()-like
+iterators, and `vim.iter()` objects.
 
 *vim.iter()* wraps its table or function argument into an *Iter* object
 with methods (such as |Iter:filter()| and |Iter:map()|) that transform the
@@ -2999,6 +2993,8 @@ pipeline depend on the type passed to this function:
 • Non-list tables pass both the key and value of each element
 • Function iterators pass all of the values returned by their respective
   function
+• Tables with a metatable implementing __call are treated as function
+  iterators
 
 Examples: >lua
 
@@ -3031,6 +3027,12 @@ Examples: >lua
      return k == 'z'
    end)
    -- true
+
+   local rb = vim.ringbuf(3)
+   rb:push("a")
+   rb:push("b")
+   vim.iter(rb):totable()
+   -- { "a", "b" }
 
 <
 

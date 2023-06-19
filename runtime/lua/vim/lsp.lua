@@ -17,6 +17,7 @@ local if_nil = vim.F.if_nil
 
 local lsp = {
   protocol = protocol,
+  _inlay_hint = require('vim.lsp._inlay_hint'),
 
   handlers = default_handlers,
 
@@ -60,6 +61,8 @@ lsp._request_name_to_capability = {
   ['textDocument/documentHighlight'] = { 'documentHighlightProvider' },
   ['textDocument/semanticTokens/full'] = { 'semanticTokensProvider' },
   ['textDocument/semanticTokens/full/delta'] = { 'semanticTokensProvider' },
+  ['textDocument/inlayHint'] = { 'inlayHintProvider' },
+  ['inlayHint/resolve'] = { 'inlayHintProvider', 'resolveProvider' },
 }
 
 -- TODO improve handling of scratch buffers with LSP attached.
@@ -807,6 +810,9 @@ end
 ---
 ---  - {server_capabilities} (table): Response from the server sent on
 ---    `initialize` describing the server's capabilities.
+---
+---  - {progress} A ring buffer (|vim.ringbuf()|) containing progress messages
+---    sent by the server.
 function lsp.client()
   error()
 end
@@ -889,6 +895,50 @@ function lsp.start(config, opts)
   end
   lsp.buf_attach_client(bufnr, client_id)
   return client_id
+end
+
+--- Consumes the latest progress messages from all clients and formats them as a string.
+--- Empty if there are no clients or if no new messages
+---
+---@return string
+function lsp.status()
+  local percentage = nil
+  local groups = {}
+  for _, client in ipairs(vim.lsp.get_active_clients()) do
+    for progress in client.progress do
+      local value = progress.value
+      if type(value) == 'table' and value.kind then
+        local group = groups[progress.token]
+        if not group then
+          group = {}
+          groups[progress.token] = group
+        end
+        group.title = value.title or group.title
+        group.message = value.message or group.message
+        if value.percentage then
+          percentage = math.max(percentage or 0, value.percentage)
+        end
+      end
+      -- else: Doesn't look like work done progress and can be in any format
+      -- Just ignore it as there is no sensible way to display it
+    end
+  end
+  local messages = {}
+  for _, group in pairs(groups) do
+    if group.title then
+      table.insert(
+        messages,
+        group.message and (group.title .. ': ' .. group.message) or group.title
+      )
+    elseif group.message then
+      table.insert(messages, group.message)
+    end
+  end
+  local message = table.concat(messages, ', ')
+  if percentage then
+    return string.format('%3d%%: %s', percentage, message)
+  end
+  return message
 end
 
 ---@private
@@ -1266,10 +1316,23 @@ function lsp.start_client(config)
 
     --- @type table<integer,{ type: string, bufnr: integer, method: string}>
     requests = {},
-    -- for $/progress report
+
+    --- Contains $/progress report messages.
+    --- They have the format {token: integer|string, value: any}
+    --- For "work done progress", value will be one of:
+    --- - lsp.WorkDoneProgressBegin,
+    --- - lsp.WorkDoneProgressReport (extended with title from Begin)
+    --- - lsp.WorkDoneProgressEnd    (extended with title from Begin)
+    progress = vim.ringbuf(50),
+
+    ---@deprecated use client.progress instead
     messages = { name = name, messages = {}, progress = {}, status = {} },
     dynamic_capabilities = require('vim.lsp._dynamic').new(client_id),
   }
+
+  ---@type table<string|integer, string> title of unfinished progress sequences by token
+  client.progress.pending = {}
+
   --- @type lsp.ClientCapabilities
   client.config.capabilities = config.capabilities or protocol.make_client_capabilities()
 
@@ -1428,7 +1491,7 @@ function lsp.start_client(config)
   ---successful, then it will return {request_id} as the
   ---second result. You can use this with `client.cancel_request(request_id)`
   ---to cancel the-request.
-  ---@see |vim.lsp.buf_request()|
+  ---@see |vim.lsp.buf_request_all()|
   function client.request(method, params, handler, bufnr)
     if not handler then
       handler = assert(
@@ -1438,21 +1501,25 @@ function lsp.start_client(config)
     end
     -- Ensure pending didChange notifications are sent so that the server doesn't operate on a stale state
     changetracking.flush(client, bufnr)
+    local version = util.buf_versions[bufnr]
     bufnr = resolve_bufnr(bufnr)
     if log.debug() then
       log.debug(log_prefix, 'client.request', client_id, method, params, handler, bufnr)
     end
     local success, request_id = rpc.request(method, params, function(err, result)
-      handler(
-        err,
-        result,
-        { method = method, client_id = client_id, bufnr = bufnr, params = params }
-      )
+      local context = {
+        method = method,
+        client_id = client_id,
+        bufnr = bufnr,
+        params = params,
+        version = version,
+      }
+      handler(err, result, context)
     end, function(request_id)
       local request = client.requests[request_id]
       request.type = 'complete'
       nvim_exec_autocmds('LspRequest', {
-        buffer = bufnr,
+        buffer = api.nvim_buf_is_valid(bufnr) and bufnr or nil,
         modeline = false,
         data = { client_id = client_id, request_id = request_id, request = request },
       })
@@ -2052,22 +2119,19 @@ function lsp.buf_request(bufnr, method, params, handler)
   return client_request_ids, _cancel_all_requests
 end
 
----Sends an async request for all active clients attached to the buffer.
----Executes the callback on the combined result.
----Parameters are the same as |vim.lsp.buf_request()| but the return result and callback are
----different.
+--- Sends an async request for all active clients attached to the buffer and executes the `handler`
+--- callback with the combined result.
 ---
 ---@param bufnr (integer) Buffer handle, or 0 for current.
 ---@param method (string) LSP method name
 ---@param params (table|nil) Parameters to send to the server
----@param callback fun(request_results: table<integer, {error: lsp.ResponseError, result: any}>) (function)
---- The callback to call when all requests are finished.
---- Unlike `buf_request`, this will collect all the responses from each server instead of handling them.
---- A map of client_id:request_result will be provided to the callback.
+---@param handler fun(results: table<integer, {error: lsp.ResponseError, result: any}>) (function)
+--- Handler called after all requests are completed. Server results are passed as
+--- a `client_id:result` map.
 ---
----@return fun() cancel A function that will cancel all requests
-function lsp.buf_request_all(bufnr, method, params, callback)
-  local request_results = {}
+---@return fun() cancel Function that cancels all requests.
+function lsp.buf_request_all(bufnr, method, params, handler)
+  local results = {}
   local result_count = 0
   local expected_result_count = 0
 
@@ -2080,12 +2144,12 @@ function lsp.buf_request_all(bufnr, method, params, callback)
   end)
 
   local function _sync_handler(err, result, ctx)
-    request_results[ctx.client_id] = { error = err, result = result }
+    results[ctx.client_id] = { error = err, result = result }
     result_count = result_count + 1
     set_expected_result_count()
 
     if result_count >= expected_result_count then
-      callback(request_results)
+      handler(results)
     end
   end
 
@@ -2097,8 +2161,8 @@ end
 --- Sends a request to all server and waits for the response of all of them.
 ---
 --- Calls |vim.lsp.buf_request_all()| but blocks Nvim while awaiting the result.
---- Parameters are the same as |vim.lsp.buf_request()| but the return result is
---- different. Wait maximum of {timeout_ms} (default 1000) ms.
+--- Parameters are the same as |vim.lsp.buf_request_all()| but the result is
+--- different. Waits a maximum of {timeout_ms} (default 1000) ms.
 ---
 ---@param bufnr (integer) Buffer handle, or 0 for current.
 ---@param method (string) LSP method name

@@ -534,9 +534,9 @@ function vim.region(bufnr, pos1, pos2, regtype, inclusive)
   return region
 end
 
---- Defers calling `fn` until `timeout` ms passes.
+--- Defers calling {fn} until {timeout} ms passes.
 ---
---- Use to do a one-shot timer that calls `fn`
+--- Use to do a one-shot timer that calls {fn}
 --- Note: The {fn} is |vim.schedule_wrap()|ped automatically, so API functions are
 --- safe to call.
 ---@param fn function Callback to call once `timeout` expires
@@ -932,7 +932,7 @@ function vim._cs_remote(rcid, server_addr, connect_error, args)
     or subcmd == 'tab-wait'
     or subcmd == 'tab-wait-silent'
   then
-    return { errmsg = 'E5600: Wait commands not yet implemented in nvim' }
+    return { errmsg = 'E5600: Wait commands not yet implemented in Nvim' }
   elseif subcmd == 'tab-silent' then
     f_tab = true
     f_silent = true
@@ -940,14 +940,14 @@ function vim._cs_remote(rcid, server_addr, connect_error, args)
     if rcid == 0 then
       return { errmsg = connection_failure_errmsg('Send failed.') }
     end
-    vim.fn.rpcrequest(rcid, 'nvim_input', args[2])
+    vim.rpcrequest(rcid, 'nvim_input', args[2])
     return { should_exit = true, tabbed = false }
   elseif subcmd == 'expr' then
     if rcid == 0 then
       return { errmsg = connection_failure_errmsg('Send expression failed.') }
     end
-    print(vim.fn.rpcrequest(rcid, 'nvim_eval', args[2]))
-    return { should_exit = true, tabbed = false }
+    local res = tostring(vim.rpcrequest(rcid, 'nvim_eval', args[2]))
+    return { result = res, should_exit = true, tabbed = false }
   elseif subcmd ~= '' then
     return { errmsg = 'Unknown option argument: ' .. args[1] }
   end
