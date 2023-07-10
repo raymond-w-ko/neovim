@@ -794,10 +794,14 @@ static void do_set_num(int opt_idx, int opt_flags, char **argp, int nextchar, co
   if (nextchar == '&') {
     value = (long)(intptr_t)options[opt_idx].def_val;
   } else if (nextchar == '<') {
-    // For 'undolevels' NO_LOCAL_UNDOLEVEL means to
-    // use the global value.
     if ((long *)varp == &curbuf->b_p_ul && opt_flags == OPT_LOCAL) {
+      // for 'undolevels' NO_LOCAL_UNDOLEVEL means using the global value
       value = NO_LOCAL_UNDOLEVEL;
+    } else if (opt_flags == OPT_LOCAL
+               && ((long *)varp == &curwin->w_p_siso
+                   || (long *)varp == &curwin->w_p_so)) {
+      // for 'scrolloff'/'sidescrolloff' -1 means using the global value
+      value = -1;
     } else {
       value = *(long *)get_varp_scope(&(options[opt_idx]), OPT_GLOBAL);
     }
@@ -6194,13 +6198,13 @@ dict_T *get_winbuf_options(const int bufopt)
 
 /// Return the effective 'scrolloff' value for the current window, using the
 /// global value when appropriate.
-long get_scrolloff_value(win_T *wp)
+linenr_T get_scrolloff_value(win_T *wp)
 {
   // Disallow scrolloff in terminal-mode. #11915
   if (State & MODE_TERMINAL) {
     return 0;
   }
-  return wp->w_p_so < 0 ? p_so : wp->w_p_so;
+  return wp->w_p_so < 0 ? (linenr_T)p_so : (linenr_T)wp->w_p_so;
 }
 
 /// Return the effective 'sidescrolloff' value for the current window, using the

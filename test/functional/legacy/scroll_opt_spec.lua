@@ -939,6 +939,49 @@ describe('smoothscroll', function()
     ]])
   end)
 
+  -- oldtest: Test_smoothscroll_zero_width_scroll_cursor_bot()
+  it('does not divide by zero in zero-width window', function()
+    screen:try_resize(40, 19)
+    screen:set_default_attr_ids({
+      [1] = {foreground = Screen.colors.Brown};  -- LineNr
+      [2] = {bold = true, foreground = Screen.colors.Blue};  -- NonText
+      [3] = {bold = true, reverse = true};  -- StatusLine
+      [4] = {reverse = true};  -- StatusLineNC
+    })
+    exec([[
+      silent normal yy
+      silent normal 19p
+      set cpoptions+=n
+      vsplit
+      vertical resize 0
+      set foldcolumn=1
+      set number
+      set smoothscroll
+      silent normal 20G
+    ]])
+    screen:expect([[
+      {1: }│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:^@}│                                      |
+      {3:< }{4:[No Name] [+]                         }|
+                                              |
+    ]])
+  end)
+
   it("works with virt_lines above and below", function()
     screen:try_resize(55, 7)
     exec([=[
@@ -1063,6 +1106,46 @@ describe('smoothscroll', function()
       <<<e text with some text with some text |
       with some text with some text           |
       [No Name] [+]                           |
+                                              |
+    ]])
+  end)
+
+  it('works with very long line', function()
+    screen:set_default_attr_ids({
+      [1] = {foreground = Screen.colors.Brown},
+      [2] = {foreground = Screen.colors.Blue1, bold = true},
+    })
+    exec([[
+      edit test/functional/fixtures/bigfile_oneline.txt
+      setlocal smoothscroll number
+    ]])
+    screen:expect([[
+      {1:  1 }^0000;<control>;Cc;0;BN;;;;;N;NULL;;;|
+      {1:    }; 0001;<control>;Cc;0;BN;;;;;N;START|
+      {1:    } OF HEADING;;;; 0002;<control>;Cc;0;|
+      {1:    }BN;;;;;N;START OF TEXT;;;; 0003;<con|
+      {1:    }trol>;Cc;0;BN;;;;;N;END OF TEXT;;;; |
+      {1:    }0004;<control>;Cc;0;BN;;;;;N;END OF |
+      {1:    }TRANSMISSION;;;; 0005;<control>;Cc;0|
+      {1:    };BN;;;;;N;ENQUIRY;;;; 0006;<control>|
+      {1:    };Cc;0;BN;;;;;N;ACKNOWLEDGE;;;; 0007;|
+      {1:    }<control>;Cc;0;BN;;;;;N;BELL;;;; 000|
+      {1:    }8;<control>;Cc;0;BN;;;;;N;BACKSPACE;|
+                                              |
+    ]])
+    feed('j')
+    screen:expect([[
+      {2:<<<}{1: }CJK COMPATIBILITY IDEOGRAPH-2F91F;Lo|
+      {1:    };0;L;243AB;;;;N;;;;; 2F920;CJK COMPA|
+      {1:    }TIBILITY IDEOGRAPH-2F920;Lo;0;L;7228|
+      {1:    };;;;N;;;;; 2F921;CJK COMPATIBILITY I|
+      {1:    }DEOGRAPH-2F921;Lo;0;L;7235;;;;N;;;;;|
+      {1:    } 2F922;CJK COMPATIBILITY IDEOGRAPH-2|
+      {1:    }F922;Lo;0;L;7250;;;;N;;;;;          |
+      {1:  2 }^2F923;CJK COMPATIBILITY IDEOGRAPH-2F|
+      {1:    }923;Lo;0;L;24608;;;;N;;;;;          |
+      {1:  3 }2F924;CJK COMPATIBILITY IDEOGRAPH-2F|
+      {1:    }924;Lo;0;L;7280;;;;N;;;;;           |
                                               |
     ]])
   end)

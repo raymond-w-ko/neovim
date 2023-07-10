@@ -335,8 +335,7 @@ describe('API', function()
       nvim('command', 'edit '..fname)
       nvim('command', 'normal itesting\napi')
       nvim('command', 'w')
-      local f = io.open(fname)
-      ok(f ~= nil)
+      local f = assert(io.open(fname))
       if is_os('win') then
         eq('testing\r\napi\r\n', f:read('*a'))
       else
@@ -441,7 +440,7 @@ describe('API', function()
       eq({mode='n', blocking=false}, nvim("get_mode"))
     end)
 
-    it('Does not cause heap buffer overflow with large output', function()
+    it('does not cause heap buffer overflow with large output', function()
       eq(eval('string(range(1000000))'),
          nvim('command_output', 'echo range(1000000)'))
     end)
@@ -578,7 +577,6 @@ describe('API', function()
     local start_dir
 
     before_each(function()
-      clear()
       funcs.mkdir("Xtestdir")
       start_dir = funcs.getcwd()
     end)
@@ -1830,6 +1828,23 @@ describe('API', function()
       feed('<C-D>')
       expect('a')  -- recognized i_0_CTRL-D
     end)
+
+    it("does not interrupt with 'digraph'", function()
+      command('set digraph')
+      feed('i,')
+      eq(2, eval('1+1'))  -- causes K_EVENT key
+      feed('<BS>')
+      eq(2, eval('1+1'))  -- causes K_EVENT key
+      feed('.')
+      expect('…')  -- digraph ",." worked
+      feed('<Esc>')
+      feed(':,')
+      eq(2, eval('1+1'))  -- causes K_EVENT key
+      feed('<BS>')
+      eq(2, eval('1+1'))  -- causes K_EVENT key
+      feed('.')
+      eq('…', funcs.getcmdline())  -- digraph ",." worked
+    end)
   end)
 
   describe('nvim_get_context', function()
@@ -1990,6 +2005,39 @@ describe('API', function()
         redir END
       ]])
       eq('\naaa\n' .. ('a'):rep(5002) .. '\naaa', meths.get_var('out'))
+    end)
+
+    it('blank line in message works', function()
+      local screen = Screen.new(40, 8)
+      screen:attach()
+      screen:set_default_attr_ids({
+        [0] = {bold = true, foreground = Screen.colors.Blue},
+        [1] = {bold = true, foreground = Screen.colors.SeaGreen},
+        [2] = {bold = true, reverse = true},
+      })
+      feed([[:call nvim_out_write("\na\n")<CR>]])
+      screen:expect{grid=[[
+                                                |
+        {0:~                                       }|
+        {0:~                                       }|
+        {0:~                                       }|
+        {2:                                        }|
+                                                |
+        a                                       |
+        {1:Press ENTER or type command to continue}^ |
+      ]]}
+      feed('<CR>')
+      feed([[:call nvim_out_write("b\n\nc\n")<CR>]])
+      screen:expect{grid=[[
+                                                |
+        {0:~                                       }|
+        {0:~                                       }|
+        {2:                                        }|
+        b                                       |
+                                                |
+        c                                       |
+        {1:Press ENTER or type command to continue}^ |
+      ]]}
     end)
   end)
 
@@ -3030,11 +3078,10 @@ describe('API', function()
     local screen
 
     before_each(function()
-      clear()
       screen = Screen.new(40, 8)
       screen:attach()
       screen:set_default_attr_ids({
-        [0] = {bold=true, foreground=Screen.colors.Blue},
+        [0] = {bold = true, foreground = Screen.colors.Blue},
         [1] = {bold = true, foreground = Screen.colors.SeaGreen},
         [2] = {bold = true, reverse = true},
         [3] = {foreground = Screen.colors.Brown, bold = true}, -- Statement
@@ -3104,7 +3151,6 @@ describe('API', function()
     local screen
 
     before_each(function()
-      clear()
       screen = Screen.new(100, 35)
       screen:attach()
       screen:set_default_attr_ids({
@@ -3468,6 +3514,7 @@ describe('API', function()
       end)
     end)
   end)
+
   describe('nvim_parse_cmd', function()
     it('works', function()
       eq({
@@ -3950,7 +3997,7 @@ describe('API', function()
         }
       }, meths.parse_cmd('MyCommand test it', {}))
     end)
-    it('errors for invalid command', function()
+    it('validates command', function()
       eq('Error while parsing command line', pcall_err(meths.parse_cmd, '', {}))
       eq('Error while parsing command line', pcall_err(meths.parse_cmd, '" foo', {}))
       eq('Error while parsing command line: E492: Not an editor command: Fubar',
@@ -4049,7 +4096,13 @@ describe('API', function()
       meths.cmd(meths.parse_cmd("set cursorline", {}), {})
       eq(true, meths.get_option_value("cursorline", {}))
     end)
+    it('no side-effects (error messages) in pcall() #20339', function()
+      eq({ false, 'Error while parsing command line: E16: Invalid range' },
+        exec_lua([=[return {pcall(vim.api.nvim_parse_cmd, "'<,'>n", {})}]=]))
+      eq('', eval('v:errmsg'))
+    end)
   end)
+
   describe('nvim_cmd', function()
     it('works', function ()
       meths.cmd({ cmd = "set", args = { "cursorline" } }, {})
@@ -4096,6 +4149,11 @@ describe('API', function()
         pcall_err(meths.cmd, { cmd = "put", args = {}, reg = '=' }, {}))
       eq("Invalid 'reg': expected single character, got xx",
         pcall_err(meths.cmd, { cmd = "put", args = {}, reg = 'xx' }, {}))
+
+      -- #20681
+      eq('Invalid command: "win_getid"', pcall_err(meths.cmd, { cmd = 'win_getid'}, {}))
+      eq('Invalid command: "echo "hi""', pcall_err(meths.cmd, { cmd = 'echo "hi"'}, {}))
+      eq('Invalid command: "win_getid"', pcall_err(exec_lua, [[return vim.cmd.win_getid{}]]))
 
       -- Lua call allows empty {} for dict item.
       eq('', exec_lua([[return vim.cmd{ cmd = "set", args = {}, magic = {} }]]))
@@ -4353,8 +4411,6 @@ describe('API', function()
       eq('1', meths.cmd({cmd = 'echo', args = {true}}, {output = true}))
     end)
     describe('first argument as count', function()
-      before_each(clear)
-
       it('works', function()
         command('vsplit | enew')
         meths.cmd({cmd = 'bdelete', args = {meths.get_current_buf()}}, {})

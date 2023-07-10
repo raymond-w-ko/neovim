@@ -220,7 +220,7 @@ M['textDocument/codeLens'] = function(...)
 end
 
 M['textDocument/inlayHint'] = function(...)
-  return require('vim.lsp._inlay_hint').on_inlayhint(...)
+  return require('vim.lsp.inlay_hint').on_inlayhint(...)
 end
 
 --see: https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_references
@@ -382,7 +382,7 @@ M['textDocument/hover'] = M.hover
 
 ---@private
 --- Jumps to a location. Used as a handler for multiple LSP methods.
----@param _ (not used)
+---@param _ nil not used
 ---@param result (table) result of LSP method; a location or a list of locations.
 ---@param ctx (table) table containing the context of the request, including the method
 ---(`textDocument/definition` can return `Location` or `Location[]`
@@ -496,8 +496,9 @@ end
 --- Displays call hierarchy in the quickfix window.
 ---
 ---@param direction `"from"` for incoming calls and `"to"` for outgoing calls
----@returns `CallHierarchyIncomingCall[]` if {direction} is `"from"`,
----@returns `CallHierarchyOutgoingCall[]` if {direction} is `"to"`,
+---@return function
+--- `CallHierarchyIncomingCall[]` if {direction} is `"from"`,
+--- `CallHierarchyOutgoingCall[]` if {direction} is `"to"`,
 local make_call_hierarchy_handler = function(direction)
   return function(_, result)
     if not result then
@@ -573,22 +574,14 @@ M['window/showDocument'] = function(_, result, ctx, _)
 
   if result.external then
     -- TODO(lvimuser): ask the user for confirmation
-    local cmd
-    if vim.fn.has('win32') == 1 then
-      cmd = { 'cmd.exe', '/c', 'start', '""', uri }
-    elseif vim.fn.has('macunix') == 1 then
-      cmd = { 'open', uri }
-    else
-      cmd = { 'xdg-open', uri }
-    end
+    local ret, err = vim.ui.open(uri)
 
-    local ret = vim.fn.system(cmd)
-    if vim.v.shell_error ~= 0 then
+    if ret == nil or ret.code ~= 0 then
       return {
         success = false,
         error = {
           code = protocol.ErrorCodes.UnknownErrorCode,
-          message = ret,
+          message = ret and ret.stderr or err,
         },
       }
     end
@@ -600,7 +593,7 @@ M['window/showDocument'] = function(_, result, ctx, _)
   local client = vim.lsp.get_client_by_id(client_id)
   local client_name = client and client.name or string.format('id=%d', client_id)
   if not client then
-    err_message({ 'LSP[', client_name, '] client has shut down after sending ', ctx.method })
+    err_message('LSP[', client_name, '] client has shut down after sending ', ctx.method)
     return vim.NIL
   end
 
@@ -617,22 +610,8 @@ M['window/showDocument'] = function(_, result, ctx, _)
 end
 
 ---@see https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_inlayHint_refresh
-M['workspace/inlayHint/refresh'] = function(err, _, ctx)
-  local inlay_hint = require('vim.lsp._inlay_hint')
-  if err then
-    return vim.NIL
-  end
-
-  for _, bufnr in ipairs(vim.lsp.get_buffers_by_client_id(ctx.client_id)) do
-    for _, winid in ipairs(api.nvim_list_wins()) do
-      if api.nvim_win_get_buf(winid) == bufnr then
-        inlay_hint.refresh({ bufnr = bufnr })
-        break
-      end
-    end
-  end
-
-  return vim.NIL
+M['workspace/inlayHint/refresh'] = function(err, result, ctx, config)
+  return require('vim.lsp.inlay_hint').on_refresh(err, result, ctx, config)
 end
 
 -- Add boilerplate error validation and logging for all of these.

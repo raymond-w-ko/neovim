@@ -293,7 +293,7 @@ local function ignore_invalid(s)
     -- Strings like |~/====| appear in various places and the parser thinks they are links, but they
     -- are just table borders.
     or s:find('===')
-    or s:find('---')
+    or s:find('%-%-%-')
   )
 end
 
@@ -379,7 +379,9 @@ local function visit_validate(root, level, lang_tree, opt, stats)
       return
     end
     -- Store the raw text to give context to the error report.
-    local sample_text = not toplevel and getbuflinestr(root, opt.buf, 3) or '[top level!]'
+    local sample_text = not toplevel and getbuflinestr(root, opt.buf, 0) or '[top level!]'
+    -- Flatten the sample text to a single, truncated line.
+    sample_text = vim.trim(sample_text):gsub('[\t\n]', ' '):sub(1, 80)
     table.insert(stats.parse_errors, sample_text)
   elseif (node_name == 'word' or node_name == 'uppercase_name')
     and (not vim.tbl_contains({'codespan', 'taglink', 'tag'}, parent))
@@ -667,7 +669,7 @@ end
 ---
 --- @param fname string help file to validate
 --- @param parser_path string? path to non-default vimdoc.so
---- @returns { invalid_links: number, parse_errors: number }
+--- @returns { invalid_links: number, parse_errors: string[] }
 local function validate_one(fname, parser_path)
   local stats = {
     parse_errors = {},
@@ -707,15 +709,16 @@ local function gen_one(fname, to_fname, old, commit, parser_path)
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Neovim user documentation">
+
+    <!-- algolia docsearch https://docsearch.algolia.com/docs/docsearch-v3/ -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@docsearch/css@3" />
+    <link rel="preconnect" href="https://X185E15FPG-dsn.algolia.net" crossorigin />
+
     <link href="/css/normalize.min.css" rel="stylesheet">
     <link href="/css/bootstrap.css" rel="stylesheet">
     <link href="/css/main.css" rel="stylesheet">
     <link href="help.css" rel="stylesheet">
     <link href="/highlight/styles/neovim.min.css" rel="stylesheet">
-
-    <!-- algolia docsearch https://docsearch.algolia.com/docs/docsearch-v3/ -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@docsearch/css@3" />
-    <link rel="preconnect" href="https://X185E15FPG-dsn.algolia.net" crossorigin />
 
     <script src="/highlight/highlight.min.js"></script>
     <script>hljs.highlightAll();</script>
@@ -942,6 +945,7 @@ local function gen_css(fname)
       padding-top: 10px;
       padding-bottom: 10px;
     }
+
     .old-help-para {
       padding-top: 10px;
       padding-bottom: 10px;
@@ -951,6 +955,12 @@ local function gen_css(fname)
       font-size: 16px;
       font-family: ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace;
     }
+    .old-help-para pre {
+      /* All text in .old-help-para is formatted as "white-space:pre" so text following <pre> is
+         already visually separated by the linebreak. */
+      margin-bottom: 0;
+    }
+
     a.help-tag, a.help-tag:focus, a.help-tag:hover {
       color: inherit;
       text-decoration: none;
@@ -1003,6 +1013,9 @@ local function gen_css(fname)
       /* font-family: ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace; */
       font-size: 16px;
       margin-top: 10px;
+    }
+    pre:last-child {
+      margin-bottom: 0;
     }
     pre:hover,
     .help-heading:hover {
@@ -1077,7 +1090,7 @@ end
 --- @returns info dict
 function M.gen(help_dir, to_dir, include, commit, parser_path)
   vim.validate{
-    help_dir={help_dir, function(d) return vim.fn.isdirectory(d) == 1 end, 'valid directory'},
+    help_dir={help_dir, function(d) return vim.fn.isdirectory(vim.fn.expand(d)) == 1 end, 'valid directory'},
     to_dir={to_dir, 's'},
     include={include, 't', true},
     commit={commit, 's', true},
@@ -1086,8 +1099,9 @@ function M.gen(help_dir, to_dir, include, commit, parser_path)
 
   local err_count = 0
   ensure_runtimepath()
-  tagmap = get_helptags(help_dir)
+  tagmap = get_helptags(vim.fn.expand(help_dir))
   helpfiles = get_helpfiles(include)
+  to_dir = vim.fn.expand(to_dir)
   parser_path = parser_path and vim.fn.expand(parser_path) or nil
 
   print(('output dir: %s'):format(to_dir))
@@ -1122,13 +1136,14 @@ end
 -- @returns results dict
 function M.validate(help_dir, include, parser_path)
   vim.validate{
-    help_dir={help_dir, function(d) return vim.fn.isdirectory(d) == 1 end, 'valid directory'},
+    help_dir={help_dir, function(d) return vim.fn.isdirectory(vim.fn.expand(d)) == 1 end, 'valid directory'},
     include={include, 't', true},
     parser_path={parser_path, function(f) return f == nil or vim.fn.filereadable(vim.fn.expand(f)) == 1 end, 'valid vimdoc.{so,dll} filepath'},
   }
   local err_count = 0
+  local files_to_errors = {}
   ensure_runtimepath()
-  tagmap = get_helptags(help_dir)
+  tagmap = get_helptags(vim.fn.expand(help_dir))
   helpfiles = get_helpfiles(include)
   parser_path = parser_path and vim.fn.expand(parser_path) or nil
 
@@ -1136,6 +1151,10 @@ function M.validate(help_dir, include, parser_path)
     local helpfile = vim.fs.basename(f)
     local rv = validate_one(f, parser_path)
     print(('validated (%-4s errors): %s'):format(#rv.parse_errors, helpfile))
+    if #rv.parse_errors > 0 then
+      files_to_errors[helpfile] = rv.parse_errors
+      vim.print(('%s'):format(vim.iter(rv.parse_errors):fold('', function(s, v) return s..'\n    '..v end)))
+    end
     err_count = err_count + #rv.parse_errors
   end
 
@@ -1145,6 +1164,7 @@ function M.validate(help_dir, include, parser_path)
     invalid_links = invalid_links,
     invalid_urls = invalid_urls,
     invalid_spelling = invalid_spelling,
+    parse_errors = files_to_errors,
   }
 end
 

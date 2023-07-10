@@ -104,7 +104,7 @@ typedef struct {
 typedef struct command_line_state {
   VimState state;
   int firstc;
-  long count;
+  int count;
   int indent;
   int c;
   int gotesc;                           // true when <ESC> just typed
@@ -236,7 +236,7 @@ static bool do_incsearch_highlighting(int firstc, int *search_delim, incsearch_s
   bool delim_optional = false;
   int delim;
   char *end;
-  char *dummy;
+  const char *dummy;
   pos_T save_cursor;
   bool use_last_pat;
   bool retval = false;
@@ -261,7 +261,6 @@ static bool do_incsearch_highlighting(int firstc, int *search_delim, incsearch_s
     return false;
   }
 
-  emsg_off++;
   exarg_T ea = {
     .line1 = 1,
     .line2 = 1,
@@ -369,12 +368,11 @@ static bool do_incsearch_highlighting(int firstc, int *search_delim, incsearch_s
   curwin->w_cursor = save_cursor;
   retval = true;
 theend:
-  emsg_off--;
   return retval;
 }
 
 // May do 'incsearch' highlighting if desired.
-static void may_do_incsearch_highlighting(int firstc, long count, incsearch_state_T *s)
+static void may_do_incsearch_highlighting(int firstc, int count, incsearch_state_T *s)
 {
   pos_T end_pos;
   proftime_T tm;
@@ -642,7 +640,7 @@ static void init_ccline(int firstc, int indent)
 /// @param count  only used for incremental search
 /// @param indent  indent for inside conditionals
 /// @param clear_ccline  clear ccline first
-static uint8_t *command_line_enter(int firstc, long count, int indent, bool clear_ccline)
+static uint8_t *command_line_enter(int firstc, int count, int indent, bool clear_ccline)
 {
   // can be invoked recursively, identify each level
   static int cmdline_level = 0;
@@ -1346,7 +1344,7 @@ static int command_line_execute(VimState *state, int key)
 // May adjust 'incsearch' highlighting for typing CTRL-G and CTRL-T, go to next
 // or previous match.
 // Returns FAIL when calling command_line_not_changed.
-static int may_do_command_line_next_incsearch(int firstc, long count, incsearch_state_T *s,
+static int may_do_command_line_next_incsearch(int firstc, int count, incsearch_state_T *s,
                                               bool next_match)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -2428,13 +2426,10 @@ static bool cmdpreview_may_show(CommandLineState *s)
   // Copy the command line so we can modify it.
   int cmdpreview_type = 0;
   char *cmdline = xstrdup(ccline.cmdbuff);
-  char *errormsg = NULL;
-  emsg_off++;  // Block errors when parsing the command line, and don't update v:errmsg
+  const char *errormsg = NULL;
   if (!parse_cmdline(cmdline, &ea, &cmdinfo, &errormsg)) {
-    emsg_off--;
     goto end;
   }
-  emsg_off--;
 
   // Check if command is previewable, if not, don't attempt to show preview
   if (!(ea.argt & EX_PREVIEW)) {
@@ -2624,7 +2619,7 @@ static void abandon_cmdline(void)
 ///
 /// @param count  only used for incremental search
 /// @param indent  indent for inside conditionals
-char *getcmdline(int firstc, long count, int indent, bool do_concat FUNC_ATTR_UNUSED)
+char *getcmdline(int firstc, int count, int indent, bool do_concat FUNC_ATTR_UNUSED)
 {
   return (char *)command_line_enter(firstc, count, indent, true);
 }

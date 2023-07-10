@@ -1551,7 +1551,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   bool retval = false;
   static int nesting = 0;
   char *save_cmdarg;
-  long save_cmdbang;
+  varnumber_T save_cmdbang;
   static int filechangeshell_busy = false;
   proftime_T wait_time;
   bool did_save_redobuff = false;
@@ -1783,8 +1783,14 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
       check_lnums_nested(true);
     }
 
+    const int save_did_emsg = did_emsg;
+    const bool save_ex_pressedreturn = get_pressedreturn();
+
     // Execute the autocmd. The `getnextac` callback handles iteration.
-    do_cmdline(NULL, getnextac, (void *)&patcmd, DOCMD_NOWAIT | DOCMD_VERBOSE | DOCMD_REPEAT);
+    do_cmdline(NULL, getnextac, &patcmd, DOCMD_NOWAIT | DOCMD_VERBOSE | DOCMD_REPEAT);
+
+    did_emsg += save_did_emsg;
+    set_pressedreturn(save_ex_pressedreturn);
 
     if (nesting == 1) {
       // restore cursor and topline, unless they were changed

@@ -13,10 +13,11 @@ local M = {}
 ---@param params (table|nil) Parameters to send to the server
 ---@param handler (function|nil) See |lsp-handler|. Follows |lsp-handler-resolution|
 --
----@returns 2-tuple:
----  - Map of client-id:request-id pairs for all successful requests.
----  - Function which can be used to cancel all the requests. You could instead
----    iterate all clients and call their `cancel_request()` methods.
+---@return table<integer, integer> client_request_ids Map of client-id:request-id pairs
+---for all successful requests.
+---@return function _cancel_all_requests Function which can be used to
+---cancel all the requests. You could instead
+---iterate all clients and call their `cancel_request()` methods.
 ---
 ---@see |vim.lsp.buf_request()|
 local function request(method, params, handler)
@@ -30,7 +31,7 @@ end
 --- Checks whether the language servers attached to the current buffer are
 --- ready.
 ---
----@returns `true` if server responds.
+---@return boolean if server responds.
 ---@deprecated
 function M.server_ready()
   vim.deprecate('vim.lsp.buf.server_ready', nil, '0.10.0')
@@ -108,7 +109,7 @@ end
 --- Retrieves the completion items at the current cursor position. Can only be
 --- called in Insert mode.
 ---
----@param context (context support not yet implemented) Additional information
+---@param context table (context support not yet implemented) Additional information
 --- about the context in which a completion was triggered (how it was triggered,
 --- and by which trigger character, if applicable)
 ---
@@ -122,7 +123,7 @@ end
 ---@private
 ---@param bufnr integer
 ---@param mode "v"|"V"
----@return table {start={row, col}, end={row, col}} using (1, 0) indexing
+---@return table {start={row,col}, end={row,col}} using (1, 0) indexing
 local function range_from_selection(bufnr, mode)
   -- TODO: Use `vim.region()` instead https://github.com/neovim/neovim/pull/13896
 
@@ -189,7 +190,7 @@ end
 ---         Restrict formatting to the client with name (client.name) matching this field.
 ---
 ---     - range (table|nil) Range to format.
----         Table must contain `start` and `end` keys with {row, col} tuples using
+---         Table must contain `start` and `end` keys with {row,col} tuples using
 ---         (1,0) indexing.
 ---         Defaults to current selection in visual mode
 ---         Defaults to `nil` in other modes, formatting the full buffer
@@ -549,7 +550,7 @@ end
 --- call, the user is prompted to enter a string on the command line. An empty
 --- string means no filtering is done.
 ---
----@param query (string, optional)
+---@param query string|nil optional
 ---@param options table|nil additional options
 ---     - on_list: (function) handler for list results. See |lsp-on-list-handler|
 function M.workspace_symbol(query, options)
@@ -581,7 +582,6 @@ function M.document_highlight()
 end
 
 --- Removes document highlights from current buffer.
----
 function M.clear_references()
   util.buf_clear_references()
 end
@@ -741,7 +741,7 @@ end
 ---  - range: (table|nil)
 ---           Range for which code actions should be requested.
 ---           If in visual mode this defaults to the active selection.
----           Table must contain `start` and `end` keys with {row, col} tuples
+---           Table must contain `start` and `end` keys with {row,col} tuples
 ---           using mark-like indexing. See |api-indexing|
 ---
 ---@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_codeAction
@@ -794,21 +794,6 @@ function M.execute_command(command_params)
     workDoneToken = command_params.workDoneToken,
   }
   request('workspace/executeCommand', command_params)
-end
-
---- Enable/disable/toggle inlay hints for a buffer
----@param bufnr (integer) Buffer handle, or 0 for current
----@param enable (boolean|nil) true/false to enable/disable, nil to toggle
-function M.inlay_hint(bufnr, enable)
-  vim.validate({ enable = { enable, { 'boolean', 'nil' } }, bufnr = { bufnr, 'number' } })
-  local inlay_hint = require('vim.lsp._inlay_hint')
-  if enable then
-    inlay_hint.enable(bufnr)
-  elseif enable == false then
-    inlay_hint.disable(bufnr)
-  else
-    inlay_hint.toggle(bufnr)
-  end
 end
 
 return M

@@ -44,7 +44,7 @@ do
   vim.fn.mkdir(vim.fn.stdpath('log'), 'p')
 
   --- Returns the log filename.
-  ---@returns (string) log filename
+  ---@return string log filename
   function log.get_filename()
     return logfilename
   end
@@ -154,7 +154,7 @@ function log.set_level(level)
 end
 
 --- Gets the current log level.
----@return string current log level
+---@return integer current log level
 function log.get_level()
   return current_log_level
 end

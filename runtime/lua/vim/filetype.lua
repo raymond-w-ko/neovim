@@ -28,7 +28,7 @@ end
 --- If only start_lnum is specified, return a single line as a string.
 --- If both start_lnum and end_lnum are omitted, return all lines from the buffer.
 ---
----@param bufnr integer|nil The buffer to get the lines from
+---@param bufnr integer The buffer to get the lines from
 ---@param start_lnum integer|nil The line number of the first line (inclusive, 1-based)
 ---@param end_lnum integer|nil The line number of the last line (inclusive, 1-based)
 ---@return table<string>|string Array of lines, or string when end_lnum is omitted
@@ -783,6 +783,10 @@ local extension = {
   g = 'pccts',
   pcmk = 'pcmk',
   pdf = 'pdf',
+  pem = 'pem',
+  cer = 'pem',
+  crt = 'pem',
+  csr = 'pem',
   plx = 'perl',
   prisma = 'prisma',
   psgi = 'perl',
@@ -1809,6 +1813,8 @@ local pattern = {
   ['bzr_log%..*'] = 'bzr',
   ['.*enlightenment/.*%.cfg'] = 'c',
   ['${HOME}/cabal%.config'] = 'cabalconfig',
+  ['${HOME}/%.config/cabal/config'] = 'cabalconfig',
+  ['${XDG_CONFIG_HOME}/cabal/config'] = 'cabalconfig',
   ['cabal%.project%..*'] = starsetf('cabalproject'),
   ['.*/%.calendar/.*'] = starsetf('calendar'),
   ['.*/share/calendar/.*/calendar%..*'] = starsetf('calendar'),
@@ -2490,7 +2496,7 @@ local function match_pattern(name, path, tail, pat)
         return_early = true
         return nil
       end
-      return vim.env[env]
+      return vim.pesc(vim.env[env])
     end)
     if return_early then
       return false

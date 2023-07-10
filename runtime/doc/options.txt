@@ -676,9 +676,6 @@ A jump table for the options with a short description can be found at |Q_op|.
 	line.
 	When 'smartindent' or 'cindent' is on the indent is changed in
 	a different way.
-	{small difference from Vi: After the indent is deleted when typing
-	<Esc> or <CR>, the cursor position when moving up or down is after the
-	deleted indent; Vi puts the cursor somewhere in the deleted indent}.
 
 				 *'autoread'* *'ar'* *'noautoread'* *'noar'*
 'autoread' 'ar'		boolean	(default on)
@@ -904,7 +901,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	accidentally overwriting existing files with a backup file.  You might
 	prefer using ".bak", but make sure that you don't have files with
 	".bak" that you want to keep.
-	Only normal file name characters can be used; "/\*?[|<>" are illegal.
+	Only normal file name characters can be used; `/\*?[|<>` are illegal.
 
 	If you like to keep a lot of backups, you could use a BufWritePre
 	autocommand to change 'backupext' just before writing the file to
@@ -1866,9 +1863,9 @@ A jump table for the options with a short description can be found at |Q_op|.
 	Pattern to be used to find a macro definition.  It is a search
 	pattern, just like for the "/" command.  This option is used for the
 	commands like "[i" and "[d" |include-search|.  The 'isident' option is
-	used to recognize the defined name after the match:
+	used to recognize the defined name after the match: >
 		{match with 'define'}{non-ID chars}{defined name}{non-ID char}
-	See |option-backslash| about inserting backslashes to include a space
+<	See |option-backslash| about inserting backslashes to include a space
 	or backslash.
 	For C++ this value would be useful, to include const type declarations: >
 		^\(#\s*define\|[a-z]*\s*const\s*[a-z]*\)
@@ -2448,7 +2445,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	one dot may appear.
 	This option is not copied to another buffer, independent of the 's' or
 	'S' flag in 'cpoptions'.
-	Only normal file name characters can be used, "/\*?[|<>" are illegal.
+	Only normal file name characters can be used, `/\*?[|<>` are illegal.
 
 						*'fillchars'* *'fcs'*
 'fillchars' 'fcs'	string	(default "")
@@ -2653,7 +2650,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 
 		item		commands ~
 		all		any
-		block		"(", "{", "[[", "[{", etc.
+		block		(, {, [[, [{, etc.
 		hor		horizontal movements: "l", "w", "fx", etc.
 		insert		any command in Insert mode
 		jump		far jumps: "G", "gg", etc.
@@ -3584,7 +3581,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	Setting this option to a valid keymap name has the side effect of
 	setting 'iminsert' to one, so that the keymap becomes effective.
 	'imsearch' is also set to one, unless it was -1
-	Only normal file name characters can be used, "/\*?[|<>" are illegal.
+	Only normal file name characters can be used, `/\*?[|<>` are illegal.
 
 					*'keymodel'* *'km'*
 'keymodel' 'km'		string	(default "")
@@ -3669,7 +3666,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	matter what $LANG is set to: >
 		:set langmenu=nl_NL.ISO_8859-1
 <	When 'langmenu' is empty, |v:lang| is used.
-	Only normal file name characters can be used, "/\*?[|<>" are illegal.
+	Only normal file name characters can be used, `/\*?[|<>` are illegal.
 	If your $LANG is set to a non-English language but you do want to use
 	the English menus: >
 		:set langmenu=none
@@ -4042,9 +4039,9 @@ A jump table for the options with a short description can be found at |Q_op|.
 	per word depends very much on how similar the words are, that's why
 	this tuning is complicated.
 
-	There are three numbers, separated by commas:
+	There are three numbers, separated by commas: >
 		{start},{inc},{added}
-
+<
 	For most languages the uncompressed word tree fits in memory.  {start}
 	gives the amount of memory in Kbyte that can be used before any
 	compression is done.  It should be a bit smaller than the amount of
@@ -4447,7 +4444,8 @@ A jump table for the options with a short description can be found at |Q_op|.
 
 				*'packpath'* *'pp'*
 'packpath' 'pp'		string	(default: see 'runtimepath')
-	Directories used to find packages.  See |packages| and |rtp-packages|.
+	Directories used to find packages.
+	See |packages| and |packages-runtimepath|.
 
 
 						*'paragraphs'* *'para'*
@@ -4480,7 +4478,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	Using 'patchmode' for compressed files appends the extension at the
 	end (e.g., "file.gz.orig"), thus the resulting name isn't always
 	recognized as a compressed file.
-	Only normal file name characters can be used, "/\*?[|<>" are illegal.
+	Only normal file name characters can be used, `/\*?[|<>` are illegal.
 
 				*'path'* *'pa'* *E343* *E345* *E347* *E854*
 'path' 'pa'		string	(default: ".,,")
@@ -6262,7 +6260,7 @@ A jump table for the options with a short description can be found at |Q_op|.
 	Syntax autocommand event is triggered with the value as argument.
 	This option is not copied to another buffer, independent of the 's' or
 	'S' flag in 'cpoptions'.
-	Only normal file name characters can be used, "/\*?[|<>" are illegal.
+	Only normal file name characters can be used, `/\*?[|<>` are illegal.
 
 						*'tabline'* *'tal'*
 'tabline' 'tal'		string	(default empty)

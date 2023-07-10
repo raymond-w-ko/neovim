@@ -1163,7 +1163,7 @@ static bool has_env_var(char *p)
 
 // Return true if "p" contains a special wildcard character, one that Vim
 // cannot expand, requires using a shell.
-static bool has_special_wildchar(char *p)
+static bool has_special_wildchar(char *p, int flags)
 {
   for (; *p; MB_PTR_ADV(p)) {
     // Disallow line break characters.
@@ -1174,6 +1174,10 @@ static bool has_special_wildchar(char *p)
     if (*p == '\\' && p[1] != NUL && p[1] != '\r' && p[1] != '\n') {
       p++;
     } else if (vim_strchr(SPECIAL_WILDCHAR, (uint8_t)(*p)) != NULL) {
+      // Need a shell for curly braces only when including non-existing files.
+      if (*p == '{' && !(flags & EW_NOTFOUND)) {
+        continue;
+      }
       // A { must be followed by a matching }.
       if (*p == '{' && vim_strchr(p, '}') == NULL) {
         continue;
@@ -1233,7 +1237,7 @@ int gen_expand_wildcards(int num_pat, char **pat, int *num_file, char ***file, i
   // avoids starting the shell for each argument separately.
   // For `=expr` do use the internal function.
   for (int i = 0; i < num_pat; i++) {
-    if (has_special_wildchar(pat[i])
+    if (has_special_wildchar(pat[i], flags)
         && !(vim_backtick(pat[i]) && pat[i][1] == '=')) {
       return os_expand_wildcards(num_pat, pat, num_file, file, flags);
     }
@@ -1810,7 +1814,7 @@ bool path_with_extension(const char *path, const char *extension)
 }
 
 /// Return true if "name" is a full (absolute) path name or URL.
-bool vim_isAbsName(char *name)
+bool vim_isAbsName(const char *name)
 {
   return path_with_url(name) != 0 || path_is_absolute(name);
 }
@@ -1871,7 +1875,7 @@ char *fix_fname(const char *fname)
 #ifdef UNIX
   return FullName_save(fname, true);
 #else
-  if (!vim_isAbsName((char *)fname)
+  if (!vim_isAbsName(fname)
       || strstr(fname, "..") != NULL
       || strstr(fname, "//") != NULL
 # ifdef BACKSLASH_IN_FILENAME
@@ -2129,7 +2133,7 @@ int expand_wildcards_eval(char **pat, int *num_file, char ***file, int flags)
   int ret = FAIL;
   char *eval_pat = NULL;
   char *exp_pat = *pat;
-  char *ignored_msg;
+  const char *ignored_msg;
   size_t usedlen;
   const bool is_cur_alt_file = *exp_pat == '%' || *exp_pat == '#';
   bool star_follows = false;
