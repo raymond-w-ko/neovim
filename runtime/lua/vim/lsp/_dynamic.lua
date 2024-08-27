@@ -1,4 +1,4 @@
-local wf = require('vim.lsp._watchfiles')
+local glob = vim.glob
 
 --- @class lsp.DynamicCapabilities
 --- @field capabilities table<string, lsp.Registration[]>
@@ -6,6 +6,7 @@ local wf = require('vim.lsp._watchfiles')
 local M = {}
 
 --- @param client_id number
+--- @return lsp.DynamicCapabilities
 function M.new(client_id)
   return setmetatable({
     capabilities = {},
@@ -18,12 +19,11 @@ function M:supports_registration(method)
   if not client then
     return false
   end
-  local capability = vim.tbl_get(client.config.capabilities, unpack(vim.split(method, '/')))
+  local capability = vim.tbl_get(client.capabilities, unpack(vim.split(method, '/')))
   return type(capability) == 'table' and capability.dynamicRegistration
 end
 
 --- @param registrations lsp.Registration[]
---- @private
 function M:register(registrations)
   -- remove duplicates
   self:unregister(registrations)
@@ -37,7 +37,6 @@ function M:register(registrations)
 end
 
 --- @param unregisterations lsp.Unregistration[]
---- @private
 function M:unregister(unregisterations)
   for _, unreg in ipairs(unregisterations) do
     local method = unreg.method
@@ -55,9 +54,8 @@ function M:unregister(unregisterations)
 end
 
 --- @param method string
---- @param opts? {bufnr?: number}
+--- @param opts? {bufnr: integer?}
 --- @return lsp.Registration? (table|nil) the registration if found
---- @private
 function M:get(method, opts)
   opts = opts or {}
   opts.bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -69,15 +67,14 @@ function M:get(method, opts)
     if not documentSelector then
       return reg
     end
-    if M.match(opts.bufnr, documentSelector) then
+    if self:match(opts.bufnr, documentSelector) then
       return reg
     end
   end
 end
 
 --- @param method string
---- @param opts? {bufnr?: number}
---- @private
+--- @param opts? {bufnr: integer?}
 function M:supports(method, opts)
   return self:get(method, opts) ~= nil
 end
@@ -85,19 +82,23 @@ end
 --- @param bufnr number
 --- @param documentSelector lsp.DocumentSelector
 --- @private
-function M.match(bufnr, documentSelector)
-  local ft = vim.bo[bufnr].filetype
+function M:match(bufnr, documentSelector)
+  local client = vim.lsp.get_client_by_id(self.client_id)
+  if not client then
+    return false
+  end
+  local language = client.get_language_id(bufnr, vim.bo[bufnr].filetype)
   local uri = vim.uri_from_bufnr(bufnr)
   local fname = vim.uri_to_fname(uri)
   for _, filter in ipairs(documentSelector) do
     local matches = true
-    if filter.language and ft ~= filter.language then
+    if filter.language and language ~= filter.language then
       matches = false
     end
     if matches and filter.scheme and not vim.startswith(uri, filter.scheme .. ':') then
       matches = false
     end
-    if matches and filter.pattern and not wf._match(filter.pattern, fname) then
+    if matches and filter.pattern and not glob.to_lpeg(filter.pattern):match(fname) then
       matches = false
     end
     if matches then

@@ -25,7 +25,8 @@ function! s:selection.on_exit(jobid, data, event) abort
   if self.owner == a:jobid
     let self.owner = 0
   endif
-  if a:data != 0
+  " Don't print if exit code is >= 128 ( exit is 128+SIGNUM if by signal (e.g. 143 on SIGTERM))
+  if a:data > 0 && a:data < 128
     echohl WarningMsg
     echomsg 'clipboard: error invoking '.get(self.argv, 0, '?').': '.join(self.stderr)
     echohl None
@@ -66,7 +67,8 @@ function! provider#clipboard#Error() abort
 endfunction
 
 function! provider#clipboard#Executable() abort
-  if exists('g:clipboard')
+  " Setting g:clipboard to v:false explicitly opts-in to using the "builtin" clipboard providers below
+  if exists('g:clipboard') && g:clipboard isnot# v:false
     if type({}) isnot# type(g:clipboard)
           \ || type({}) isnot# type(get(g:clipboard, 'copy', v:null))
           \ || type({}) isnot# type(get(g:clipboard, 'paste', v:null))
@@ -92,9 +94,9 @@ function! provider#clipboard#Executable() abort
     let s:cache_enabled = 0
     return 'pbcopy'
   elseif !empty($WAYLAND_DISPLAY) && executable('wl-copy') && executable('wl-paste')
-    let s:copy['+'] = ['wl-copy', '--foreground', '--type', 'text/plain']
+    let s:copy['+'] = ['wl-copy', '--type', 'text/plain']
     let s:paste['+'] = ['wl-paste', '--no-newline']
-    let s:copy['*'] = ['wl-copy', '--foreground', '--primary', '--type', 'text/plain']
+    let s:copy['*'] = ['wl-copy', '--primary', '--type', 'text/plain']
     let s:paste['*'] = ['wl-paste', '--no-newline', '--primary']
     return 'wl-copy'
   elseif !empty($WAYLAND_DISPLAY) && executable('waycopy') && executable('waypaste')

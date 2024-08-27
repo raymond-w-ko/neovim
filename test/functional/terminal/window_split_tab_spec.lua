@@ -1,16 +1,18 @@
-local helpers = require('test.functional.helpers')(after_each)
-local thelpers = require('test.functional.terminal.helpers')
-local assert_alive = helpers.assert_alive
-local clear = helpers.clear
-local feed = helpers.feed
-local feed_command = helpers.feed_command
-local command = helpers.command
-local eq = helpers.eq
-local eval = helpers.eval
-local meths = helpers.meths
-local sleep = helpers.sleep
-local retry = helpers.retry
-local is_os = helpers.is_os
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local tt = require('test.functional.terminal.testutil')
+local assert_alive = n.assert_alive
+local clear = n.clear
+local feed = n.feed
+local feed_command = n.feed_command
+local command = n.command
+local eq = t.eq
+local eval = n.eval
+local api = n.api
+local sleep = vim.uv.sleep
+local retry = t.retry
+local is_os = t.is_os
 
 describe(':terminal', function()
   local screen
@@ -19,11 +21,13 @@ describe(':terminal', function()
     clear()
     -- set the statusline to a constant value because of variables like pid
     -- and current directory and to improve visibility of splits
-    meths.set_option_value('statusline', '==========', {})
-    command('highlight StatusLine cterm=NONE')
-    command('highlight StatusLineNC cterm=NONE')
-    command('highlight VertSplit cterm=NONE')
-    screen = thelpers.screen_setup(3)
+    api.nvim_set_option_value('statusline', '==========', {})
+    screen = tt.screen_setup(3)
+    command('highlight StatusLine NONE')
+    command('highlight StatusLineNC NONE')
+    command('highlight StatusLineTerm NONE')
+    command('highlight StatusLineTermNC NONE')
+    command('highlight VertSplit NONE')
   end)
 
   after_each(function()
@@ -35,7 +39,7 @@ describe(':terminal', function()
     command('terminal')
     command('vsplit foo')
     eq(3, eval("winnr('$')"))
-    feed('ZQ')  -- Close split, should not crash. #7538
+    feed('ZQ') -- Close split, should not crash. #7538
     assert_alive()
   end)
 
@@ -50,8 +54,7 @@ describe(':terminal', function()
       tty ready                                         |
       rows: 5, cols: 50                                 |
       {2: }                                                 |
-                                                        |
-                                                        |
+                                                        |*2
       ==========                                        |
       :2split                                           |
     ]])
@@ -63,31 +66,23 @@ describe(':terminal', function()
       ^tty ready                                         |
       rows: 5, cols: 50                                 |
       {2: }                                                 |
-                                                        |
-                                                        |
+                                                        |*2
       ==========                                        |
       :wincmd p                                         |
     ]])
   end)
 
   it('does not change size if updated when not visible in any window #19665', function()
-    local channel = meths.get_option_value('channel', {})
+    local channel = api.nvim_get_option_value('channel', {})
     command('enew')
     sleep(100)
-    meths.chan_send(channel, 'foo')
+    api.nvim_chan_send(channel, 'foo')
     sleep(100)
     command('bprevious')
     screen:expect([[
       tty ready                                         |
       ^foo{2: }                                              |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
+                                                        |*8
     ]])
   end)
 
@@ -100,9 +95,9 @@ describe(':terminal', function()
       -- win: SIGWINCH is unreliable, use a weaker test. #7506
       retry(3, 30000, function()
         screen:try_resize(w1, h1)
-        screen:expect{any='rows: 7, cols: 47'}
+        screen:expect { any = 'rows: 7, cols: 47' }
         screen:try_resize(w2, h2)
-        screen:expect{any='rows: 4, cols: 41'}
+        screen:expect { any = 'rows: 4, cols: 41' }
       end)
       return
     end
@@ -112,9 +107,7 @@ describe(':terminal', function()
       tty ready                                      |
       rows: 7, cols: 47                              |
       {2: }                                              |
-                                                     |
-                                                     |
-                                                     |
+                                                     |*3
       ^                                               |
                                                      |
     ]])
@@ -133,8 +126,7 @@ describe(':terminal', function()
     command('split')
     command('terminal')
     feed('a<Cmd>wincmd j<CR>')
-    eq(2, eval("winnr()"))
+    eq(2, eval('winnr()'))
     eq('t', eval('mode(1)'))
   end)
-
 end)

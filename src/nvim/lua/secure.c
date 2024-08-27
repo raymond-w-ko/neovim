@@ -1,13 +1,15 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
-#include <lauxlib.h>
 #include <lua.h>
-#include <lualib.h>
+#include <stdbool.h>
+#include <string.h>
 
 #include "nvim/charset.h"
+#include "nvim/errors.h"
+#include "nvim/ex_cmds_defs.h"
+#include "nvim/gettext_defs.h"
+#include "nvim/globals.h"
 #include "nvim/lua/executor.h"
 #include "nvim/lua/secure.h"
+#include "nvim/memory.h"
 #include "nvim/message.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -76,11 +78,11 @@ static bool nlua_trust(const char *action, const char *path)
   if (msg != NULL) {
     if (success) {
       if (strcmp(action, "allow") == 0) {
-        smsg("Allowed \"%s\" in trust database.", msg);
+        smsg(0, "Allowed \"%s\" in trust database.", msg);
       } else if (strcmp(action, "deny") == 0) {
-        smsg("Denied \"%s\" in trust database.", msg);
+        smsg(0, "Denied \"%s\" in trust database.", msg);
       } else if (strcmp(action, "remove") == 0) {
-        smsg("Removed \"%s\" from trust database.", msg);
+        smsg(0, "Removed \"%s\" from trust database.", msg);
       }
     } else {
       semsg(e_trustfile, msg);
@@ -102,12 +104,12 @@ void ex_trust(exarg_T *eap)
     action = "deny";
   } else if (strcmp(arg1, "++remove") == 0) {
     action = "remove";
-  } else if (*arg1 != '\0') {
+  } else if (*arg1 != NUL) {
     semsg(e_invarg2, arg1);
     goto theend;
   }
 
-  if (path[0] == '\0') {
+  if (path[0] == NUL) {
     path = NULL;
   }
 

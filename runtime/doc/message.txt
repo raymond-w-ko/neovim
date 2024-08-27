@@ -114,6 +114,13 @@ wiped out a buffer which contains a mark or is referenced in another way.
 You cannot have two buffers with exactly the same name.  This includes the
 path leading to the file.
 
+							*E1513* >
+  Cannot switch buffer. 'winfixbuf' is enabled
+
+If a window has 'winfixbuf' enabled, you cannot change that window's current
+buffer. You need to set 'nowinfixbuf' before continuing. You may use [!] to
+force the window to switch buffers, if your command supports it.
+
 							*E72*  >
   Close error on swap file
 
@@ -683,6 +690,7 @@ Ex command or function was given an invalid argument. Or |jobstart()| or
 
 							*E488*  >
   Trailing characters
+  Trailing characters: {text}
 
 An argument was given to an Ex command that does not permit one.
 Or the argument has invalid characters and has not been recognized.
@@ -749,7 +757,7 @@ src/ex_cmds.lua.  Update the lookup table by re-running the build. >
 This is an (incomplete) overview of various messages that Vim gives:
 
 			*hit-enter* *press-enter* *hit-return*
-			*press-return* *hit-enter-prompt*
+			*press-return* *hit-enter-prompt*  >
 
   Press ENTER or type command to continue
 

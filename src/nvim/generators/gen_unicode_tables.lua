@@ -5,13 +5,13 @@
 --    (A) east asian width respectively.
 -- 2. combining table: same as the above, but characters inside are combining
 --    characters (i.e. have general categories equal to Mn, Mc or Me).
--- 3. foldCase, toLower and toUpper tables used to convert characters to
---    folded/lower/upper variants. In these tables first two values are
+-- 3. foldCase table used to convert characters to
+--    folded variants. In this table first two values are
 --    character ranges: like in previous tables they are sorted and must be
 --    non-overlapping. Third value means step inside the range: e.g. if it is
 --    2 then interval applies only to first, third, fifth, … character in range.
 --    Fourth value is number that should be added to the codepoint to yield
---    folded/lower/upper codepoint.
+--    folded codepoint.
 -- 4. emoji_wide and emoji_all tables: sorted lists of non-overlapping closed
 --    intervals of Emoji characters.  emoji_wide contains all the characters
 --    which don't have ambiguous or double width, and emoji_all has all Emojis.
@@ -28,7 +28,6 @@ local get_path = function(fname)
 end
 
 local unicodedata_fname = get_path('UnicodeData.txt')
-local casefolding_fname = get_path('CaseFolding.txt')
 local eastasianwidth_fname = get_path('EastAsianWidth.txt')
 local emoji_fname = get_path('emoji-data.txt')
 
@@ -60,12 +59,10 @@ local fp_lines_to_lists = function(fp, n, has_comments)
     if not line then
       break
     end
-    if (not has_comments
-        or (line:sub(1, 1) ~= '#' and not line:match('^%s*$'))) then
+    if not has_comments or (line:sub(1, 1) ~= '#' and not line:match('^%s*$')) then
       local l = split_on_semicolons(line)
       if #l ~= n then
-        io.stderr:write(('Found %s items in line %u, expected %u\n'):format(
-          #l, i, n))
+        io.stderr:write(('Found %s items in line %u, expected %u\n'):format(#l, i, n))
         io.stderr:write('Line: ' .. line .. '\n')
         return nil
       end
@@ -79,10 +76,6 @@ local parse_data_to_props = function(ud_fp)
   return fp_lines_to_lists(ud_fp, 15, false)
 end
 
-local parse_fold_props = function(cf_fp)
-  return fp_lines_to_lists(cf_fp, 4, true)
-end
-
 local parse_width_props = function(eaw_fp)
   return fp_lines_to_lists(eaw_fp, 2, true)
 end
@@ -93,59 +86,10 @@ end
 
 local make_range = function(start, end_, step, add)
   if step and add then
-    return ('  {0x%x, 0x%x, %d, %d},\n'):format(
-      start, end_, step == 0 and -1 or step, add)
+    return ('  {0x%x, 0x%x, %d, %d},\n'):format(start, end_, step == 0 and -1 or step, add)
   else
     return ('  {0x%04x, 0x%04x},\n'):format(start, end_)
   end
-end
-
-local build_convert_table = function(ut_fp, props, cond_func, nl_index,
-                                     table_name)
-  ut_fp:write('static const convertStruct ' .. table_name .. '[] = {\n')
-  local start = -1
-  local end_ = -1
-  local step = 0
-  local add = -1
-  for _, p in ipairs(props) do
-    if cond_func(p) then
-      local n = tonumber(p[1], 16)
-      local nl = tonumber(p[nl_index], 16)
-      if start >= 0 and add == (nl - n) and (step == 0 or n - end_ == step) then
-        -- Continue with the same range.
-        step = n - end_
-        end_ = n
-      else
-        if start >= 0 then
-          -- Produce previous range.
-          ut_fp:write(make_range(start, end_, step, add))
-        end
-        start = n
-        end_ = n
-        step = 0
-        add = nl - n
-      end
-    end
-  end
-  if start >= 0 then
-    ut_fp:write(make_range(start, end_, step, add))
-  end
-  ut_fp:write('};\n')
-end
-
-local build_case_table = function(ut_fp, dataprops, table_name, index)
-  local cond_func = function(p)
-    return p[index] ~= ''
-  end
-  return build_convert_table(ut_fp, dataprops, cond_func, index,
-                             'to' .. table_name)
-end
-
-local build_fold_table = function(ut_fp, foldprops)
-  local cond_func = function(p)
-    return (p[2] == 'C' or p[2] == 'S')
-  end
-  return build_convert_table(ut_fp, foldprops, cond_func, 3, 'foldCase')
 end
 
 local build_combining_table = function(ut_fp, dataprops)
@@ -154,7 +98,7 @@ local build_combining_table = function(ut_fp, dataprops)
   local end_ = -1
   for _, p in ipairs(dataprops) do
     -- The 'Mc' property was removed, it does take up space.
-    if (({Mn=true, Me=true})[p[3]]) then
+    if ({ Mn = true, Me = true })[p[3]] then
       local n = tonumber(p[1], 16)
       if start >= 0 and end_ + 1 == n then
         -- Continue with the same range.
@@ -175,8 +119,7 @@ local build_combining_table = function(ut_fp, dataprops)
   ut_fp:write('};\n')
 end
 
-local build_width_table = function(ut_fp, dataprops, widthprops, widths,
-                                   table_name)
+local build_width_table = function(ut_fp, dataprops, widthprops, widths, table_name)
   ut_fp:write('static const struct interval ' .. table_name .. '[] = {\n')
   local start = -1
   local end_ = -1
@@ -208,13 +151,13 @@ local build_width_table = function(ut_fp, dataprops, widthprops, widths,
       -- Only use the char when it’s not a composing char.
       -- But use all chars from a range.
       local dp = dataprops[dataidx]
-      if (n_last > n) or (not (({Mn=true, Mc=true, Me=true})[dp[3]])) then
+      if (n_last > n) or not ({ Mn = true, Mc = true, Me = true })[dp[3]] then
         if start >= 0 and end_ + 1 == n then -- luacheck: ignore 542
           -- Continue with the same range.
         else
           if start >= 0 then
             ut_fp:write(make_range(start, end_))
-            table.insert(ret, {start, end_})
+            table.insert(ret, { start, end_ })
           end
           start = n
         end
@@ -224,7 +167,7 @@ local build_width_table = function(ut_fp, dataprops, widthprops, widths,
   end
   if start >= 0 then
     ut_fp:write(make_range(start, end_))
-    table.insert(ret, {start, end_})
+    table.insert(ret, { start, end_ })
   end
   ut_fp:write('};\n')
   return ret
@@ -302,24 +245,15 @@ ud_fp:close()
 
 local ut_fp = io.open(utf_tables_fname, 'w')
 
-build_case_table(ut_fp, dataprops, 'Lower', 14)
-build_case_table(ut_fp, dataprops, 'Upper', 13)
 build_combining_table(ut_fp, dataprops)
-
-local cf_fp = io.open(casefolding_fname, 'r')
-local foldprops = parse_fold_props(cf_fp)
-cf_fp:close()
-
-build_fold_table(ut_fp, foldprops)
 
 local eaw_fp = io.open(eastasianwidth_fname, 'r')
 local widthprops = parse_width_props(eaw_fp)
 eaw_fp:close()
 
-local doublewidth = build_width_table(ut_fp, dataprops, widthprops,
-                                      {W=true, F=true}, 'doublewidth')
-local ambiwidth = build_width_table(ut_fp, dataprops, widthprops,
-                                    {A=true}, 'ambiguous')
+local doublewidth =
+  build_width_table(ut_fp, dataprops, widthprops, { W = true, F = true }, 'doublewidth')
+local ambiwidth = build_width_table(ut_fp, dataprops, widthprops, { A = true }, 'ambiguous')
 
 local emoji_fp = io.open(emoji_fname, 'r')
 local emojiprops = parse_emoji_props(emoji_fp)

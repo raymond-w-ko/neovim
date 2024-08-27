@@ -239,6 +239,8 @@ func Test_printf_misc()
   let lines =<< trim END
       call assert_equal('123', printf('123'))
 
+      call assert_equal('', printf('%'))
+      call assert_equal('', printf('%.0d', 0))
       call assert_equal('123', printf('%d', 123))
       call assert_equal('123', printf('%i', 123))
       call assert_equal('123', printf('%D', 123))
@@ -419,6 +421,7 @@ func Test_printf_misc()
       call assert_equal('[00000あiう]', printf('[%010.7S]', 'あiう'))
 
       call assert_equal('1%', printf('%d%%', 1))
+      call assert_notequal('', printf('%p', "abc"))
   END
   call CheckLegacyAndVim9Success(lines)
 
@@ -900,6 +903,22 @@ func Test_string_interp()
       echo "${ LET tmp += 1 }"
     endif
     call assert_equal(0, tmp)
+
+    #" Dict interpolation
+    VAR d = {'a': 10, 'b': [1, 2]}
+    call assert_equal("{'a': 10, 'b': [1, 2]}", $'{d}')
+    VAR emptydict = {}
+    call assert_equal("a{}b", $'a{emptydict}b')
+    VAR nulldict = v:_null_dict
+    call assert_equal("a{}b", $'a{nulldict}b')
+
+    #" List interpolation
+    VAR l = ['a', 'b', 'c']
+    call assert_equal("['a', 'b', 'c']", $'{l}')
+    VAR emptylist = []
+    call assert_equal("a[]b", $'a{emptylist}b')
+    VAR nulllist = v:_null_list
+    call assert_equal("a[]b", $'a{nulllist}b')
 
     #" Stray closing brace.
     call assert_fails('echo $"moo}"', 'E1278:')

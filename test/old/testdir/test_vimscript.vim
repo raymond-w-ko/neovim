@@ -3109,7 +3109,7 @@ endfunc
 "	    should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function checks the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_while_error()
@@ -3236,7 +3236,7 @@ endfunc
 "	    error messages should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function checks the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_cont_break_error()
@@ -3344,7 +3344,7 @@ endfunc
 "	    should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function check the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_endtry_error()
@@ -3641,7 +3641,7 @@ endfunc
 "	    exceptions.
 "-------------------------------------------------------------------------------
 
-func Test_execption_info_for_error()
+func Test_exception_info_for_error()
   CheckEnglish
 
   let test =<< trim [CODE]
@@ -6502,16 +6502,22 @@ func Test_type()
     call assert_equal(2, type(function("tr", [8])))
     call assert_equal(3, type([]))
     call assert_equal(4, type({}))
-    call assert_equal(5, type(0.0))
+    if has('float')
+      call assert_equal(5, type(0.0))
+    endif
     call assert_equal(6, type(v:false))
     call assert_equal(6, type(v:true))
+    " call assert_equal(7, type(v:none))
     call assert_equal(7, type(v:null))
     call assert_equal(v:t_number, type(0))
     call assert_equal(v:t_string, type(""))
     call assert_equal(v:t_func, type(function("tr")))
+    call assert_equal(v:t_func, type(function("tr", [8])))
     call assert_equal(v:t_list, type([]))
     call assert_equal(v:t_dict, type({}))
-    call assert_equal(v:t_float, type(0.0))
+    if has('float')
+      call assert_equal(v:t_float, type(0.0))
+    endif
     call assert_equal(v:t_bool, type(v:false))
     call assert_equal(v:t_bool, type(v:true))
     " call assert_equal(v:t_none, type(v:none))
@@ -6829,10 +6835,12 @@ func Test_bitwise_functions()
     call assert_equal(16, and(127, 16))
     eval 127->and(16)->assert_equal(16)
     call assert_equal(0, and(127, 128))
-    call assert_fails("call and(1.0, 1)", 'E805:')
     call assert_fails("call and([], 1)", 'E745:')
     call assert_fails("call and({}, 1)", 'E728:')
-    call assert_fails("call and(1, 1.0)", 'E805:')
+    if has('float')
+      call assert_fails("call and(1.0, 1)", 'E805:')
+      call assert_fails("call and(1, 1.0)", 'E805:')
+    endif
     call assert_fails("call and(1, [])", 'E745:')
     call assert_fails("call and(1, {})", 'E728:')
     " or
@@ -6840,10 +6848,12 @@ func Test_bitwise_functions()
     call assert_equal(15, or(8, 7))
     eval 8->or(7)->assert_equal(15)
     call assert_equal(123, or(0, 123))
-    call assert_fails("call or(1.0, 1)", 'E805:')
     call assert_fails("call or([], 1)", 'E745:')
     call assert_fails("call or({}, 1)", 'E728:')
-    call assert_fails("call or(1, 1.0)", 'E805:')
+    if has('float')
+      call assert_fails("call or(1.0, 1)", 'E805:')
+      call assert_fails("call or(1, 1.0)", 'E805:')
+    endif
     call assert_fails("call or(1, [])", 'E745:')
     call assert_fails("call or(1, {})", 'E728:')
     " xor
@@ -6851,10 +6861,12 @@ func Test_bitwise_functions()
     call assert_equal(111, xor(127, 16))
     eval 127->xor(16)->assert_equal(111)
     call assert_equal(255, xor(127, 128))
-    call assert_fails("call xor(1.0, 1)", 'E805:')
+    if has('float')
+      call assert_fails("call xor(1.0, 1)", 'E805:')
+      call assert_fails("call xor(1, 1.0)", 'E805:')
+    endif
     call assert_fails("call xor([], 1)", 'E745:')
     call assert_fails("call xor({}, 1)", 'E728:')
-    call assert_fails("call xor(1, 1.0)", 'E805:')
     call assert_fails("call xor(1, [])", 'E745:')
     call assert_fails("call xor(1, {})", 'E728:')
     " invert
@@ -6862,7 +6874,9 @@ func Test_bitwise_functions()
     eval 127->invert()->and(65535)->assert_equal(65408)
     call assert_equal(65519, and(invert(16), 65535))
     call assert_equal(65407, and(invert(128), 65535))
-    call assert_fails("call invert(1.0)", 'E805:')
+    if has('float')
+      call assert_fails("call invert(1.0)", 'E805:')
+    endif
     call assert_fails("call invert([])", 'E745:')
     call assert_fails("call invert({})", 'E728:')
 endfunc
@@ -7249,30 +7263,30 @@ func Test_deep_nest()
 
   " Deep nesting of if ... endif
   call term_sendkeys(buf, ":call Test1()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E579:', term_getline(buf, 5))})
 
   " Deep nesting of for ... endfor
   call term_sendkeys(buf, ":call Test2()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E585:', term_getline(buf, 5))})
 
   " Deep nesting of while ... endwhile
   call term_sendkeys(buf, ":call Test3()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E585:', term_getline(buf, 5))})
 
   " Deep nesting of try ... endtry
   call term_sendkeys(buf, ":call Test4()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E601:', term_getline(buf, 5))})
 
   " Deep nesting of function ... endfunction
   call term_sendkeys(buf, ":call Test5()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E1058:', term_getline(buf, 4))})
   call term_sendkeys(buf, "\<C-C>\n")
-  call term_wait(buf)
+  call TermWait(buf)
 
   "let l = ''
   "for i in range(1, 6)
@@ -7435,6 +7449,57 @@ func Test_for_over_string()
     let res ..= c .. '-'
   endfor
   call assert_equal('', res)
+
+  " Test for using "_" as the loop variable
+  let i = 0
+  let s = 'abc'
+  for _ in s
+    call assert_equal(s[i], _)
+    let i += 1
+  endfor
+endfunc
+
+" Test for deeply nested :source command  {{{1
+func Test_deeply_nested_source()
+  throw 'Skipped: Vim9 script is N/A'
+  let lines =<< trim END
+
+      so
+      sil 0scr
+      delete
+      so
+      0
+  END
+  call writefile(["vim9 silent! @0 \n/"] + lines, 'Xnested.vim', 'D')
+
+  " this must not crash
+  let cmd = GetVimCommand() .. " -e -s -S Xnested.vim -c qa!"
+  call system(cmd)
+endfunc
+
+func Test_exception_silent()
+  XpathINIT
+  let lines =<< trim END
+  func Throw()
+    Xpath 'a'
+    throw "Uncaught"
+    " This line is not executed.
+    Xpath 'b'
+  endfunc
+  " The exception is suppressed due to the presence of silent!.
+  silent! call Throw()
+  try
+    call DoesNotExist()
+  catch /E117:/
+    Xpath 'c'
+  endtry
+  Xpath 'd'
+  END
+  let verify =<< trim END
+    call assert_equal('acd', g:Xpath)
+  END
+
+  call RunInNewVim(lines, verify)
 endfunc
 
 "-------------------------------------------------------------------------------

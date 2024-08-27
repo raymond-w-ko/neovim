@@ -1,15 +1,14 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <uv.h>
 
-#include "nvim/event/loop.h"
+#include "nvim/event/defs.h"
 #include "nvim/event/stream.h"
 #include "nvim/event/wstream.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/memory.h"
+#include "nvim/types_defs.h"
 
 #define DEFAULT_MAXMEM 1024 * 1024 * 2000
 
@@ -104,7 +103,7 @@ err:
 
 /// Creates a WBuffer object for holding output data. Instances of this
 /// object can be reused across Stream instances, and the memory is freed
-/// automatically when no longer needed(it tracks the number of references
+/// automatically when no longer needed (it tracks the number of references
 /// internally)
 ///
 /// @param data Data stored by the WBuffer
@@ -112,7 +111,7 @@ err:
 /// @param refcount The number of references for the WBuffer. This will be used
 ///        by Stream instances to decide when a WBuffer should be freed.
 /// @param cb Pointer to function that will be responsible for freeing
-///        the buffer data(passing 'free' will work as expected).
+///        the buffer data (passing `xfree` will work as expected).
 /// @return The allocated WBuffer instance
 WBuffer *wstream_new_buffer(char *data, size_t size, size_t refcount, wbuffer_data_finalizer cb)
   FUNC_ATTR_NONNULL_ARG(1)
@@ -142,7 +141,7 @@ static void write_cb(uv_write_t *req, int status)
 
   if (data->stream->closed && data->stream->pending_reqs == 0) {
     // Last pending write, free the stream;
-    stream_close_handle(data->stream);
+    stream_close_handle(data->stream, false);
   }
 
   xfree(data);
@@ -158,4 +157,9 @@ void wstream_release_wbuffer(WBuffer *buffer)
 
     xfree(buffer);
   }
+}
+
+void wstream_may_close(Stream *stream)
+{
+  stream_may_close(stream, false);
 }

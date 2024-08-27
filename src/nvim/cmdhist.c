@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // cmdhist.c: Functions for the history of the command-line.
 
 #include <assert.h>
@@ -10,24 +7,27 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/cmdhist.h"
+#include "nvim/errors.h"
 #include "nvim/eval/typval.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_getln.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/option_defs.h"
-#include "nvim/pos.h"
+#include "nvim/option_vars.h"
+#include "nvim/os/time.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "cmdhist.c.generated.h"
@@ -190,7 +190,7 @@ static inline void hist_free_entry(histentry_T *hisptr)
   FUNC_ATTR_NONNULL_ALL
 {
   xfree(hisptr->hisstr);
-  tv_list_unref(hisptr->additional_elements);
+  xfree(hisptr->additional_data);
   clear_hist_entry(hisptr);
 }
 
@@ -237,7 +237,7 @@ static int in_history(int type, const char *str, int move_to_front, int sep)
     return false;
   }
 
-  list_T *const list = history[type][i].additional_elements;
+  AdditionalData *ad = history[type][i].additional_data;
   char *const save_hisstr = history[type][i].hisstr;
   while (i != hisidx[type]) {
     if (++i >= hislen) {
@@ -246,11 +246,11 @@ static int in_history(int type, const char *str, int move_to_front, int sep)
     history[type][last_i] = history[type][i];
     last_i = i;
   }
-  tv_list_unref(list);
+  xfree(ad);
   history[type][i].hisnum = ++hisnum[type];
   history[type][i].hisstr = save_hisstr;
   history[type][i].timestamp = os_time();
-  history[type][i].additional_elements = NULL;
+  history[type][i].additional_data = NULL;
   return true;
 }
 
@@ -295,7 +295,7 @@ static int last_maptick = -1;           // last seen maptick
 /// @param histype  may be one of the HIST_ values.
 /// @param in_map   consider maptick when inside a mapping
 /// @param sep      separator character used (search hist)
-void add_to_history(int histype, const char *new_entry, int in_map, int sep)
+void add_to_history(int histype, const char *new_entry, size_t new_entrylen, bool in_map, int sep)
 {
   histentry_T *hisptr;
 
@@ -335,11 +335,10 @@ void add_to_history(int histype, const char *new_entry, int in_map, int sep)
   hist_free_entry(hisptr);
 
   // Store the separator after the NUL of the string.
-  size_t len = strlen(new_entry);
-  hisptr->hisstr = xstrnsave(new_entry, len + 2);
+  hisptr->hisstr = xstrnsave(new_entry, new_entrylen + 2);
   hisptr->timestamp = os_time();
-  hisptr->additional_elements = NULL;
-  hisptr->hisstr[len + 1] = (char)sep;
+  hisptr->additional_data = NULL;
+  hisptr->hisstr[new_entrylen + 1] = (char)sep;
 
   hisptr->hisnum = ++hisnum[histype];
   if (histype == HIST_SEARCH && in_map) {
@@ -376,7 +375,7 @@ static int calc_hist_idx(int histype, int num)
 
   histentry_T *hist = history[histype];
   if (num > 0) {
-    int wrapped = false;
+    bool wrapped = false;
     while (hist[i].hisnum > num) {
       if (--i < 0) {
         if (wrapped) {
@@ -454,13 +453,14 @@ static int del_history_entry(int histype, char *str)
   regmatch.rm_ic = false;       // always match case
 
   bool found = false;
-  int i = idx, last = idx;
+  int i = idx;
+  int last = idx;
   do {
     histentry_T *hisptr = &history[histype][i];
     if (hisptr->hisstr == NULL) {
       break;
     }
-    if (vim_regexec(&regmatch, hisptr->hisstr, (colnr_T)0)) {
+    if (vim_regexec(&regmatch, hisptr->hisstr, 0)) {
       found = true;
       hist_free_entry(hisptr);
     } else {
@@ -519,14 +519,12 @@ static int del_history_idx(int histype, int idx)
 /// "histadd()" function
 void f_histadd(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  HistoryType histype;
-
   rettv->vval.v_number = false;
   if (check_secure()) {
     return;
   }
   const char *str = tv_get_string_chk(&argvars[0]);  // NULL on type error
-  histype = str != NULL ? get_histtype(str, strlen(str), false) : HIST_INVALID;
+  HistoryType histype = str != NULL ? get_histtype(str, strlen(str), false) : HIST_INVALID;
   if (histype == HIST_INVALID) {
     return;
   }
@@ -538,7 +536,7 @@ void f_histadd(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   init_history();
-  add_to_history(histype, str, false, NUL);
+  add_to_history(histype, str, strlen(str), false, NUL);
   rettv->vval.v_number = true;
 }
 
@@ -590,8 +588,8 @@ void f_histnr(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   const char *const histname = tv_get_string_chk(&argvars[0]);
   HistoryType i = histname == NULL
-    ? HIST_INVALID
-    : get_histtype(histname, strlen(histname), false);
+                  ? HIST_INVALID
+                  : get_histtype(histname, strlen(histname), false);
   if (i != HIST_INVALID) {
     i = get_history_idx(i);
   }
@@ -605,12 +603,11 @@ void ex_history(exarg_T *eap)
   int histype2 = HIST_CMD;
   int hisidx1 = 1;
   int hisidx2 = -1;
-  int i;
   char *end;
   char *arg = eap->arg;
 
   if (hislen == 0) {
-    msg(_("'history' option is zero"));
+    msg(_("'history' option is zero"), 0);
     return;
   }
 
@@ -636,7 +633,11 @@ void ex_history(exarg_T *eap)
     end = arg;
   }
   if (!get_list_range(&end, &hisidx1, &hisidx2) || *end != NUL) {
-    semsg(_(e_trailing_arg), end);
+    if (*end != NUL) {
+      semsg(_(e_trailing_arg), end);
+    } else {
+      semsg(_(e_val_too_large), arg);
+    }
     return;
   }
 
@@ -657,12 +658,13 @@ void ex_history(exarg_T *eap)
       k = (-k > hislen) ? 0 : hist[(hislen + k + idx + 1) % hislen].hisnum;
     }
     if (idx >= 0 && j <= k) {
-      for (i = idx + 1; !got_int; i++) {
+      for (int i = idx + 1; !got_int; i++) {
         if (i == hislen) {
           i = 0;
         }
         if (hist[i].hisstr != NULL
-            && hist[i].hisnum >= j && hist[i].hisnum <= k) {
+            && hist[i].hisnum >= j && hist[i].hisnum <= k
+            && !message_filtered(hist[i].hisstr)) {
           msg_putchar('\n');
           snprintf(IObuff, IOSIZE, "%c%6d  ", i == idx ? '>' : ' ',
                    hist[i].hisnum);
@@ -672,7 +674,7 @@ void ex_history(exarg_T *eap)
           } else {
             xstrlcat(IObuff, hist[i].hisstr, IOSIZE);
           }
-          msg_outtrans(IObuff);
+          msg_outtrans(IObuff, 0);
         }
         if (i == idx) {
           break;

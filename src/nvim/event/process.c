@@ -1,25 +1,23 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <stdlib.h>
 #include <uv.h>
 
 #include "klib/klist.h"
 #include "nvim/event/libuv_process.h"
 #include "nvim/event/loop.h"
+#include "nvim/event/multiqueue.h"
 #include "nvim/event/process.h"
+#include "nvim/event/rstream.h"
+#include "nvim/event/stream.h"
+#include "nvim/event/wstream.h"
 #include "nvim/globals.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/os/process.h"
 #include "nvim/os/pty_process.h"
 #include "nvim/os/shell.h"
 #include "nvim/os/time.h"
-#include "nvim/rbuffer.h"
 #include "nvim/ui_client.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -54,15 +52,15 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   }
 
   if (out) {
-    uv_pipe_init(&proc->loop->uv, &proc->out.uv.pipe, 0);
+    uv_pipe_init(&proc->loop->uv, &proc->out.s.uv.pipe, 0);
   } else {
-    proc->out.closed = true;
+    proc->out.s.closed = true;
   }
 
   if (err) {
-    uv_pipe_init(&proc->loop->uv, &proc->err.uv.pipe, 0);
+    uv_pipe_init(&proc->loop->uv, &proc->err.s.uv.pipe, 0);
   } else {
-    proc->err.closed = true;
+    proc->err.s.closed = true;
   }
 
 #ifdef USE_GCOV
@@ -78,8 +76,6 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   case kProcessTypePty:
     status = pty_process_spawn((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 
   if (status) {
@@ -87,10 +83,10 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
       uv_close((uv_handle_t *)&proc->in.uv.pipe, NULL);
     }
     if (out) {
-      uv_close((uv_handle_t *)&proc->out.uv.pipe, NULL);
+      uv_close((uv_handle_t *)&proc->out.s.uv.pipe, NULL);
     }
     if (err) {
-      uv_close((uv_handle_t *)&proc->err.uv.pipe, NULL);
+      uv_close((uv_handle_t *)&proc->err.s.uv.pipe, NULL);
     }
 
     if (proc->type == kProcessTypeUv) {
@@ -104,26 +100,23 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   }
 
   if (in) {
-    stream_init(NULL, &proc->in, -1,
-                STRUCT_CAST(uv_stream_t, &proc->in.uv.pipe));
+    stream_init(NULL, &proc->in, -1, (uv_stream_t *)&proc->in.uv.pipe);
     proc->in.internal_data = proc;
     proc->in.internal_close_cb = on_process_stream_close;
     proc->refcount++;
   }
 
   if (out) {
-    stream_init(NULL, &proc->out, -1,
-                STRUCT_CAST(uv_stream_t, &proc->out.uv.pipe));
-    proc->out.internal_data = proc;
-    proc->out.internal_close_cb = on_process_stream_close;
+    stream_init(NULL, &proc->out.s, -1, (uv_stream_t *)&proc->out.s.uv.pipe);
+    proc->out.s.internal_data = proc;
+    proc->out.s.internal_close_cb = on_process_stream_close;
     proc->refcount++;
   }
 
   if (err) {
-    stream_init(NULL, &proc->err, -1,
-                STRUCT_CAST(uv_stream_t, &proc->err.uv.pipe));
-    proc->err.internal_data = proc;
-    proc->err.internal_close_cb = on_process_stream_close;
+    stream_init(NULL, &proc->err.s, -1, (uv_stream_t *)&proc->err.s.uv.pipe);
+    proc->err.s.internal_data = proc;
+    proc->err.s.internal_close_cb = on_process_stream_close;
     proc->refcount++;
   }
 
@@ -142,7 +135,7 @@ void process_teardown(Loop *loop) FUNC_ATTR_NONNULL_ALL
     Process *proc = (*current)->data;
     if (proc->detach || proc->type == kProcessTypePty) {
       // Close handles to process without killing it.
-      CREATE_EVENT(loop->events, process_close_handles, 1, proc);
+      CREATE_EVENT(loop->events, process_close_handles, proc);
     } else {
       process_stop(proc);
     }
@@ -156,9 +149,9 @@ void process_teardown(Loop *loop) FUNC_ATTR_NONNULL_ALL
 
 void process_close_streams(Process *proc) FUNC_ATTR_NONNULL_ALL
 {
-  stream_may_close(&proc->in);
-  stream_may_close(&proc->out);
-  stream_may_close(&proc->err);
+  wstream_may_close(&proc->in);
+  rstream_may_close(&proc->out);
+  rstream_may_close(&proc->err);
 }
 
 /// Synchronously wait for a process to finish
@@ -239,8 +232,6 @@ void process_stop(Process *proc) FUNC_ATTR_NONNULL_ALL
     process_close_streams(proc);
     pty_process_close_master((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 
   // (Re)start timer to verify that stopped process(es) died.
@@ -312,7 +303,7 @@ static void decref(Process *proc)
   }
   assert(node);
   kl_shift_at(WatcherPtr, loop->children, node);
-  CREATE_EVENT(proc->events, process_close_event, 1, proc);
+  CREATE_EVENT(proc->events, process_close_event, proc);
 }
 
 static void process_close(Process *proc)
@@ -340,8 +331,6 @@ static void process_close(Process *proc)
   case kProcessTypePty:
     pty_process_close((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 }
 
@@ -349,10 +338,10 @@ static void process_close(Process *proc)
 ///
 /// @param proc     Process, for which an output stream should be flushed.
 /// @param stream   Stream to flush.
-static void flush_stream(Process *proc, Stream *stream)
+static void flush_stream(Process *proc, RStream *stream)
   FUNC_ATTR_NONNULL_ARG(1)
 {
-  if (!stream || stream->closed) {
+  if (!stream || stream->s.closed) {
     return;
   }
 
@@ -362,31 +351,31 @@ static void flush_stream(Process *proc, Stream *stream)
   // keeps sending data, we only accept as much data as the system buffer size.
   // Otherwise this would block cleanup/teardown.
   int system_buffer_size = 0;
-  int err = uv_recv_buffer_size((uv_handle_t *)&stream->uv.pipe,
+  int err = uv_recv_buffer_size((uv_handle_t *)&stream->s.uv.pipe,
                                 &system_buffer_size);
   if (err) {
-    system_buffer_size = (int)rbuffer_capacity(stream->buffer);
+    system_buffer_size = ARENA_BLOCK_SIZE;
   }
 
   size_t max_bytes = stream->num_bytes + (size_t)system_buffer_size;
 
   // Read remaining data.
-  while (!stream->closed && stream->num_bytes < max_bytes) {
+  while (!stream->s.closed && stream->num_bytes < max_bytes) {
     // Remember number of bytes before polling
     size_t num_bytes = stream->num_bytes;
 
     // Poll for data and process the generated events.
     loop_poll_events(proc->loop, 0);
-    if (stream->events) {
-      multiqueue_process_events(stream->events);
+    if (stream->s.events) {
+      multiqueue_process_events(stream->s.events);
     }
 
     // Stream can be closed if it is empty.
-    if (num_bytes == stream->num_bytes) {  // -V547
+    if (num_bytes == stream->num_bytes) {
       if (stream->read_cb && !stream->did_eof) {
         // Stream callback could miss EOF handling if a child keeps the stream
         // open. But only send EOF if we haven't already.
-        stream->read_cb(stream, stream->buffer, 0, stream->cb_data, true);
+        stream->read_cb(stream, stream->buffer, 0, stream->s.cb_data, true);
       }
       break;
     }
@@ -409,7 +398,7 @@ static void process_close_handles(void **argv)
 static void exit_delay_cb(uv_timer_t *handle)
 {
   uv_timer_stop(&main_loop.exit_delay_timer);
-  multiqueue_put(main_loop.fast_events, exit_event, 1, main_loop.exit_delay_timer.data);
+  multiqueue_put(main_loop.fast_events, exit_event, main_loop.exit_delay_timer.data);
 }
 
 static void exit_event(void **argv)
@@ -423,6 +412,7 @@ static void exit_event(void **argv)
 
   if (!exiting) {
     if (ui_client_channel_id) {
+      ui_client_exit_status = status;
       os_exit(status);
     } else {
       assert(status == 0);  // Called from rpc_close(), which passes 0 as status.
@@ -433,7 +423,7 @@ static void exit_event(void **argv)
 
 void exit_from_channel(int status)
 {
-  multiqueue_put(main_loop.fast_events, exit_event, 1, status);
+  multiqueue_put(main_loop.fast_events, exit_event, (void *)(intptr_t)status);
 }
 
 static void on_process_exit(Process *proc)
@@ -451,7 +441,7 @@ static void on_process_exit(Process *proc)
   // more data directly. Instead delay the reading after the libuv loop by
   // queueing process_close_handles() as an event.
   MultiQueue *queue = proc->events ? proc->events : loop->events;
-  CREATE_EVENT(queue, process_close_handles, 1, proc);
+  CREATE_EVENT(queue, process_close_handles, proc);
 }
 
 static void on_process_stream_close(Stream *stream, void *data)

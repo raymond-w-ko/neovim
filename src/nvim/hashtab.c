@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file hashtab.c
 ///
 /// Handling of a hashtable with Vim-specific properties.
@@ -26,12 +23,12 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/hashtab.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 
 // Magic value for algorithm that walks through the array.
 #define PERTURB_SHIFT 5
@@ -124,7 +121,7 @@ hashitem_T *hash_lookup(const hashtab_T *const ht, const char *const key, const 
 {
 #ifdef HT_DEBUG
   hash_count_lookup++;
-#endif  // ifdef HT_DEBUG
+#endif
 
   // Quickly handle the most common situations:
   // - return if there is no item at all
@@ -157,7 +154,7 @@ hashitem_T *hash_lookup(const hashtab_T *const ht, const char *const key, const 
 #ifdef HT_DEBUG
     // count a "miss" for hashtab lookup
     hash_count_perturb++;
-#endif  // ifdef HT_DEBUG
+#endif
     idx = 5 * idx + perturb + 1;
     hi = &ht->ht_array[idx & ht->ht_mask];
 
@@ -192,7 +189,7 @@ void hash_debug_results(void)
           (int64_t)hash_count_perturb);
   fprintf(stderr, "Percentage of perturb loops: %" PRId64 "%%\r\n",
           (int64_t)(hash_count_perturb * 100 / hash_count_lookup));
-#endif  // ifdef HT_DEBUG
+#endif
 }
 
 /// Add (empty) item for key `key` to hashtable `ht`.
@@ -290,7 +287,7 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
   if (ht->ht_filled >= ht->ht_mask + 1) {
     emsg("hash_may_resize(): table completely filled");
   }
-#endif  // ifdef HT_DEBUG
+#endif
 
   size_t minsize;
   const size_t oldsize = ht->ht_mask + 1;
@@ -319,10 +316,7 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
     }
   } else {
     // Use specified size.
-    if (minitems < ht->ht_used) {
-      // just in case...
-      minitems = ht->ht_used;
-    }
+    minitems = MAX(minitems, ht->ht_used);
     // array is up to 2/3 full
     minsize = minitems * 3 / 2;
   }
@@ -350,15 +344,15 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
   // so that copying is possible.
   hashitem_T temparray[HT_INIT_SIZE];
   hashitem_T *oldarray = keep_smallarray
-    ? memcpy(temparray, ht->ht_smallarray, sizeof(temparray))
-    : ht->ht_array;
+                         ? memcpy(temparray, ht->ht_smallarray, sizeof(temparray))
+                         : ht->ht_array;
 
   if (newarray_is_small) {
     CLEAR_FIELD(ht->ht_smallarray);
   }
   hashitem_T *newarray = newarray_is_small
-    ? ht->ht_smallarray
-    : xcalloc(newsize, sizeof(hashitem_T));
+                         ? ht->ht_smallarray
+                         : xcalloc(newsize, sizeof(hashitem_T));
 
   // Move all the items from the old array to the new one, placing them in
   // the right spot. The new array won't have any removed items, thus this
@@ -411,7 +405,7 @@ hash_T hash_hash(const char *key)
   hash_T hash = (uint8_t)(*key);
 
   if (hash == 0) {
-    return (hash_T)0;
+    return 0;
   }
 
   // A simplistic algorithm that appears to do very well.

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // Built-in fallback terminfo entries.
 
 #include <stdbool.h>
@@ -10,7 +7,7 @@
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/charset.h"
 #include "nvim/memory.h"
 #include "nvim/strings.h"
@@ -38,7 +35,7 @@ bool terminfo_is_term_family(const char *term, const char *family)
          // The screen terminfo may have a terminal name like screen.xterm. By making
          // the dot(.) a valid separator, such terminal names will also be the
          // terminal family of the screen.
-         && ('\0' == term[flen] || '-' == term[flen] || '.' == term[flen]);
+         && (NUL == term[flen] || '-' == term[flen] || '.' == term[flen]);
 }
 
 bool terminfo_is_bsd_console(const char *term)

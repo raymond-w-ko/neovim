@@ -1,17 +1,14 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <uv.h>
 #include <uv/version.h>
 
+#include "nvim/event/defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/stream.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
-#include "nvim/rbuffer.h"
+#include "nvim/types_defs.h"
 #ifdef MSWIN
 # include "nvim/os/os_win_console.h"
 #endif
@@ -37,9 +34,8 @@ int stream_set_blocking(int fd, bool blocking)
   uv_loop_init(&loop);
   uv_pipe_init(&loop, &stream, 0);
   uv_pipe_open(&stream, fd);
-  int retval = uv_stream_set_blocking(STRUCT_CAST(uv_stream_t, &stream),
-                                      blocking);
-  uv_close(STRUCT_CAST(uv_handle_t, &stream), NULL);
+  int retval = uv_stream_set_blocking((uv_stream_t *)&stream, blocking);
+  uv_close((uv_handle_t *)&stream, NULL);
   uv_run(&loop, UV_RUN_NOWAIT);  // not necessary, but couldn't hurt.
   uv_loop_close(&loop);
   return retval;
@@ -71,12 +67,12 @@ void stream_init(Loop *loop, Stream *stream, int fd, uv_stream_t *uvstream)
           dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
           SetConsoleMode(stream->uv.tty.handle, dwMode);
         }
-        stream->uvstream = STRUCT_CAST(uv_stream_t, &stream->uv.tty);
+        stream->uvstream = (uv_stream_t *)&stream->uv.tty;
       } else {
 #endif
       uv_pipe_init(&loop->uv, &stream->uv.pipe, 0);
       uv_pipe_open(&stream->uv.pipe, fd);
-      stream->uvstream = STRUCT_CAST(uv_stream_t, &stream->uv.pipe);
+      stream->uvstream = (uv_stream_t *)&stream->uv.pipe;
 #ifdef MSWIN
     }
 #endif
@@ -88,21 +84,17 @@ void stream_init(Loop *loop, Stream *stream, int fd, uv_stream_t *uvstream)
   }
 
   stream->internal_data = NULL;
-  stream->fpos = 0;
   stream->curmem = 0;
   stream->maxmem = 0;
   stream->pending_reqs = 0;
-  stream->read_cb = NULL;
   stream->write_cb = NULL;
   stream->close_cb = NULL;
   stream->internal_close_cb = NULL;
   stream->closed = false;
-  stream->buffer = NULL;
   stream->events = NULL;
-  stream->num_bytes = 0;
 }
 
-void stream_close(Stream *stream, stream_close_cb on_stream_close, void *data)
+void stream_close(Stream *stream, stream_close_cb on_stream_close, void *data, bool rstream)
   FUNC_ATTR_NONNULL_ARG(1)
 {
   assert(!stream->closed);
@@ -119,38 +111,51 @@ void stream_close(Stream *stream, stream_close_cb on_stream_close, void *data)
 #endif
 
   if (!stream->pending_reqs) {
-    stream_close_handle(stream);
+    stream_close_handle(stream, rstream);
   }
 }
 
-void stream_may_close(Stream *stream)
+void stream_may_close(Stream *stream, bool rstream)
 {
   if (!stream->closed) {
-    stream_close(stream, NULL, NULL);
+    stream_close(stream, NULL, NULL, rstream);
   }
 }
 
-void stream_close_handle(Stream *stream)
+void stream_close_handle(Stream *stream, bool rstream)
   FUNC_ATTR_NONNULL_ALL
 {
+  uv_handle_t *handle = NULL;
   if (stream->uvstream) {
     if (uv_stream_get_write_queue_size(stream->uvstream) > 0) {
       WLOG("closed Stream (%p) with %zu unwritten bytes",
            (void *)stream,
            uv_stream_get_write_queue_size(stream->uvstream));
     }
-    uv_close((uv_handle_t *)stream->uvstream, close_cb);
+    handle = (uv_handle_t *)stream->uvstream;
   } else {
-    uv_close((uv_handle_t *)&stream->uv.idle, close_cb);
+    handle = (uv_handle_t *)&stream->uv.idle;
   }
+
+  assert(handle != NULL);
+
+  if (!uv_is_closing(handle)) {
+    uv_close(handle, rstream ? rstream_close_cb : close_cb);
+  }
+}
+
+static void rstream_close_cb(uv_handle_t *handle)
+{
+  RStream *stream = handle->data;
+  if (stream->buffer) {
+    free_block(stream->buffer);
+  }
+  close_cb(handle);
 }
 
 static void close_cb(uv_handle_t *handle)
 {
   Stream *stream = handle->data;
-  if (stream->buffer) {
-    rbuffer_free(stream->buffer);
-  }
   if (stream->close_cb) {
     stream->close_cb(stream, stream->close_cb_data);
   }

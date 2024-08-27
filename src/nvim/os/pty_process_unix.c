@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // Some of the code came from pangoterm and libuv
 
 #include <assert.h>
@@ -35,14 +32,15 @@
 #include "auto/config.h"
 #include "klib/klist.h"
 #include "nvim/eval/typval.h"
+#include "nvim/event/defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/process.h"
-#include "nvim/event/stream.h"
 #include "nvim/log.h"
-#include "nvim/os/os.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/os_defs.h"
 #include "nvim/os/pty_process.h"
 #include "nvim/os/pty_process_unix.h"
+#include "nvim/types_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "os/pty_process_unix.c.generated.h"
@@ -171,7 +169,7 @@ int pty_process_spawn(PtyProcess *ptyproc)
 
   int status = 0;  // zero or negative error code (libuv convention)
   Process *proc = (Process *)ptyproc;
-  assert(proc->err.closed);
+  assert(proc->err.s.closed);
   uv_signal_start(&proc->loop->children_watcher, chld_handler, SIGCHLD);
   ptyproc->winsize = (struct winsize){ ptyproc->height, ptyproc->width, 0, 0 };
   uv_disable_stdio_inheritance();
@@ -210,8 +208,8 @@ int pty_process_spawn(PtyProcess *ptyproc)
       && (status = set_duplicating_descriptor(master, &proc->in.uv.pipe))) {
     goto error;
   }
-  if (!proc->out.closed
-      && (status = set_duplicating_descriptor(master, &proc->out.uv.pipe))) {
+  if (!proc->out.s.closed
+      && (status = set_duplicating_descriptor(master, &proc->out.s.uv.pipe))) {
     goto error;
   }
 
@@ -335,21 +333,21 @@ static void init_termios(struct termios *termios) FUNC_ATTR_NONNULL_ALL
   termios->c_lflag |= ECHOKE;
 #endif
 
-  termios->c_cc[VINTR]    = 0x1f & 'C';
-  termios->c_cc[VQUIT]    = 0x1f & '\\';
-  termios->c_cc[VERASE]   = 0x7f;
-  termios->c_cc[VKILL]    = 0x1f & 'U';
-  termios->c_cc[VEOF]     = 0x1f & 'D';
-  termios->c_cc[VEOL]     = _POSIX_VDISABLE;
-  termios->c_cc[VEOL2]    = _POSIX_VDISABLE;
-  termios->c_cc[VSTART]   = 0x1f & 'Q';
-  termios->c_cc[VSTOP]    = 0x1f & 'S';
-  termios->c_cc[VSUSP]    = 0x1f & 'Z';
+  termios->c_cc[VINTR] = 0x1f & 'C';
+  termios->c_cc[VQUIT] = 0x1f & '\\';
+  termios->c_cc[VERASE] = 0x7f;
+  termios->c_cc[VKILL] = 0x1f & 'U';
+  termios->c_cc[VEOF] = 0x1f & 'D';
+  termios->c_cc[VEOL] = _POSIX_VDISABLE;
+  termios->c_cc[VEOL2] = _POSIX_VDISABLE;
+  termios->c_cc[VSTART] = 0x1f & 'Q';
+  termios->c_cc[VSTOP] = 0x1f & 'S';
+  termios->c_cc[VSUSP] = 0x1f & 'Z';
   termios->c_cc[VREPRINT] = 0x1f & 'R';
-  termios->c_cc[VWERASE]  = 0x1f & 'W';
-  termios->c_cc[VLNEXT]   = 0x1f & 'V';
-  termios->c_cc[VMIN]     = 1;
-  termios->c_cc[VTIME]    = 0;
+  termios->c_cc[VWERASE] = 0x1f & 'W';
+  termios->c_cc[VLNEXT] = 0x1f & 'V';
+  termios->c_cc[VMIN] = 1;
+  termios->c_cc[VTIME] = 0;
 }
 
 static int set_duplicating_descriptor(int fd, uv_pipe_t *pipe)
@@ -406,4 +404,14 @@ static void chld_handler(uv_signal_t *handle, int signum)
     }
     proc->internal_exit_cb(proc);
   }
+}
+
+PtyProcess pty_process_init(Loop *loop, void *data)
+{
+  PtyProcess rv;
+  rv.process = process_init(loop, kProcessTypePty, data);
+  rv.width = 80;
+  rv.height = 24;
+  rv.tty_fd = -1;
+  return rv;
 }

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -51,6 +48,10 @@ int main(int argc, char **argv)
   if (argc == 2 && strcmp(argv[1], "--help") == 0) {
     help();
   }
+
+#ifdef _MSC_VER
+  SetConsoleOutputCP(CP_UTF8);
+#endif
 
   if (argc >= 2) {
     if (strcmp(argv[1], "-t") == 0) {

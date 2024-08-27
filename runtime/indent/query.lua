@@ -1,6 +1,6 @@
 -- Neovim indent file
--- Language:	Tree-sitter query
--- Last Change:	2022 Mar 29
+-- Language:	Treesitter query
+-- Last Change:	2024 Jul 03
 
 -- it's a lisp!
-vim.cmd([[ runtime! indent/lisp.vim ]])
+vim.cmd([[runtime! indent/lisp.vim]])

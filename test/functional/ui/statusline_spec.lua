@@ -1,18 +1,21 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local assert_alive = helpers.assert_alive
-local clear = helpers.clear
-local command = helpers.command
-local feed = helpers.feed
-local eq = helpers.eq
-local funcs = helpers.funcs
-local meths = helpers.meths
-local exec = helpers.exec
-local exec_lua = helpers.exec_lua
-local eval = helpers.eval
-local sleep = helpers.sleep
 
-local mousemodels = { "extend", "popup", "popup_setpos" }
+local assert_alive = n.assert_alive
+local clear = n.clear
+local command = n.command
+local feed = n.feed
+local eq = t.eq
+local fn = n.fn
+local api = n.api
+local exec = n.exec
+local exec_lua = n.exec_lua
+local eval = n.eval
+local sleep = vim.uv.sleep
+local pcall_err = t.pcall_err
+
+local mousemodels = { 'extend', 'popup', 'popup_setpos' }
 
 for _, model in ipairs(mousemodels) do
   describe('statusline clicks with mousemodel=' .. model, function()
@@ -22,8 +25,8 @@ for _, model in ipairs(mousemodels) do
       clear()
       screen = Screen.new(40, 8)
       screen:set_default_attr_ids({
-        [0] = {bold = true, foreground = Screen.colors.Blue};  -- NonText
-        [1] = {bold = true, reverse = true};  -- StatusLine
+        [0] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+        [1] = { bold = true, reverse = true }, -- StatusLine
       })
       screen:attach()
       command('set laststatus=2 mousemodel=' .. model)
@@ -39,80 +42,84 @@ for _, model in ipairs(mousemodels) do
     end)
 
     it('works', function()
-      meths.set_option_value('statusline',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
-      meths.input_mouse('left', 'press', '', 0, 6, 16)
-      eq('', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 29)
-      eq('', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 2 l', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 3 l', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 4 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 28)
-      eq('0 1 r', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 28)
-      eq('0 2 r', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 28)
-      eq('0 3 r', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 28)
-      eq('0 4 r', eval("g:testvar"))
+      api.nvim_set_option_value('statusline', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 16)
+      eq('', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 29)
+      eq('', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 2 l', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 3 l', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 4 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 28)
+      eq('0 1 r', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 28)
+      eq('0 2 r', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 28)
+      eq('0 3 r', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 28)
+      eq('0 4 r', eval('g:testvar'))
     end)
 
     it('works with control characters and highlight', function()
-      meths.set_option_value('statusline',  '\t%#NonText#\1%0@MyClickFunc@\t\1%T\t%##\1', {})
-      screen:expect{grid=[[
+      api.nvim_set_option_value('statusline', '\t%#NonText#\1%0@MyClickFunc@\t\1%T\t%##\1', {})
+      screen:expect {
+        grid = [[
         ^                                        |
-        {0:~                                       }|
-        {0:~                                       }|
-        {0:~                                       }|
-        {0:~                                       }|
-        {0:~                                       }|
+        {0:~                                       }|*5
         {1:^I}{0:^A^I^A^I}{1:^A                            }|
                                                 |
-      ]]}
-      meths.input_mouse('right', 'press', '', 0, 6, 3)
-      eq('', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 8)
-      eq('', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 4)
-      eq('0 1 r', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 7)
-      eq('0 1 l', eval("g:testvar"))
+      ]],
+      }
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 3)
+      eq('', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 8)
+      eq('', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 4)
+      eq('0 1 r', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 7)
+      eq('0 1 l', eval('g:testvar'))
     end)
 
     it('works for winbar', function()
-      meths.set_option_value('winbar',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
-      meths.input_mouse('left', 'press', '', 0, 0, 17)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 0, 17)
-      eq('0 1 r', eval("g:testvar"))
+      api.nvim_set_option_value('winbar', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_input_mouse('left', 'press', '', 0, 0, 17)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 0, 17)
+      eq('0 1 r', eval('g:testvar'))
     end)
 
     it('works for winbar in floating window', function()
-      meths.open_win(0, true, { width=30, height=4, relative='editor', row=1, col=5,
-      border = "single" })
-      meths.set_option_value('winbar', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T',
-      { scope = 'local' })
-      meths.input_mouse('left', 'press', '', 0, 2, 23)
-      eq('0 1 l', eval("g:testvar"))
+      api.nvim_open_win(
+        0,
+        true,
+        { width = 30, height = 4, relative = 'editor', row = 1, col = 5, border = 'single' }
+      )
+      api.nvim_set_option_value(
+        'winbar',
+        'Not clicky stuff %0@MyClickFunc@Clicky stuff%T',
+        { scope = 'local' }
+      )
+      api.nvim_input_mouse('left', 'press', '', 0, 2, 23)
+      eq('0 1 l', eval('g:testvar'))
     end)
 
     it('works when there are multiple windows', function()
       command('split')
-      meths.set_option_value('statusline',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
-      meths.set_option_value('winbar',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
-      meths.input_mouse('left', 'press', '', 0, 0, 17)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 4, 17)
-      eq('0 1 r', eval("g:testvar"))
-      meths.input_mouse('middle', 'press', '', 0, 3, 17)
-      eq('0 1 m', eval("g:testvar"))
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 1 l', eval("g:testvar"))
+      api.nvim_set_option_value('statusline', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_set_option_value('winbar', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_input_mouse('left', 'press', '', 0, 0, 17)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 4, 17)
+      eq('0 1 r', eval('g:testvar'))
+      api.nvim_input_mouse('middle', 'press', '', 0, 3, 17)
+      eq('0 1 m', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 1 l', eval('g:testvar'))
     end)
 
     it('works with Lua function', function()
@@ -121,101 +128,107 @@ for _, model in ipairs(mousemodels) do
         vim.g.testvar = string.format("%d %d %s", minwid, clicks, button)
       end
       ]])
-      meths.set_option_value('statusline',  'Not clicky stuff %0@v:lua.clicky_func@Clicky stuff%T', {})
-      meths.input_mouse('left', 'press', '', 0, 6, 17)
-      eq('0 1 l', eval("g:testvar"))
+      api.nvim_set_option_value(
+        'statusline',
+        'Not clicky stuff %0@v:lua.clicky_func@Clicky stuff%T',
+        {}
+      )
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 17)
+      eq('0 1 l', eval('g:testvar'))
     end)
 
     it('ignores unsupported click items', function()
       command('tabnew | tabprevious')
-      meths.set_option_value('statusline',  '%2TNot clicky stuff%T', {})
-      meths.input_mouse('left', 'press', '', 0, 6, 0)
-      eq(1, meths.get_current_tabpage().id)
-      meths.set_option_value('statusline',  '%2XNot clicky stuff%X', {})
-      meths.input_mouse('left', 'press', '', 0, 6, 0)
-      eq(2, #meths.list_tabpages())
+      api.nvim_set_option_value('statusline', '%2TNot clicky stuff%T', {})
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 0)
+      eq(1, api.nvim_get_current_tabpage())
+      api.nvim_set_option_value('statusline', '%2XNot clicky stuff%X', {})
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 0)
+      eq(2, #api.nvim_list_tabpages())
     end)
 
     it("right click works when statusline isn't focused #18994", function()
-      meths.set_option_value('statusline',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
-      meths.input_mouse('right', 'press', '', 0, 6, 17)
-      eq('0 1 r', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 17)
-      eq('0 2 r', eval("g:testvar"))
+      api.nvim_set_option_value('statusline', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 17)
+      eq('0 1 r', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 17)
+      eq('0 2 r', eval('g:testvar'))
     end)
 
-    it("works with modifiers #18994", function()
-      meths.set_option_value('statusline',  'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
+    it('works with modifiers #18994', function()
+      api.nvim_set_option_value('statusline', 'Not clicky stuff %0@MyClickFunc@Clicky stuff%T', {})
       -- Note: alternate between left and right mouse buttons to avoid triggering multiclicks
-      meths.input_mouse('left', 'press', 'S', 0, 6, 17)
-      eq('0 1 l(s   )', eval("g:testvar"))
-      meths.input_mouse('right', 'press', 'S', 0, 6, 17)
-      eq('0 1 r(s   )', eval("g:testvar"))
-      meths.input_mouse('left', 'press', 'A', 0, 6, 17)
-      eq('0 1 l(  a )', eval("g:testvar"))
-      meths.input_mouse('right', 'press', 'A', 0, 6, 17)
-      eq('0 1 r(  a )', eval("g:testvar"))
-      meths.input_mouse('left', 'press', 'AS', 0, 6, 17)
-      eq('0 1 l(s a )', eval("g:testvar"))
-      meths.input_mouse('right', 'press', 'AS', 0, 6, 17)
-      eq('0 1 r(s a )', eval("g:testvar"))
-      meths.input_mouse('left', 'press', 'T', 0, 6, 17)
-      eq('0 1 l(   m)', eval("g:testvar"))
-      meths.input_mouse('right', 'press', 'T', 0, 6, 17)
-      eq('0 1 r(   m)', eval("g:testvar"))
-      meths.input_mouse('left', 'press', 'TS', 0, 6, 17)
-      eq('0 1 l(s  m)', eval("g:testvar"))
-      meths.input_mouse('right', 'press', 'TS', 0, 6, 17)
-      eq('0 1 r(s  m)', eval("g:testvar"))
-      meths.input_mouse('left', 'press', 'C', 0, 6, 17)
-      eq('0 1 l( c  )', eval("g:testvar"))
+      api.nvim_input_mouse('left', 'press', 'S', 0, 6, 17)
+      eq('0 1 l(s   )', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', 'S', 0, 6, 17)
+      eq('0 1 r(s   )', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', 'A', 0, 6, 17)
+      eq('0 1 l(  a )', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', 'A', 0, 6, 17)
+      eq('0 1 r(  a )', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', 'AS', 0, 6, 17)
+      eq('0 1 l(s a )', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', 'AS', 0, 6, 17)
+      eq('0 1 r(s a )', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', 'T', 0, 6, 17)
+      eq('0 1 l(   m)', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', 'T', 0, 6, 17)
+      eq('0 1 r(   m)', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', 'TS', 0, 6, 17)
+      eq('0 1 l(s  m)', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', 'TS', 0, 6, 17)
+      eq('0 1 r(s  m)', eval('g:testvar'))
+      api.nvim_input_mouse('left', 'press', 'C', 0, 6, 17)
+      eq('0 1 l( c  )', eval('g:testvar'))
       -- <C-RightMouse> is for tag jump
     end)
 
-    it("works for global statusline with vertical splits #19186", function()
+    it('works for global statusline with vertical splits #19186', function()
       command('set laststatus=3')
-      meths.set_option_value('statusline',  '%0@MyClickFunc@Clicky stuff%T %= %0@MyClickFunc@Clicky stuff%T', {})
+      api.nvim_set_option_value(
+        'statusline',
+        '%0@MyClickFunc@Clicky stuff%T %= %0@MyClickFunc@Clicky stuff%T',
+        {}
+      )
       command('vsplit')
-      screen:expect{grid=[[
+      screen:expect {
+        grid = [[
         ^                    │                   |
-        {0:~                   }│{0:~                  }|
-        {0:~                   }│{0:~                  }|
-        {0:~                   }│{0:~                  }|
-        {0:~                   }│{0:~                  }|
-        {0:~                   }│{0:~                  }|
+        {0:~                   }│{0:~                  }|*5
         {1:Clicky stuff                Clicky stuff}|
                                                 |
-      ]]}
+      ]],
+      }
 
       -- clickable area on the right
-      meths.input_mouse('left', 'press', '', 0, 6, 35)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 35)
-      eq('0 1 r', eval("g:testvar"))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 35)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 35)
+      eq('0 1 r', eval('g:testvar'))
 
       -- clickable area on the left
-      meths.input_mouse('left', 'press', '', 0, 6, 5)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 5)
-      eq('0 1 r', eval("g:testvar"))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 5)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 5)
+      eq('0 1 r', eval('g:testvar'))
     end)
 
     it('no memory leak with zero-width click labels', function()
       command([[
       let &stl = '%@Test@%T%@MyClickFunc@%=%T%@Test@'
       ]])
-      meths.input_mouse('left', 'press', '', 0, 6, 0)
-      eq('0 1 l', eval("g:testvar"))
-      meths.input_mouse('right', 'press', '', 0, 6, 39)
-      eq('0 1 r', eval("g:testvar"))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 0)
+      eq('0 1 l', eval('g:testvar'))
+      api.nvim_input_mouse('right', 'press', '', 0, 6, 39)
+      eq('0 1 r', eval('g:testvar'))
     end)
 
     it('no memory leak with truncated click labels', function()
       command([[
       let &stl = '%@MyClickFunc@foo%X' .. repeat('a', 40) .. '%<t%@Test@bar%X%@Test@baz'
       ]])
-      meths.input_mouse('left', 'press', '', 0, 6, 2)
-      eq('0 1 l', eval("g:testvar"))
+      api.nvim_input_mouse('left', 'press', '', 0, 6, 2)
+      eq('0 1 l', eval('g:testvar'))
     end)
   end)
 end
@@ -228,11 +241,11 @@ describe('global statusline', function()
     screen = Screen.new(60, 16)
     screen:attach()
     screen:set_default_attr_ids({
-      [1] = {bold = true, foreground = Screen.colors.Blue};
-      [2] = {bold = true, reverse = true};
-      [3] = {bold = true};
-      [4] = {reverse = true};
-      [5] = {bold = true, foreground = Screen.colors.Fuchsia};
+      [1] = { bold = true, foreground = Screen.colors.Blue },
+      [2] = { bold = true, reverse = true },
+      [3] = { bold = true },
+      [4] = { reverse = true },
+      [5] = { bold = true, foreground = Screen.colors.Fuchsia },
     })
     command('set laststatus=3')
     command('set ruler')
@@ -241,39 +254,16 @@ describe('global statusline', function()
   it('works', function()
     screen:expect([[
       ^                                                            |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*13
       {2:[No Name]                                 0,0-1          All}|
                                                                   |
     ]])
 
     feed('i<CR><CR>')
     screen:expect([[
-                                                                  |
-                                                                  |
+                                                                  |*2
       ^                                                            |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*11
       {2:[No Name] [+]                             3,1            All}|
       {3:-- INSERT --}                                                |
     ]])
@@ -283,9 +273,7 @@ describe('global statusline', function()
     command('vsplit | split | vsplit | vsplit | wincmd l | split | 2wincmd l | split')
     screen:expect([[
                           │                │ │^                    |
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
+      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|*3
       {1:~                   }├────────────────┤{1:~}│{1:~                   }|
       {1:~                   }│                │{1:~}│{1:~                   }|
       {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
@@ -293,9 +281,7 @@ describe('global statusline', function()
       {1:~                   }│{1:~               }│{1:~}│                    |
       ────────────────────┴────────────────┴─┤{1:~                   }|
                                              │{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
+      {1:~                                      }│{1:~                   }|*3
       {2:[No Name]                                 0,0-1          All}|
                                                                   |
     ]])
@@ -305,39 +291,14 @@ describe('global statusline', function()
     command('set laststatus=1')
     screen:expect([[
       ^                                                            |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*14
                                                 0,0-1         All |
     ]])
 
     command('set laststatus=3')
     screen:expect([[
       ^                                                            |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*13
       {2:[No Name]                                 0,0-1          All}|
                                                                   |
     ]])
@@ -346,9 +307,7 @@ describe('global statusline', function()
     command('set laststatus=2')
     screen:expect([[
                           │                │ │^                    |
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
+      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|*3
       {1:~                   }│{4:< Name] 0,0-1   }│{1:~}│{1:~                   }|
       {1:~                   }│                │{1:~}│{1:~                   }|
       {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
@@ -356,9 +315,7 @@ describe('global statusline', function()
       {1:~                   }│{1:~               }│{1:~}│                    |
       {4:<No Name] 0,0-1  All < Name] 0,0-1    <}│{1:~                   }|
                                              │{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
+      {1:~                                      }│{1:~                   }|*3
       {4:[No Name]            0,0-1          All <No Name] 0,0-1  All}|
                                                                   |
     ]])
@@ -366,9 +323,7 @@ describe('global statusline', function()
     command('set laststatus=3')
     screen:expect([[
                           │                │ │^                    |
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
+      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|*3
       {1:~                   }├────────────────┤{1:~}│{1:~                   }|
       {1:~                   }│                │{1:~}│{1:~                   }|
       {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
@@ -376,9 +331,7 @@ describe('global statusline', function()
       {1:~                   }│{1:~               }│{1:~}│                    |
       ────────────────────┴────────────────┴─┤{1:~                   }|
                                              │{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
+      {1:~                                      }│{1:~                   }|*3
       {2:[No Name]                                 0,0-1          All}|
                                                                   |
     ]])
@@ -386,9 +339,7 @@ describe('global statusline', function()
     command('set laststatus=0')
     screen:expect([[
                           │                │ │^                    |
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
+      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|*3
       {1:~                   }│{4:< Name] 0,0-1   }│{1:~}│{1:~                   }|
       {1:~                   }│                │{1:~}│{1:~                   }|
       {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
@@ -396,19 +347,14 @@ describe('global statusline', function()
       {1:~                   }│{1:~               }│{1:~}│                    |
       {4:<No Name] 0,0-1  All < Name] 0,0-1    <}│{1:~                   }|
                                              │{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
+      {1:~                                      }│{1:~                   }|*4
                                                 0,0-1         All |
     ]])
 
     command('set laststatus=3')
     screen:expect([[
                           │                │ │^                    |
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
-      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
+      {1:~                   }│{1:~               }│{1:~}│{1:~                   }|*3
       {1:~                   }├────────────────┤{1:~}│{1:~                   }|
       {1:~                   }│                │{1:~}│{1:~                   }|
       {1:~                   }│{1:~               }│{1:~}│{1:~                   }|
@@ -416,55 +362,49 @@ describe('global statusline', function()
       {1:~                   }│{1:~               }│{1:~}│                    |
       ────────────────────┴────────────────┴─┤{1:~                   }|
                                              │{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
-      {1:~                                      }│{1:~                   }|
+      {1:~                                      }│{1:~                   }|*3
       {2:[No Name]                                 0,0-1          All}|
                                                                   |
     ]])
   end)
 
   it('win_move_statusline() can reduce cmdheight to 1', function()
-    eq(1, meths.get_option_value('cmdheight', {}))
-    funcs.win_move_statusline(0, -1)
-    eq(2, meths.get_option_value('cmdheight', {}))
-    funcs.win_move_statusline(0, -1)
-    eq(3, meths.get_option_value('cmdheight', {}))
-    funcs.win_move_statusline(0, 1)
-    eq(2, meths.get_option_value('cmdheight', {}))
-    funcs.win_move_statusline(0, 1)
-    eq(1, meths.get_option_value('cmdheight', {}))
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
+    fn.win_move_statusline(0, -1)
+    eq(2, api.nvim_get_option_value('cmdheight', {}))
+    fn.win_move_statusline(0, -1)
+    eq(3, api.nvim_get_option_value('cmdheight', {}))
+    fn.win_move_statusline(0, 1)
+    eq(2, api.nvim_get_option_value('cmdheight', {}))
+    fn.win_move_statusline(0, 1)
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
   end)
 
   it('mouse dragging can reduce cmdheight to 1', function()
     command('set mouse=a')
-    meths.input_mouse('left', 'press', '', 0, 14, 10)
-    eq(1, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 13, 10)
-    eq(2, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 12, 10)
-    eq(3, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 13, 10)
-    eq(2, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 14, 10)
-    eq(1, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 15, 10)
-    eq(1, meths.get_option_value('cmdheight', {}))
-    meths.input_mouse('left', 'drag', '', 0, 14, 10)
-    eq(1, meths.get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'press', '', 0, 14, 10)
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 13, 10)
+    eq(2, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 12, 10)
+    eq(3, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 13, 10)
+    eq(2, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 14, 10)
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 15, 10)
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
+    api.nvim_input_mouse('left', 'drag', '', 0, 14, 10)
+    eq(1, api.nvim_get_option_value('cmdheight', {}))
   end)
 
   it('cmdline row is correct after setting cmdheight #20514', function()
     command('botright split test/functional/fixtures/bigfile.txt')
-    meths.set_option_value('cmdheight', 1, {})
+    api.nvim_set_option_value('cmdheight', 1, {})
     feed('L')
     screen:expect([[
                                                                   |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*5
       ────────────────────────────────────────────────────────────|
       0000;<control>;Cc;0;BN;;;;;N;NULL;;;;                       |
       0001;<control>;Cc;0;BN;;;;;N;START OF HEADING;;;;           |
@@ -479,11 +419,7 @@ describe('global statusline', function()
     feed('j')
     screen:expect([[
                                                                   |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*5
       ────────────────────────────────────────────────────────────|
       0001;<control>;Cc;0;BN;;;;;N;START OF HEADING;;;;           |
       0002;<control>;Cc;0;BN;;;;;N;START OF TEXT;;;;              |
@@ -495,15 +431,11 @@ describe('global statusline', function()
       {2:test/functional/fixtures/bigfile.txt      8,1             0%}|
                                                                   |
     ]])
-    meths.set_option_value('showtabline', 2, {})
+    api.nvim_set_option_value('showtabline', 2, {})
     screen:expect([[
       {3: }{5:2}{3: t/f/f/bigfile.txt }{4:                                       }|
                                                                   |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*5
       ────────────────────────────────────────────────────────────|
       0002;<control>;Cc;0;BN;;;;;N;START OF TEXT;;;;              |
       0003;<control>;Cc;0;BN;;;;;N;END OF TEXT;;;;                |
@@ -514,15 +446,11 @@ describe('global statusline', function()
       {2:test/functional/fixtures/bigfile.txt      8,1             0%}|
                                                                   |
     ]])
-    meths.set_option_value('cmdheight', 0, {})
+    api.nvim_set_option_value('cmdheight', 0, {})
     screen:expect([[
       {3: }{5:2}{3: t/f/f/bigfile.txt }{4:                                       }|
                                                                   |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*5
       ────────────────────────────────────────────────────────────|
       0001;<control>;Cc;0;BN;;;;;N;START OF HEADING;;;;           |
       0002;<control>;Cc;0;BN;;;;;N;START OF TEXT;;;;              |
@@ -533,15 +461,11 @@ describe('global statusline', function()
       ^0007;<control>;Cc;0;BN;;;;;N;BELL;;;;                       |
       {2:test/functional/fixtures/bigfile.txt      8,1             0%}|
     ]])
-    meths.set_option_value('cmdheight', 1, {})
+    api.nvim_set_option_value('cmdheight', 1, {})
     screen:expect([[
       {3: }{5:2}{3: t/f/f/bigfile.txt }{4:                                       }|
                                                                   |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
+      {1:~                                                           }|*5
       ────────────────────────────────────────────────────────────|
       0002;<control>;Cc;0;BN;;;;;N;START OF TEXT;;;;              |
       0003;<control>;Cc;0;BN;;;;;N;END OF TEXT;;;;                |
@@ -553,12 +477,31 @@ describe('global statusline', function()
                                                                   |
     ]])
   end)
+
+  it('horizontal separators unchanged when failing to split-move window', function()
+    exec([[
+      botright split
+      let &winwidth = &columns
+      let &winminwidth = &columns
+    ]])
+    eq('Vim(wincmd):E36: Not enough room', pcall_err(command, 'wincmd L'))
+    command('mode')
+    screen:expect([[
+                                                                  |
+      {1:~                                                           }|*5
+      ────────────────────────────────────────────────────────────|
+      ^                                                            |
+      {1:~                                                           }|*6
+      {2:[No Name]                                 0,0-1          All}|
+                                                                  |
+    ]])
+  end)
 end)
 
 it('statusline does not crash if it has Arabic characters #19447', function()
   clear()
-  meths.set_option_value('statusline', 'غً', {})
-  meths.set_option_value('laststatus', 2, {})
+  api.nvim_set_option_value('statusline', 'غً', {})
+  api.nvim_set_option_value('laststatus', 2, {})
   command('redraw!')
   assert_alive()
 end)
@@ -567,8 +510,8 @@ it('statusline is redrawn with :resize from <Cmd> mapping #19629', function()
   clear()
   local screen = Screen.new(40, 8)
   screen:set_default_attr_ids({
-    [0] = {bold = true, foreground = Screen.colors.Blue},  -- NonText
-    [1] = {bold = true, reverse = true},  -- StatusLine
+    [0] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+    [1] = { bold = true, reverse = true }, -- StatusLine
   })
   screen:attach()
   exec([[
@@ -579,22 +522,14 @@ it('statusline is redrawn with :resize from <Cmd> mapping #19629', function()
   feed('<Up>')
   screen:expect([[
     ^                                        |
-    {0:~                                       }|
-    {0:~                                       }|
-    {0:~                                       }|
-    {0:~                                       }|
+    {0:~                                       }|*4
     {1:[No Name]                               }|
-                                            |
-                                            |
+                                            |*2
   ]])
   feed('<Down>')
   screen:expect([[
     ^                                        |
-    {0:~                                       }|
-    {0:~                                       }|
-    {0:~                                       }|
-    {0:~                                       }|
-    {0:~                                       }|
+    {0:~                                       }|*5
     {1:[No Name]                               }|
                                             |
   ]])
@@ -604,9 +539,9 @@ it('showcmdloc=statusline does not show if statusline is too narrow', function()
   clear()
   local screen = Screen.new(40, 8)
   screen:set_default_attr_ids({
-    [0] = {bold = true, foreground = Screen.colors.Blue},  -- NonText
-    [1] = {bold = true, reverse = true},  -- StatusLine
-    [2] = {reverse = true},  -- StatusLineNC
+    [0] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+    [1] = { bold = true, reverse = true }, -- StatusLine
+    [2] = { reverse = true }, -- StatusLineNC
   })
   screen:attach()
   command('set showcmd')
@@ -614,11 +549,7 @@ it('showcmdloc=statusline does not show if statusline is too narrow', function()
   command('1vsplit')
   screen:expect([[
     ^ │                                      |
-    {0:~}│{0:~                                     }|
-    {0:~}│{0:~                                     }|
-    {0:~}│{0:~                                     }|
-    {0:~}│{0:~                                     }|
-    {0:~}│{0:~                                     }|
+    {0:~}│{0:~                                     }|*5
     {1:< }{2:[No Name]                             }|
                                             |
   ]])
@@ -667,22 +598,22 @@ it('statusline is redrawn on various state changes', function()
   command('set ls=2 stl=%{repeat(reg_recording(),5)}')
   screen:expect([[
     ^                                        |
-    ~                                       |
-                                            |
+    {1:~                                       }|
+    {3:                                        }|
                                             |
   ]])
   feed('qQ')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    QQQQQ                                   |
-    recording @Q                            |
+    {1:~                                       }|
+    {3:QQQQQ                                   }|
+    {5:recording @Q}                            |
   ]])
   feed('q')
   screen:expect([[
     ^                                        |
-    ~                                       |
-                                            |
+    {1:~                                       }|
+    {3:                                        }|
                                             |
   ]])
 
@@ -690,36 +621,36 @@ it('statusline is redrawn on various state changes', function()
   command('set ls=2 stl=%{mode(1)}')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    n                                       |
+    {1:~                                       }|
+    {3:n                                       }|
                                             |
   ]])
   feed('v')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    v                                       |
-    -- VISUAL --                            |
+    {1:~                                       }|
+    {3:v                                       }|
+    {5:-- VISUAL --}                            |
   ]])
   feed('V')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    V                                       |
-    -- VISUAL LINE --                       |
+    {1:~                                       }|
+    {3:V                                       }|
+    {5:-- VISUAL LINE --}                       |
   ]])
   feed('<C-V>')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    ^V                                      |
-    -- VISUAL BLOCK --                      |
+    {1:~                                       }|
+    {3:^V                                      }|
+    {5:-- VISUAL BLOCK --}                      |
   ]])
   feed('<Esc>')
   screen:expect([[
     ^                                        |
-    ~                                       |
-    n                                       |
+    {1:~                                       }|
+    {3:n                                       }|
                                             |
   ]])
 end)
@@ -741,13 +672,13 @@ it('ruler is redrawn in cmdline with redrawstatus #22804', function()
   ]])
 end)
 
-it("shows correct ruler in cmdline with no statusline", function()
+it('shows correct ruler in cmdline with no statusline', function()
   clear()
   local screen = Screen.new(30, 8)
   screen:set_default_attr_ids {
-    [1] = {bold = true, foreground = Screen.colors.Blue},  -- NonText
-    [2] = {bold = true, reverse = true},  -- StatusLine
-    [3] = {reverse = true},  -- StatusLineNC
+    [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+    [2] = { bold = true, reverse = true }, -- StatusLine
+    [3] = { reverse = true }, -- StatusLineNC
   }
   screen:attach()
   -- Use long ruler to check 'ruler' with 'rulerformat' set has correct width.
@@ -765,12 +696,10 @@ it("shows correct ruler in cmdline with no statusline", function()
   command '1wincmd w'
   screen:expect [[
     ^                              |
-    {1:~                             }|
-    {1:~                             }|
+    {1:~                             }|*2
     {2:[No Name]      1longlonglong  }|
                    │              |
-    {1:~              }│{1:~             }|
-    {1:~              }│{1:~             }|
+    {1:~              }│{1:~             }|*2
                    3longlonglong  |
   ]]
   -- Window 2 is current. It has no statusline, so cmdline should show its
@@ -778,24 +707,95 @@ it("shows correct ruler in cmdline with no statusline", function()
   command '2wincmd w'
   screen:expect [[
                                   |
-    {1:~                             }|
-    {1:~                             }|
+    {1:~                             }|*2
     {3:[No Name]      1longlonglong  }|
     ^               │              |
-    {1:~              }│{1:~             }|
-    {1:~              }│{1:~             }|
+    {1:~              }│{1:~             }|*2
                    2longlonglong  |
   ]]
   -- Window 3 is current. Cmdline should again show its ruler.
   command '3wincmd w'
   screen:expect [[
                                   |
-    {1:~                             }|
-    {1:~                             }|
+    {1:~                             }|*2
     {3:[No Name]      1longlonglong  }|
                    │^              |
-    {1:~              }│{1:~             }|
-    {1:~              }│{1:~             }|
+    {1:~              }│{1:~             }|*2
                    3longlonglong  |
   ]]
+end)
+
+it('uses "stl" and "stlnc" fillchars even if they are the same #19803', function()
+  clear()
+  local screen = Screen.new(53, 4)
+  screen:attach()
+  screen:set_default_attr_ids({
+    [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+  })
+  command('hi clear StatusLine')
+  command('hi clear StatusLineNC')
+  command('vsplit')
+  screen:expect {
+    grid = [[
+    ^                          │                          |
+    {1:~                         }│{1:~                         }|
+    [No Name]                  [No Name]                 |
+                                                         |
+  ]],
+  }
+end)
+
+it('showcmdloc=statusline works with vertical splits', function()
+  clear()
+  local screen = Screen.new(53, 4)
+  screen:set_default_attr_ids {
+    [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+    [2] = { bold = true, reverse = true }, -- StatusLine
+    [3] = { reverse = true }, -- StatusLineNC
+  }
+  screen:attach()
+  command('rightbelow vsplit')
+  command('set showcmd showcmdloc=statusline')
+  feed('1234')
+  screen:expect([[
+                              │^                          |
+    {1:~                         }│{1:~                         }|
+    {3:[No Name]                  }{2:[No Name]      1234       }|
+                                                         |
+  ]])
+  feed('<Esc>')
+  command('set laststatus=3')
+  feed('1234')
+  screen:expect([[
+                              │^                          |
+    {1:~                         }│{1:~                         }|
+    {2:[No Name]                                 1234       }|
+                                                         |
+  ]])
+end)
+
+it('keymap is shown with vertical splits #27269', function()
+  clear()
+  local screen = Screen.new(53, 4)
+  screen:set_default_attr_ids {
+    [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
+    [2] = { bold = true, reverse = true }, -- StatusLine
+    [3] = { reverse = true }, -- StatusLineNC
+  }
+  screen:attach()
+  command('setlocal keymap=dvorak')
+  command('rightbelow vsplit')
+  screen:expect([[
+                              │^                          |
+    {1:~                         }│{1:~                         }|
+    {3:[No Name]         <en-dv>  }{2:[No Name]         <en-dv> }|
+                                                         |
+  ]])
+  command('set laststatus=3')
+  screen:expect([[
+                              │^                          |
+    {1:~                         }│{1:~                         }|
+    {2:[No Name]                                    <en-dv> }|
+                                                         |
+  ]])
 end)

@@ -1,16 +1,16 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <uv.h>
 
+#include "nvim/ascii_defs.h"
 #include "nvim/channel.h"
 #include "nvim/eval.h"
+#include "nvim/event/defs.h"
 #include "nvim/event/socket.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/log.h"
 #include "nvim/main.h"
 #include "nvim/memory.h"
@@ -71,8 +71,8 @@ static void close_socket_watcher(SocketWatcher **watcher)
 static void set_vservername(garray_T *srvs)
 {
   char *default_server = (srvs->ga_len > 0)
-    ? ((SocketWatcher **)srvs->ga_data)[0]->addr
-    : NULL;
+                         ? ((SocketWatcher **)srvs->ga_data)[0]->addr
+                         : NULL;
   set_vim_var_string(VV_SEND_SERVER, default_server, -1);
 }
 
@@ -132,7 +132,7 @@ bool server_owns_pipe_address(const char *path)
 /// @returns 0: success, 1: validation error, 2: already listening, -errno: failed to bind/listen.
 int server_start(const char *addr)
 {
-  if (addr == NULL || addr[0] == '\0') {
+  if (addr == NULL || addr[0] == NUL) {
     WLOG("Empty or NULL address");
     return 1;
   }

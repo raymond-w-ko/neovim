@@ -75,6 +75,7 @@ function(add_glob_target)
     list(APPEND ARG_FILES ${globfiles})
   endforeach()
 
+  list(APPEND ARG_EXCLUDE runtime/lua/vim/_meta) # only generated files, always ignore
   foreach(exclude_pattern ${ARG_EXCLUDE})
     list(FILTER ARG_FILES EXCLUDE REGEX ${exclude_pattern})
   endforeach()
@@ -88,7 +89,7 @@ function(add_glob_target)
   endif()
 
   if(ARG_TOUCH_STRATEGY STREQUAL SINGLE)
-    set(touch_file ${TOUCHES_DIR}/ran-${ARG_TARGET})
+    set(touch_file ${TOUCHES_DIR}/${ARG_TARGET})
     add_custom_command(
       OUTPUT ${touch_file}
       COMMAND ${CMAKE_COMMAND} -E touch ${touch_file}
@@ -102,7 +103,7 @@ function(add_glob_target)
     foreach(f ${ARG_FILES})
       string(REGEX REPLACE "^${PROJECT_SOURCE_DIR}/" "" tf ${f})
       string(REGEX REPLACE "[/.]" "-" tf ${tf})
-      set(touch_file ${touch_dir}/ran-${tf})
+      set(touch_file ${touch_dir}/${tf})
       add_custom_command(
         OUTPUT ${touch_file}
         COMMAND ${CMAKE_COMMAND} -E touch ${touch_file}
@@ -132,7 +133,7 @@ function(add_glob_target)
       file(MAKE_DIRECTORY ${td})
       string(REGEX REPLACE "^${PROJECT_SOURCE_DIR}/" "" tf ${touch_dir})
       string(REGEX REPLACE "[/.]" "-" tf ${tf})
-      set(touch_file ${td}/ran-${tf})
+      set(touch_file ${td}/${tf})
 
       add_custom_command(
         OUTPUT ${touch_file}
@@ -147,8 +148,35 @@ function(add_glob_target)
   add_custom_target(${ARG_TARGET} DEPENDS ${touch_list})
 endfunction()
 
-# Set default build type to Debug. Also limit the list of allowable build types
-# to the ones defined in variable allowableBuildTypes.
+# A wrapper function that combines add_custom_command and add_custom_target. It
+# essentially models the "make" dependency where a target is only rebuilt if
+# any dependencies have been changed.
+#
+# Important to note is that `DEPENDS` is a bit misleading; it should not only
+# specify dependencies but also the files that are being generated/output
+# files in order to work correctly.
+function(add_target)
+  cmake_parse_arguments(ARG
+    ""
+    ""
+    "COMMAND;DEPENDS;CUSTOM_COMMAND_ARGS"
+    ${ARGN}
+  )
+  set(target ${ARGV0})
+
+  set(touch_file ${TOUCHES_DIR}/${target})
+  add_custom_command(
+    OUTPUT ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E touch ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E env "VIMRUNTIME=${NVIM_RUNTIME_DIR}" ${ARG_COMMAND}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    DEPENDS ${ARG_DEPENDS}
+    ${ARG_CUSTOM_COMMAND_ARGS})
+  add_custom_target(${target} DEPENDS ${touch_file})
+endfunction()
+
+# Set default build type to BUILD_TYPE. Also limit the list of allowable build
+# types to the ones defined in variable allowableBuildTypes.
 #
 # The correct way to specify build type (for example Release) for
 # single-configuration generators (Make and Ninja) is to run
@@ -162,23 +190,29 @@ endfunction()
 # cmake -B build
 # cmake --build build --config Release
 #
-# Passing CMAKE_BUILD_TYPE for multi-config generators will now not only
-# not be used, but also generate a warning for the user.
-function(set_default_buildtype)
+# Passing CMAKE_BUILD_TYPE for multi-config generators will not only not be
+# used, but also generate a warning for the user.
+function(set_default_buildtype BUILD_TYPE)
   set(allowableBuildTypes Debug Release MinSizeRel RelWithDebInfo)
+  if(NOT BUILD_TYPE IN_LIST allowableBuildTypes)
+    message(FATAL_ERROR "Invalid build type: ${BUILD_TYPE}")
+  endif()
 
   get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
   if(isMultiConfig)
+    # Multi-config generators use the first element in CMAKE_CONFIGURATION_TYPES as the default build type
+    list(INSERT allowableBuildTypes 0 ${BUILD_TYPE})
+    list(REMOVE_DUPLICATES allowableBuildTypes)
     set(CMAKE_CONFIGURATION_TYPES ${allowableBuildTypes} PARENT_SCOPE)
     if(CMAKE_BUILD_TYPE)
       message(WARNING "CMAKE_BUILD_TYPE specified which is ignored on \
-      multi-configuration generators. Defaulting to Debug build type.")
+      multi-configuration generators. Defaulting to ${BUILD_TYPE} build type.")
     endif()
   else()
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "${allowableBuildTypes}")
     if(NOT CMAKE_BUILD_TYPE)
-      message(STATUS "CMAKE_BUILD_TYPE not specified, default is 'Debug'")
-      set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
+      message(STATUS "CMAKE_BUILD_TYPE not specified, default is '${BUILD_TYPE}'")
+      set(CMAKE_BUILD_TYPE ${BUILD_TYPE} CACHE STRING "Choose the type of build" FORCE)
     elseif(NOT CMAKE_BUILD_TYPE IN_LIST allowableBuildTypes)
       message(FATAL_ERROR "Invalid build type: ${CMAKE_BUILD_TYPE}")
     else()

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file runtime.c
 ///
 /// Management of runtime files (including packages)
@@ -9,57 +6,76 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <uv.h>
 
+#include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cmdexpand.h"
 #include "nvim/debugger.h"
+#include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
+#include "nvim/ex_eval_defs.h"
 #include "nvim/garray.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/hashtab.h"
+#include "nvim/hashtab_defs.h"
 #include "nvim/lua/executor.h"
-#include "nvim/macros.h"
-#include "nvim/map.h"
+#include "nvim/macros_defs.h"
+#include "nvim/map_defs.h"
 #include "nvim/mbyte.h"
+#include "nvim/mbyte_defs.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/path.h"
+#include "nvim/pos_defs.h"
 #include "nvim/profile.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
 #include "nvim/strings.h"
+#include "nvim/types_defs.h"
 #include "nvim/usercmd.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
+#ifdef USE_CRNL
+# include "nvim/highlight.h"
+#endif
 
 /// Structure used to store info for each sourced file.
 /// It is shared between do_source() and getsourceline().
 /// This is required, because it needs to be handed to do_cmdline() and
 /// sourcing can be done recursively.
-struct source_cookie {
+typedef struct {
   FILE *fp;                     ///< opened file for sourcing
   char *nextline;               ///< if not NULL: line that was read ahead
   linenr_T sourcing_lnum;       ///< line number of the source file
   int finished;                 ///< ":finish" used
-#if defined(USE_CRNL)
+#ifdef USE_CRNL
   int fileformat;               ///< EOL_UNKNOWN, EOL_UNIX or EOL_DOS
   bool error;                   ///< true if LF found after CR-LF
 #endif
@@ -68,7 +84,16 @@ struct source_cookie {
   int dbg_tick;                 ///< debug_tick when breakpoint was set
   int level;                    ///< top nesting level of sourced file
   vimconv_T conv;               ///< type of conversion
-};
+} source_cookie_T;
+
+typedef struct {
+  char *path;
+  bool after;
+  TriState has_lua;
+} SearchPathItem;
+
+typedef kvec_t(SearchPathItem) RuntimeSearchPath;
+typedef kvec_t(char *) CharVec;
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "runtime.c.generated.h"
@@ -151,8 +176,8 @@ char *estack_sfile(estack_arg_T which)
                                        ? &entry->es_info.ufunc->uf_script_ctx
                                        : &entry->es_info.aucmd->script_ctx);
         return def_ctx->sc_sid > 0
-                ? xstrdup((SCRIPT_ITEM(def_ctx->sc_sid)->sn_name))
-                : NULL;
+               ? xstrdup((SCRIPT_ITEM(def_ctx->sc_sid)->sn_name))
+               : NULL;
       } else if (entry->es_type == ETYPE_SCRIPT) {
         return xstrdup(entry->es_name);
       }
@@ -185,8 +210,8 @@ char *estack_sfile(estack_arg_T which)
       len += strlen(type_name);
       ga_grow(&ga, (int)len);
       linenr_T lnum = idx == exestack.ga_len - 1
-        ? which == ESTACK_STACK ? SOURCING_LNUM : 0
-        : entry->es_lnum;
+                      ? which == ESTACK_STACK ? SOURCING_LNUM : 0
+                      : entry->es_lnum;
       char *dots = idx == exestack.ga_len - 1 ? "" : "..";
       if (lnum == 0) {
         // For the bottom entry of <sfile>: do not add the line number,
@@ -265,6 +290,15 @@ void set_context_in_runtime_cmd(expand_T *xp, const char *arg)
   char *p = skiptowhite(arg);
   runtime_expand_flags
     = *p != NUL ? get_runtime_cmd_flags((char **)&arg, (size_t)(p - arg)) : 0;
+  // Skip to the last argument.
+  while (*(p = skiptowhite_esc(arg)) != NUL) {
+    if (runtime_expand_flags == 0) {
+      // When there are multiple arguments and [where] is not specified,
+      // use an unrelated non-zero flag to avoid expanding [where].
+      runtime_expand_flags = DIP_ALL;
+    }
+    arg = skipwhite(p);
+  }
   xp->xp_context = EXPAND_RUNTIME;
   xp->xp_pattern = (char *)arg;
 }
@@ -276,7 +310,7 @@ static bool source_callback_vim_lua(int num_fnames, char **fnames, bool all, voi
 
   for (int i = 0; i < num_fnames; i++) {
     if (path_with_extension(fnames[i], "vim")) {
-      (void)do_source(fnames[i], false, DOSO_NONE, cookie);
+      do_source(fnames[i], false, DOSO_NONE, cookie);
       did_one = true;
       if (!all) {
         return true;
@@ -286,7 +320,7 @@ static bool source_callback_vim_lua(int num_fnames, char **fnames, bool all, voi
 
   for (int i = 0; i < num_fnames; i++) {
     if (path_with_extension(fnames[i], "lua")) {
-      (void)do_source(fnames[i], false, DOSO_NONE, cookie);
+      do_source(fnames[i], false, DOSO_NONE, cookie);
       did_one = true;
       if (!all) {
         return true;
@@ -310,7 +344,7 @@ static bool source_callback(int num_fnames, char **fnames, bool all, void *cooki
   for (int i = 0; i < num_fnames; i++) {
     if (!path_with_extension(fnames[i], "vim")
         && !path_with_extension(fnames[i], "lua")) {
-      (void)do_source(fnames[i], false, DOSO_NONE, cookie);
+      do_source(fnames[i], false, DOSO_NONE, cookie);
       did_one = true;
       if (!all) {
         return true;
@@ -321,15 +355,17 @@ static bool source_callback(int num_fnames, char **fnames, bool all, void *cooki
   return did_one;
 }
 
-/// Find the file "name" in all directories in "path" and invoke
+/// Find the patterns in "name" in all directories in "path" and invoke
 /// "callback(fname, cookie)".
-/// "name" can contain wildcards.
+/// "prefix" is prepended to each pattern in "name".
 /// When "flags" has DIP_ALL: source all files, otherwise only the first one.
 /// When "flags" has DIP_DIR: find directories instead of files.
 /// When "flags" has DIP_ERR: give an error message if there is no match.
 ///
-/// return FAIL when no file could be sourced, OK otherwise.
-int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, void *cookie)
+/// Return FAIL when no file could be sourced, OK otherwise.
+int do_in_path(const char *path, const char *prefix, char *name, int flags,
+               DoInRuntimepathCB callback, void *cookie)
+  FUNC_ATTR_NONNULL_ARG(1, 2)
 {
   bool did_one = false;
 
@@ -341,7 +377,11 @@ int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, vo
     char *tail;
     if (p_verbose > 10 && name != NULL) {
       verbose_enter();
-      smsg(_("Searching for \"%s\" in \"%s\""), name, path);
+      if (*prefix != NUL) {
+        smsg(0, _("Searching for \"%s\" under \"%s\" in \"%s\""), name, prefix, path);
+      } else {
+        smsg(0, _("Searching for \"%s\" in \"%s\""), name, path);
+      }
       verbose_leave();
     }
 
@@ -367,8 +407,9 @@ int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, vo
       if (name == NULL) {
         (*callback)(1, &buf, do_all, cookie);
         did_one = true;
-      } else if (buflen + strlen(name) + 2 < MAXPATHL) {
+      } else if (buflen + 2 + strlen(prefix) + strlen(name) < MAXPATHL) {
         add_pathsep(buf);
+        strcat(buf, prefix);
         tail = buf + strlen(buf);
 
         // Loop over all patterns in "name"
@@ -380,7 +421,7 @@ int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, vo
 
           if (p_verbose > 10) {
             verbose_enter();
-            smsg(_("Searching for \"%s\""), buf);
+            smsg(0, _("Searching for \"%s\""), buf);
             verbose_leave();
           }
 
@@ -402,7 +443,7 @@ int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, vo
       semsg(_(e_dirnotf), basepath, name);
     } else if (p_verbose > 1) {
       verbose_enter();
-      smsg(_("not found in '%s': \"%s\""), basepath, name);
+      smsg(0, _("not found in '%s': \"%s\""), basepath, name);
       verbose_leave();
     }
   }
@@ -410,7 +451,7 @@ int do_in_path(char *path, char *name, int flags, DoInRuntimepathCB callback, vo
   return did_one ? OK : FAIL;
 }
 
-RuntimeSearchPath runtime_search_path_get_cached(int *ref)
+static RuntimeSearchPath runtime_search_path_get_cached(int *ref)
   FUNC_ATTR_NONNULL_ALL
 {
   runtime_search_path_validate();
@@ -425,7 +466,7 @@ RuntimeSearchPath runtime_search_path_get_cached(int *ref)
   return runtime_search_path;
 }
 
-RuntimeSearchPath copy_runtime_search_path(const RuntimeSearchPath src)
+static RuntimeSearchPath copy_runtime_search_path(const RuntimeSearchPath src)
 {
   RuntimeSearchPath dst = KV_INITIAL_VALUE;
   for (size_t j = 0; j < kv_size(src); j++) {
@@ -436,7 +477,7 @@ RuntimeSearchPath copy_runtime_search_path(const RuntimeSearchPath src)
   return dst;
 }
 
-void runtime_search_path_unref(RuntimeSearchPath path, const int *ref)
+static void runtime_search_path_unref(RuntimeSearchPath path, const int *ref)
   FUNC_ATTR_NONNULL_ALL
 {
   if (*ref) {
@@ -456,7 +497,7 @@ void runtime_search_path_unref(RuntimeSearchPath path, const int *ref)
 /// When "flags" has DIP_ERR: give an error message if there is no match.
 ///
 /// return FAIL when no file could be sourced, OK otherwise.
-int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *cookie)
+static int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *cookie)
 {
   char *tail;
   bool did_one = false;
@@ -465,7 +506,7 @@ int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *c
 
   if (p_verbose > 10 && name != NULL) {
     verbose_enter();
-    smsg(_("Searching for \"%s\" in runtime path"), name);
+    smsg(0, _("Searching for \"%s\" in runtime path"), name);
     verbose_leave();
   }
 
@@ -504,7 +545,7 @@ int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *c
 
         if (p_verbose > 10) {
           verbose_enter();
-          smsg(_("Searching for \"%s\""), buf);
+          smsg(0, _("Searching for \"%s\""), buf);
           verbose_leave();
         }
 
@@ -524,7 +565,7 @@ int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *c
       semsg(_(e_dirnotf), "runtime path", name);
     } else if (p_verbose > 1) {
       verbose_enter();
-      smsg(_("not found in runtime path: \"%s\""), name);
+      smsg(0, _("not found in runtime path: \"%s\""), name);
       verbose_leave();
     }
   }
@@ -534,31 +575,31 @@ int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *c
   return did_one ? OK : FAIL;
 }
 
-Array runtime_inspect(void)
+Array runtime_inspect(Arena *arena)
 {
   RuntimeSearchPath path = runtime_search_path;
-  Array rv = ARRAY_DICT_INIT;
+  Array rv = arena_array(arena, kv_size(path));
 
   for (size_t i = 0; i < kv_size(path); i++) {
     SearchPathItem *item = &kv_A(path, i);
-    Array entry = ARRAY_DICT_INIT;
-    ADD(entry, CSTR_TO_OBJ(item->path));
-    ADD(entry, BOOLEAN_OBJ(item->after));
+    Array entry = arena_array(arena, 3);
+    ADD_C(entry, CSTR_AS_OBJ(item->path));
+    ADD_C(entry, BOOLEAN_OBJ(item->after));
     if (item->has_lua != kNone) {
-      ADD(entry, BOOLEAN_OBJ(item->has_lua == kTrue));
+      ADD_C(entry, BOOLEAN_OBJ(item->has_lua == kTrue));
     }
-    ADD(rv, ARRAY_OBJ(entry));
+    ADD_C(rv, ARRAY_OBJ(entry));
   }
   return rv;
 }
 
-ArrayOf(String) runtime_get_named(bool lua, Array pat, bool all)
+ArrayOf(String) runtime_get_named(bool lua, Array pat, bool all, Arena *arena)
 {
   int ref;
   RuntimeSearchPath path = runtime_search_path_get_cached(&ref);
   static char buf[MAXPATHL];
 
-  ArrayOf(String) rv = runtime_get_named_common(lua, pat, all, path, buf, sizeof buf);
+  ArrayOf(String) rv = runtime_get_named_common(lua, pat, all, path, buf, sizeof buf, arena);
 
   runtime_search_path_unref(path, &ref);
   return rv;
@@ -570,15 +611,16 @@ ArrayOf(String) runtime_get_named_thread(bool lua, Array pat, bool all)
   uv_mutex_lock(&runtime_search_path_mutex);
   static char buf[MAXPATHL];
   ArrayOf(String) rv = runtime_get_named_common(lua, pat, all, runtime_search_path_thread,
-                                                buf, sizeof buf);
+                                                buf, sizeof buf, NULL);
   uv_mutex_unlock(&runtime_search_path_mutex);
   return rv;
 }
 
-ArrayOf(String) runtime_get_named_common(bool lua, Array pat, bool all,
-                                         RuntimeSearchPath path, char *buf, size_t buf_len)
+static ArrayOf(String) runtime_get_named_common(bool lua, Array pat, bool all,
+                                                RuntimeSearchPath path, char *buf, size_t buf_len,
+                                                Arena *arena)
 {
-  ArrayOf(String) rv = ARRAY_DICT_INIT;
+  ArrayOf(String) rv = arena_array(arena, kv_size(path) * pat.size);
   for (size_t i = 0; i < kv_size(path); i++) {
     SearchPathItem *item = &kv_A(path, i);
     if (lua) {
@@ -598,7 +640,7 @@ ArrayOf(String) runtime_get_named_common(bool lua, Array pat, bool all,
                                        item->path, pat_item.data.string.data);
         if (size < buf_len) {
           if (os_file_is_readable(buf)) {
-            ADD(rv, CSTR_TO_OBJ(buf));
+            ADD_C(rv, CSTR_TO_ARENA_OBJ(arena, buf));
             if (!all) {
               goto done;
             }
@@ -624,52 +666,26 @@ int do_in_path_and_pp(char *path, char *name, int flags, DoInRuntimepathCB callb
   int done = FAIL;
 
   if ((flags & DIP_NORTP) == 0) {
-    done |= do_in_path(path, (name && !*name) ? NULL : name, flags, callback,
+    done |= do_in_path(path, "", (name && !*name) ? NULL : name, flags, callback,
                        cookie);
   }
 
   if ((done == FAIL || (flags & DIP_ALL)) && (flags & DIP_START)) {
-    char *start_dir = "pack/*/start/*/%s%s";  // NOLINT
-    size_t len = strlen(start_dir) + strlen(name) + 6;
-    char *s = xmallocz(len);  // TODO(bfredl): get rid of random allocations
-    char *suffix = (flags & DIP_AFTER) ? "after/" : "";
-
-    vim_snprintf(s, len, start_dir, suffix, name);
-    done |= do_in_path(p_pp, s, flags & ~DIP_AFTER, callback, cookie);
-
-    xfree(s);
+    const char *prefix
+      = (flags & DIP_AFTER) ? "pack/*/start/*/after/" : "pack/*/start/*/";  // NOLINT
+    done |= do_in_path(p_pp, prefix, name, flags & ~DIP_AFTER, callback, cookie);
 
     if (done == FAIL || (flags & DIP_ALL)) {
-      start_dir = "start/*/%s%s";  // NOLINT
-      len = strlen(start_dir) + strlen(name) + 6;
-      s = xmallocz(len);
-
-      vim_snprintf(s, len, start_dir, suffix, name);
-      done |= do_in_path(p_pp, s, flags & ~DIP_AFTER, callback, cookie);
-
-      xfree(s);
+      prefix = (flags & DIP_AFTER) ? "start/*/after/" : "start/*/";  // NOLINT
+      done |= do_in_path(p_pp, prefix, name, flags & ~DIP_AFTER, callback, cookie);
     }
   }
 
   if ((done == FAIL || (flags & DIP_ALL)) && (flags & DIP_OPT)) {
-    char *opt_dir = "pack/*/opt/*/%s";  // NOLINT
-    size_t len = strlen(opt_dir) + strlen(name);
-    char *s = xmallocz(len);
-
-    vim_snprintf(s, len, opt_dir, name);
-    done |= do_in_path(p_pp, s, flags, callback, cookie);
-
-    xfree(s);
+    done |= do_in_path(p_pp, "pack/*/opt/*/", name, flags, callback, cookie);  // NOLINT
 
     if (done == FAIL || (flags & DIP_ALL)) {
-      opt_dir = "opt/*/%s";  // NOLINT
-      len = strlen(opt_dir) + strlen(name);
-      s = xmallocz(len);
-
-      vim_snprintf(s, len, opt_dir, name);
-      done |= do_in_path(p_pp, s, flags, callback, cookie);
-
-      xfree(s);
+      done |= do_in_path(p_pp, "opt/*/", name, flags, callback, cookie);  // NOLINT
     }
   }
 
@@ -738,10 +754,10 @@ static bool path_is_after(char *buf, size_t buflen)
          && strcmp(buf + buflen - 5, "after") == 0;
 }
 
-RuntimeSearchPath runtime_search_path_build(void)
+static RuntimeSearchPath runtime_search_path_build(void)
 {
   kvec_t(String) pack_entries = KV_INITIAL_VALUE;
-  Map(String, handle_T) pack_used = MAP_INIT;
+  Map(String, int) pack_used = MAP_INIT;
   Set(String) rtp_used = SET_INIT;
   RuntimeSearchPath search_path = KV_INITIAL_VALUE;
   CharVec after_path = KV_INITIAL_VALUE;
@@ -754,7 +770,7 @@ RuntimeSearchPath runtime_search_path_build(void)
     String the_entry = { .data = cur_entry, .size = strlen(buf) };
 
     kv_push(pack_entries, the_entry);
-    map_put(String, handle_T)(&pack_used, the_entry, 0);
+    map_put(String, int)(&pack_used, the_entry, 0);
   }
 
   char *rtp_entry;
@@ -771,7 +787,7 @@ RuntimeSearchPath runtime_search_path_build(void)
     // fact: &rtp entries can contain wild chars
     expand_rtp_entry(&search_path, &rtp_used, buf, false);
 
-    handle_T *h = map_ref(String, handle_T)(&pack_used, cstr_as_string(buf), NULL);
+    handle_T *h = map_ref(String, int)(&pack_used, cstr_as_string(buf), NULL);
     if (h) {
       (*h)++;
       expand_pack_entry(&search_path, &rtp_used, &after_path, buf, buflen);
@@ -780,7 +796,7 @@ RuntimeSearchPath runtime_search_path_build(void)
 
   for (size_t i = 0; i < kv_size(pack_entries); i++) {
     String item = kv_A(pack_entries, i);
-    handle_T h = map_get(String, handle_T)(&pack_used, item);
+    handle_T h = map_get(String, int)(&pack_used, item);
     if (h == 0) {
       expand_pack_entry(&search_path, &rtp_used, &after_path, item.data, item.size);
     }
@@ -813,7 +829,7 @@ const char *did_set_runtimepackpath(optset_T *args)
   return NULL;
 }
 
-void runtime_search_path_free(RuntimeSearchPath path)
+static void runtime_search_path_free(RuntimeSearchPath path)
 {
   for (size_t j = 0; j < kv_size(path); j++) {
     SearchPathItem item = kv_A(path, j);
@@ -920,7 +936,6 @@ static int gen_expand_wildcards_and_cb(int num_pat, char **pats, int flags, bool
 static int add_pack_dir_to_rtp(char *fname, bool is_pack)
 {
   char *p;
-  char *buf = NULL;
   char *afterdir = NULL;
   int retval = FAIL;
 
@@ -955,7 +970,7 @@ static int add_pack_dir_to_rtp(char *fname, bool is_pack)
   // Find "ffname" in "p_rtp", ignoring '/' vs '\' differences
   // Also stop at the first "after" directory
   size_t fname_len = strlen(ffname);
-  buf = try_malloc(MAXPATHL);
+  char *buf = try_malloc(MAXPATHL);
   if (buf == NULL) {
     goto theend;
   }
@@ -1055,7 +1070,7 @@ static int add_pack_dir_to_rtp(char *fname, bool is_pack)
     xstrlcat(new_rtp, afterdir, new_rtp_capacity);
   }
 
-  set_option_value_give_err("rtp", CSTR_AS_OPTVAL(new_rtp), 0);
+  set_option_value_give_err(kOptRuntimepath, CSTR_AS_OPTVAL(new_rtp), 0);
   xfree(new_rtp);
   retval = OK;
 
@@ -1078,14 +1093,14 @@ static int load_pack_plugin(bool opt, char *fname)
   size_t len = strlen(ffname) + sizeof(plugpat);
   char *pat = xmallocz(len);
 
-  vim_snprintf(pat, len, plugpat, ffname);  // NOLINT
+  vim_snprintf(pat, len, plugpat, ffname);
   gen_expand_wildcards_and_cb(1, &pat, EW_FILE, true, source_callback_vim_lua, NULL);
 
   char *cmd = xstrdup("g:did_load_filetypes");
 
   // If runtime/filetype.lua wasn't loaded yet, the scripts will be
   // found when it loads.
-  if (opt && eval_to_number(cmd) > 0) {
+  if (opt && eval_to_number(cmd, false) > 0) {
     do_cmdline_cmd("augroup filetypedetect");
     vim_snprintf(pat, len, ftpat, ffname);
     gen_expand_wildcards_and_cb(1, &pat, EW_FILE, true, source_callback_vim_lua, NULL);
@@ -1164,7 +1179,7 @@ static bool add_opt_pack_plugins(int num_fnames, char **fnames, bool all, void *
 /// Add all packages in the "start" directory to 'runtimepath'.
 void add_pack_start_dirs(void)
 {
-  do_in_path(p_pp, NULL, DIP_ALL + DIP_DIR, add_pack_start_dir, NULL);
+  do_in_path(p_pp, "", NULL, DIP_ALL + DIP_DIR, add_pack_start_dir, NULL);
 }
 
 static bool pack_has_entries(char *buf)
@@ -1206,9 +1221,9 @@ static bool add_pack_start_dir(int num_fnames, char **fnames, bool all, void *co
 void load_start_packages(void)
 {
   did_source_packages = true;
-  do_in_path(p_pp, "pack/*/start/*", DIP_ALL + DIP_DIR,  // NOLINT
+  do_in_path(p_pp, "", "pack/*/start/*", DIP_ALL + DIP_DIR,  // NOLINT
              add_start_pack_plugins, &APP_LOAD);
-  do_in_path(p_pp, "start/*", DIP_ALL + DIP_DIR,  // NOLINT
+  do_in_path(p_pp, "", "start/*", DIP_ALL + DIP_DIR,  // NOLINT
              add_start_pack_plugins, &APP_LOAD);
 }
 
@@ -1237,7 +1252,8 @@ void load_plugins(void)
       add_pack_start_dirs();
     }
 
-    // don't use source_runtime() yet so we can check for :packloadall below
+    // Don't use source_runtime_vim_lua() yet so we can check for :packloadall below.
+    // NB: after calling this "rtp_copy" may have been freed if it wasn't copied.
     source_in_path_vim_lua(rtp_copy, plugin_pattern, DIP_ALL | DIP_NOAFTER);
     TIME_MSG("loading rtp plugins");
 
@@ -1273,7 +1289,8 @@ void ex_packadd(exarg_T *eap)
     // The first round don't give a "not found" error, in the second round
     // only when nothing was found in the first round.
     res =
-      do_in_path(p_pp, pat, DIP_ALL + DIP_DIR + (round == 2 && res == FAIL ? DIP_ERR : 0),
+      do_in_path(p_pp, "", pat,
+                 DIP_ALL + DIP_DIR + (round == 2 && res == FAIL ? DIP_ERR : 0),
                  round == 1 ? add_start_pack_plugins : add_opt_pack_plugins,
                  eap->forceit ? &APP_ADD_DIR : &APP_BOTH);
     xfree(pat);
@@ -1612,14 +1629,14 @@ static inline char *add_dir(char *dest, const char *const dir, const size_t dir_
     const char *appname = get_appname();
     size_t appname_len = strlen(appname);
     assert(appname_len < (IOSIZE - sizeof("-data")));
-    xstrlcpy(IObuff, appname, appname_len + 1);
+    xmemcpyz(IObuff, appname, appname_len);
 #if defined(MSWIN)
     if (type == kXDGDataHome || type == kXDGStateHome) {
       xstrlcat(IObuff, "-data", IOSIZE);
       appname_len += 5;
     }
 #endif
-    xstrlcpy(dest, IObuff, appname_len + 1);
+    xmemcpyz(dest, IObuff, appname_len);
     dest += appname_len;
     if (suf1 != NULL) {
       *dest++ = PATHSEP;
@@ -1648,7 +1665,7 @@ char *get_lib_dir(void)
   // Find library path relative to the nvim binary: ../lib/nvim/
   char exe_name[MAXPATHL];
   vim_get_prefix_from_exepath(exe_name);
-  if (append_path(exe_name, "lib" _PATHSEPSTR "nvim", MAXPATHL) == OK) {
+  if (append_path(exe_name, "lib/nvim", MAXPATHL) == OK) {
     return xstrdup(exe_name);
   }
   return NULL;
@@ -1665,11 +1682,11 @@ char *runtimepath_default(bool clean_arg)
 {
   size_t rtp_size = 0;
   char *const data_home = clean_arg
-    ? NULL
-    : stdpaths_get_xdg_var(kXDGDataHome);
+                          ? NULL
+                          : stdpaths_get_xdg_var(kXDGDataHome);
   char *const config_home = clean_arg
-    ? NULL
-    : stdpaths_get_xdg_var(kXDGConfigHome);
+                            ? NULL
+                            : stdpaths_get_xdg_var(kXDGConfigHome);
   char *const vimruntime = vim_getenv("VIMRUNTIME");
   char *const libdir = get_lib_dir();
   char *const data_dirs = stdpaths_get_xdg_var(kXDGDataDirs);
@@ -1764,7 +1781,7 @@ freeall:
 static void cmd_source(char *fname, exarg_T *eap)
 {
   if (eap != NULL && *fname == NUL) {
-    cmd_source_buffer(eap);
+    cmd_source_buffer(eap, false);
   } else if (eap != NULL && eap->forceit) {
     // ":source!": read Normal mode commands
     // Need to execute the commands directly.  This is required at least
@@ -1795,7 +1812,7 @@ void ex_options(exarg_T *eap)
   bool multi_mods = 0;
 
   buf[0] = NUL;
-  (void)add_win_cmd_modifiers(buf, &cmdmod, &multi_mods);
+  add_win_cmd_modifiers(buf, &cmdmod, &multi_mods);
 
   os_setenv("OPTWIN_CMD", buf, 1);
   cmd_source(SYS_OPTWIN_FILE, NULL);
@@ -1806,20 +1823,20 @@ void ex_options(exarg_T *eap)
 /// @return address holding the next breakpoint line for a source cookie
 linenr_T *source_breakpoint(void *cookie)
 {
-  return &((struct source_cookie *)cookie)->breakpoint;
+  return &((source_cookie_T *)cookie)->breakpoint;
 }
 
 /// @return  the address holding the debug tick for a source cookie.
 int *source_dbg_tick(void *cookie)
 {
-  return &((struct source_cookie *)cookie)->dbg_tick;
+  return &((source_cookie_T *)cookie)->dbg_tick;
 }
 
 /// @return  the nesting level for a source cookie.
 int source_level(void *cookie)
   FUNC_ATTR_PURE
 {
-  return ((struct source_cookie *)cookie)->level;
+  return ((source_cookie_T *)cookie)->level;
 }
 
 /// Special function to open a file without handle inheritance.
@@ -1836,7 +1853,7 @@ static FILE *fopen_noinh_readbin(char *filename)
     return NULL;
   }
 
-  (void)os_set_cloexec(fd_tmp);
+  os_set_cloexec(fd_tmp);
 
   return fdopen(fd_tmp, READBIN);
 }
@@ -1871,11 +1888,6 @@ static bool concat_continued_line(garray_T *const ga, const int init_growsize, c
   ga_concat_len(ga, line + 1, len - 1);
   return true;
 }
-
-typedef struct {
-  linenr_T curr_lnum;
-  const linenr_T final_lnum;
-} GetBufferLineCookie;
 
 typedef struct {
   char *buf;
@@ -1974,7 +1986,7 @@ static int source_using_linegetter(void *cookie, LineGetter fgetline, const char
   return retval;
 }
 
-static void cmd_source_buffer(const exarg_T *const eap)
+void cmd_source_buffer(const exarg_T *const eap, bool ex_lua)
   FUNC_ATTR_NONNULL_ALL
 {
   if (curbuf == NULL) {
@@ -1993,14 +2005,15 @@ static void cmd_source_buffer(const exarg_T *const eap)
     ga_append(&ga, NL);
   }
   ((char *)ga.ga_data)[ga.ga_len - 1] = NUL;
-  const GetStrLineCookie cookie = {
-    .buf = ga.ga_data,
-    .offset = 0,
-  };
-  if (strequal(curbuf->b_p_ft, "lua")
+  if (ex_lua || strequal(curbuf->b_p_ft, "lua")
       || (curbuf->b_fname && path_with_extension(curbuf->b_fname, "lua"))) {
-    nlua_source_using_linegetter(get_str_line, (void *)&cookie, ":source (no file)");
+    char *name = ex_lua ? ":{range}lua" : ":source (no file)";
+    nlua_source_str(ga.ga_data, name);
   } else {
+    const GetStrLineCookie cookie = {
+      .buf = ga.ga_data,
+      .offset = 0,
+    };
     source_using_linegetter((void *)&cookie, get_str_line, ":source (no file)");
   }
   ga_clear(&ga);
@@ -2035,9 +2048,7 @@ int do_source_str(const char *cmd, const char *traceback_name)
 /// If a scriptitem_T was found or created "*ret_sid" is set to the SID.
 int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
 {
-  struct source_cookie cookie;
-  char *p;
-  char *fname_exp;
+  source_cookie_T cookie;
   uint8_t *firstline = NULL;
   int retval = FAIL;
   int save_debug_break_level = debug_break_level;
@@ -2045,17 +2056,17 @@ int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
   proftime_T wait_start;
   bool trigger_source_post = false;
 
-  p = expand_env_save(fname);
+  char *p = expand_env_save(fname);
   if (p == NULL) {
     return retval;
   }
-  fname_exp = fix_fname(p);
+  char *fname_exp = fix_fname(p);
   xfree(p);
   if (fname_exp == NULL) {
     return retval;
   }
   if (os_isdir(fname_exp)) {
-    smsg(_("Cannot source a directory: \"%s\""), fname);
+    smsg(0, _("Cannot source a directory: \"%s\""), fname);
     goto theend;
   }
 
@@ -2099,9 +2110,9 @@ int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
     if (p_verbose > 1) {
       verbose_enter();
       if (SOURCING_NAME == NULL) {
-        smsg(_("could not source \"%s\""), fname);
+        smsg(0, _("could not source \"%s\""), fname);
       } else {
-        smsg(_("line %" PRId64 ": could not source \"%s\""),
+        smsg(0, _("line %" PRId64 ": could not source \"%s\""),
              (int64_t)SOURCING_LNUM, fname);
       }
       verbose_leave();
@@ -2115,9 +2126,9 @@ int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
   if (p_verbose > 1) {
     verbose_enter();
     if (SOURCING_NAME == NULL) {
-      smsg(_("sourcing \"%s\""), fname);
+      smsg(0, _("sourcing \"%s\""), fname);
     } else {
-      smsg(_("line %" PRId64 ": sourcing \"%s\""), (int64_t)SOURCING_LNUM, fname);
+      smsg(0, _("line %" PRId64 ": sourcing \"%s\""), (int64_t)SOURCING_LNUM, fname);
     }
     verbose_leave();
   }
@@ -2140,7 +2151,7 @@ int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
   cookie.finished = false;
 
   // Check if this script has a breakpoint.
-  cookie.breakpoint = dbg_find_breakpoint(true, fname_exp, (linenr_T)0);
+  cookie.breakpoint = dbg_find_breakpoint(true, fname_exp, 0);
   cookie.fname = fname_exp;
   cookie.dbg_tick = debug_tick;
 
@@ -2250,9 +2261,9 @@ int do_source(char *fname, int check_other, int is_vimrc, int *ret_sid)
   estack_pop();
   if (p_verbose > 1) {
     verbose_enter();
-    smsg(_("finished sourcing %s"), fname);
+    smsg(0, _("finished sourcing %s"), fname);
     if (SOURCING_NAME != NULL) {
-      smsg(_("continuing in %s"), SOURCING_NAME);
+      smsg(0, _("continuing in %s"), SOURCING_NAME);
     }
     verbose_leave();
   }
@@ -2337,7 +2348,7 @@ void ex_scriptnames(exarg_T *eap)
       vim_snprintf(IObuff, IOSIZE, "%3d: %s", i, NameBuff);
       if (!message_filtered(IObuff)) {
         msg_putchar('\n');
-        msg_outtrans(IObuff);
+        msg_outtrans(IObuff, 0);
         line_breakcheck();
       }
     }
@@ -2377,7 +2388,7 @@ char *get_scriptname(LastSet last_set, bool *should_free)
   case SID_WINLAYOUT:
     return _("changed window size");
   case SID_LUA:
-    return _("Lua");
+    return _("Lua (run Nvim with -V1 for more details)");
   case SID_API_CLIENT:
     snprintf(IObuff, IOSIZE, _("API client (channel id %" PRIu64 ")"), last_set.channel_id);
     return IObuff;
@@ -2425,8 +2436,8 @@ linenr_T get_sourced_lnum(LineGetter fgetline, void *cookie)
   FUNC_ATTR_PURE
 {
   return fgetline == getsourceline
-        ? ((struct source_cookie *)cookie)->sourcing_lnum
-        : SOURCING_LNUM;
+         ? ((source_cookie_T *)cookie)->sourcing_lnum
+         : SOURCING_LNUM;
 }
 
 /// Return a List of script-local functions defined in the script with id "sid".
@@ -2499,7 +2510,7 @@ void f_getscriptinfo(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       continue;
     }
 
-    if (filterpat && !vim_regexec(&regmatch, si->sn_name, (colnr_T)0)) {
+    if (filterpat && !vim_regexec(&regmatch, si->sn_name, 0)) {
       continue;
     }
 
@@ -2531,7 +2542,7 @@ void f_getscriptinfo(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 ///         some error.
 char *getsourceline(int c, void *cookie, int indent, bool do_concat)
 {
-  struct source_cookie *sp = (struct source_cookie *)cookie;
+  source_cookie_T *sp = (source_cookie_T *)cookie;
   char *line;
 
   // If breakpoints have been added/deleted need to check for it.
@@ -2545,8 +2556,8 @@ char *getsourceline(int c, void *cookie, int indent, bool do_concat)
   // Set the current sourcing line number.
   SOURCING_LNUM = sp->sourcing_lnum + 1;
   // Get current line.  If there is a read-ahead line, use it, otherwise get
-  // one now.
-  if (sp->finished) {
+  // one now.  "fp" is NULL if actually using a string.
+  if (sp->finished || sp->fp == NULL) {
     line = NULL;
   } else if (sp->nextline == NULL) {
     line = get_one_sourceline(sp);
@@ -2590,10 +2601,8 @@ char *getsourceline(int c, void *cookie, int indent, bool do_concat)
   }
 
   if (line != NULL && sp->conv.vc_type != CONV_NONE) {
-    char *s;
-
     // Convert the encoding of the script line.
-    s = string_convert(&sp->conv, line, NULL);
+    char *s = string_convert(&sp->conv, line, NULL);
     if (s != NULL) {
       xfree(line);
       line = s;
@@ -2611,14 +2620,14 @@ char *getsourceline(int c, void *cookie, int indent, bool do_concat)
   return line;
 }
 
-static char *get_one_sourceline(struct source_cookie *sp)
+static char *get_one_sourceline(source_cookie_T *sp)
 {
   garray_T ga;
   int len;
   int c;
   char *buf;
 #ifdef USE_CRNL
-  int has_cr;                           // CR-LF found
+  bool has_cr;                           // CR-LF found
 #endif
   bool have_read = false;
 
@@ -2717,10 +2726,10 @@ retry:
 /// Without the multi-byte feature it's simply ignored.
 void ex_scriptencoding(exarg_T *eap)
 {
-  struct source_cookie *sp;
+  source_cookie_T *sp;
   char *name;
 
-  if (!getline_equal(eap->getline, eap->cookie, getsourceline)) {
+  if (!getline_equal(eap->ea_getline, eap->cookie, getsourceline)) {
     emsg(_("E167: :scriptencoding used outside of a sourced file"));
     return;
   }
@@ -2732,7 +2741,7 @@ void ex_scriptencoding(exarg_T *eap)
   }
 
   // Setup for conversion from the specified encoding to 'encoding'.
-  sp = (struct source_cookie *)getline_cookie(eap->getline, eap->cookie);
+  sp = (source_cookie_T *)getline_cookie(eap->ea_getline, eap->cookie);
   convert_setup(&sp->conv, name, p_enc);
 
   if (name != eap->arg) {
@@ -2743,7 +2752,7 @@ void ex_scriptencoding(exarg_T *eap)
 /// ":finish": Mark a sourced file as finished.
 void ex_finish(exarg_T *eap)
 {
-  if (getline_equal(eap->getline, eap->cookie, getsourceline)) {
+  if (getline_equal(eap->ea_getline, eap->cookie, getsourceline)) {
     do_finish(eap, false);
   } else {
     emsg(_("E168: :finish used outside of a sourced file"));
@@ -2753,26 +2762,22 @@ void ex_finish(exarg_T *eap)
 /// Mark a sourced file as finished.  Possibly makes the ":finish" pending.
 /// Also called for a pending finish at the ":endtry" or after returning from
 /// an extra do_cmdline().  "reanimate" is used in the latter case.
-void do_finish(exarg_T *eap, int reanimate)
+void do_finish(exarg_T *eap, bool reanimate)
 {
-  int idx;
-
   if (reanimate) {
-    ((struct source_cookie *)getline_cookie(eap->getline,
-                                            eap->cookie))->finished = false;
+    ((source_cookie_T *)getline_cookie(eap->ea_getline, eap->cookie))->finished = false;
   }
 
   // Cleanup (and deactivate) conditionals, but stop when a try conditional
   // not in its finally clause (which then is to be executed next) is found.
   // In this case, make the ":finish" pending for execution at the ":endtry".
   // Otherwise, finish normally.
-  idx = cleanup_conditionals(eap->cstack, 0, true);
+  int idx = cleanup_conditionals(eap->cstack, 0, true);
   if (idx >= 0) {
     eap->cstack->cs_pending[idx] = CSTP_FINISH;
     report_make_pending(CSTP_FINISH, NULL);
   } else {
-    ((struct source_cookie *)getline_cookie(eap->getline,
-                                            eap->cookie))->finished = true;
+    ((source_cookie_T *)getline_cookie(eap->ea_getline, eap->cookie))->finished = true;
   }
 }
 
@@ -2782,7 +2787,7 @@ void do_finish(exarg_T *eap, int reanimate)
 bool source_finished(LineGetter fgetline, void *cookie)
 {
   return getline_equal(fgetline, cookie, getsourceline)
-         && ((struct source_cookie *)getline_cookie(fgetline, cookie))->finished;
+         && ((source_cookie_T *)getline_cookie(fgetline, cookie))->finished;
 }
 
 /// Return the autoload script name for a function or variable name
@@ -2852,7 +2857,7 @@ bool script_autoload(const char *const name, const size_t name_len, const bool r
     // Try loading the package from $VIMRUNTIME/autoload/<name>.vim
     // Use "ret_sid" to avoid loading the same script again.
     int ret_sid;
-    if (do_in_runtimepath(scriptname, 0, source_callback, &ret_sid) == OK) {
+    if (do_in_runtimepath(scriptname, DIP_START, source_callback, &ret_sid) == OK) {
       ret = true;
     }
   }

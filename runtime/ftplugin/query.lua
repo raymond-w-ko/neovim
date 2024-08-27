@@ -1,6 +1,6 @@
 -- Neovim filetype plugin file
--- Language:	Tree-sitter query
--- Last Change:	2022 Apr 25
+-- Language:	Treesitter query
+-- Last Change:	2024 Jul 03
 
 if vim.b.did_ftplugin == 1 then
   return
@@ -13,6 +13,8 @@ vim.treesitter.start()
 
 -- set omnifunc
 vim.bo.omnifunc = 'v:lua.vim.treesitter.query.omnifunc'
+
+vim.opt_local.iskeyword:append('.')
 
 -- query linter
 local buf = vim.api.nvim_get_current_buf()
@@ -30,4 +32,7 @@ if not vim.b.disable_query_linter and #query_lint_on > 0 then
 end
 
 -- it's a lisp!
-vim.cmd([[ runtime! ftplugin/lisp.vim ]])
+vim.cmd([[runtime! ftplugin/lisp.vim]])
+
+vim.b.undo_ftplugin = vim.b.undo_ftplugin .. ' | setl omnifunc< iskeyword<'
+vim.b.undo_ftplugin = vim.b.undo_ftplugin .. ' | call v:lua.vim.treesitter.stop()'

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -8,26 +5,30 @@
 #include "klib/kvec.h"
 #include "mpack/conv.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
-#include "nvim/macros.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/grid.h"
+#include "nvim/macros_defs.h"
 #include "nvim/memory.h"
 #include "nvim/msgpack_rpc/channel_defs.h"
-#include "nvim/msgpack_rpc/helpers.h"
 #include "nvim/msgpack_rpc/unpacker.h"
+#include "nvim/strings.h"
 #include "nvim/ui_client.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "msgpack_rpc/unpacker.c.generated.h"
 #endif
 
-Object unpack(const char *data, size_t size, Error *err)
+Object unpack(const char *data, size_t size, Arena *arena, Error *err)
 {
   Unpacker unpacker;
   mpack_parser_init(&unpacker.parser, 0);
   unpacker.parser.data.p = &unpacker;
+  unpacker.arena = *arena;
 
   int result = mpack_parse(&unpacker.parser, &data, &size,
                            api_parse_enter, api_parse_exit);
+
+  *arena = unpacker.arena;
 
   if (result == MPACK_NOMEM) {
     api_set_error(err, kErrorTypeException, "object was too deep to unpack");
@@ -172,9 +173,6 @@ static void api_parse_enter(mpack_parser_t *parser, mpack_node_t *node)
     node->data[0].p = result;
     break;
   }
-
-  default:
-    abort();
   }
 }
 
@@ -190,6 +188,8 @@ void unpacker_init(Unpacker *p)
   p->unpack_error = ERROR_INIT;
 
   p->arena = (Arena)ARENA_EMPTY;
+
+  p->has_grid_line_event = false;
 }
 
 void unpacker_teardown(Unpacker *p)
@@ -207,6 +207,7 @@ bool unpacker_parse_header(Unpacker *p)
 
   assert(!ERROR_SET(&p->unpack_error));
 
+  // TODO(bfredl): eliminate p->reader, we can use mpack_rtoken directly
 #define NEXT(tok) \
   result = mpack_read(&p->reader, &data, &size, &tok); \
   if (result) { goto error; }
@@ -293,19 +294,20 @@ error:
 // objects. For the moment "redraw/grid_line" uses a hand-rolled decoder,
 // to avoid a blizzard of small objects for each screen cell.
 //
-// <0>[2, "redraw", <10>[{11}["method", <12>[args], <12>[args], ...], <11>[...], ...]]
+// <0>[2, "redraw", <10>[<11>["method", <12>[args], <12>[args], ...], <11>[...], ...]]
 //
 // Where [args] gets unpacked as an Array. Note: first {11} is not saved as a state.
 //
 // When method is "grid_line", we furthermore decode a cell at a time like:
 //
-// <0>[2, "redraw", <10>[{11}["grid_line", <14>[g, r, c, [<15>[cell], <15>[cell], ...]], ...], <11>[...], ...]]
+// <0>[2, "redraw", <10>[<11>["grid_line", <14>[g, r, c, [<15>[cell], <15>[cell], ...], <16>wrap]], <11>[...], ...]]
 //
 // where [cell] is [char, repeat, attr], where 'repeat' and 'attr' is optional
 
 bool unpacker_advance(Unpacker *p)
 {
   assert(p->state >= 0);
+  p->has_grid_line_event = false;
   if (p->state == 0) {
     if (!unpacker_parse_header(p)) {
       return false;
@@ -324,8 +326,9 @@ bool unpacker_advance(Unpacker *p)
       return false;
     }
 
-    if (p->state == 15) {
+    if (p->state == 16) {
       // grid_line event already unpacked
+      p->has_grid_line_event = true;
       goto done;
     } else {
       assert(p->state == 12);
@@ -359,10 +362,10 @@ done:
     p->state = 0;
     return true;
   case 13:
-  case 15:
+  case 16:
     p->ncalls--;
     if (p->ncalls > 0) {
-      p->state = (p->state == 15) ? 14 : 12;
+      p->state = (p->state == 16) ? 14 : 12;
     } else if (p->nevents > 0) {
       p->state = 11;
     } else {
@@ -381,9 +384,8 @@ bool unpacker_parse_redraw(Unpacker *p)
 
   const char *data = p->read_ptr;
   size_t size = p->read_size;
-  GridLineEvent *g = p->grid_line_event;
+  GridLineEvent *g = &p->grid_line_event;
 
-// -V:NEXT_TYPE:501
 #define NEXT_TYPE(tok, typ) \
   result = mpack_rtoken(&data, &size, &tok); \
   if (result == MPACK_EOF) { \
@@ -395,7 +397,6 @@ bool unpacker_parse_redraw(Unpacker *p)
     return false; \
   }
 
-redo:
   switch (p->state) {
   case 10:
     NEXT_TYPE(tok, MPACK_TOKEN_ARRAY);
@@ -425,16 +426,10 @@ redo:
     p->read_size = size;
     if (p->ui_handler.fn != ui_client_event_grid_line) {
       p->state = 12;
-      if (p->grid_line_event) {
-        arena_mem_free(arena_finish(&p->arena));
-        p->grid_line_event = NULL;
-      }
       return true;
     } else {
       p->state = 14;
       p->arena = (Arena)ARENA_EMPTY;
-      p->grid_line_event = arena_alloc(&p->arena, sizeof *p->grid_line_event, true);
-      g = p->grid_line_event;
     }
     FALLTHROUGH;
 
@@ -463,63 +458,64 @@ redo:
     FALLTHROUGH;
 
   case 15:
-    assert(g->icell < g->ncells);
+    for (; g->icell != g->ncells; g->icell++) {
+      assert(g->icell < g->ncells);
 
-    NEXT_TYPE(tok, MPACK_TOKEN_ARRAY);
-    int cellarrsize = (int)tok.length;
-    if (cellarrsize < 1 || cellarrsize > 3) {
-      p->state = -1;
-      return false;
-    }
-
-    NEXT_TYPE(tok, MPACK_TOKEN_STR);
-    if (tok.length > size) {
-      return false;
-    }
-
-    const char *cellbuf = data;
-    size_t cellsize = tok.length;
-    data += cellsize;
-    size -= cellsize;
-
-    if (cellarrsize >= 2) {
-      NEXT_TYPE(tok, MPACK_TOKEN_SINT);
-      g->cur_attr = (int)tok.data.value.lo;
-    }
-
-    int repeat = 1;
-    if (cellarrsize >= 3) {
-      NEXT_TYPE(tok, MPACK_TOKEN_UINT);
-      repeat = (int)tok.data.value.lo;
-    }
-
-    g->clear_width = 0;
-    if (g->icell == g->ncells - 1 && cellsize == 1 && cellbuf[0] == ' ' && repeat > 1) {
-      g->clear_width = repeat;
-    } else {
-      for (int r = 0; r < repeat; r++) {
-        if (g->coloff >= (int)grid_line_buf_size) {
-          p->state = -1;
-          return false;
-        }
-        memcpy(grid_line_buf_char[g->coloff], cellbuf, cellsize);
-        grid_line_buf_char[g->coloff][cellsize] = NUL;
-        grid_line_buf_attr[g->coloff++] = g->cur_attr;
+      NEXT_TYPE(tok, MPACK_TOKEN_ARRAY);
+      int cellarrsize = (int)tok.length;
+      if (cellarrsize < 1 || cellarrsize > 3) {
+        p->state = -1;
+        return false;
       }
-    }
 
-    g->icell++;
-    if (g->icell == g->ncells) {
-      NEXT_TYPE(tok, MPACK_TOKEN_BOOLEAN);
-      g->wrap = mpack_unpack_boolean(tok);
+      NEXT_TYPE(tok, MPACK_TOKEN_STR);
+      if (tok.length > size) {
+        return false;
+      }
+
+      const char *cellbuf = data;
+      size_t cellsize = tok.length;
+      data += cellsize;
+      size -= cellsize;
+
+      if (cellarrsize >= 2) {
+        NEXT_TYPE(tok, MPACK_TOKEN_SINT);
+        g->cur_attr = (int)tok.data.value.lo;
+      }
+
+      int repeat = 1;
+      if (cellarrsize >= 3) {
+        NEXT_TYPE(tok, MPACK_TOKEN_UINT);
+        repeat = (int)tok.data.value.lo;
+      }
+
+      g->clear_width = 0;
+      if (g->icell == g->ncells - 1 && cellsize == 1 && cellbuf[0] == ' ' && repeat > 1) {
+        g->clear_width = repeat;
+      } else {
+        schar_T sc = schar_from_buf(cellbuf, cellsize);
+        for (int r = 0; r < repeat; r++) {
+          if (g->coloff >= (int)grid_line_buf_size) {
+            p->state = -1;
+            return false;
+          }
+          grid_line_buf_char[g->coloff] = sc;
+          grid_line_buf_attr[g->coloff++] = g->cur_attr;
+        }
+      }
+
       p->read_ptr = data;
       p->read_size = size;
-      return true;
     }
+    p->state = 16;
+    FALLTHROUGH;
 
+  case 16:
+    NEXT_TYPE(tok, MPACK_TOKEN_BOOLEAN);
+    g->wrap = mpack_unpack_boolean(tok);
     p->read_ptr = data;
     p->read_size = size;
-    goto redo;
+    return true;
 
   case 12:
     return true;
@@ -527,4 +523,198 @@ redo:
   default:
     abort();
   }
+}
+
+/// Requires a complete string. safe to use e.g. in shada as we have loaded a
+/// complete shada item into a linear buffer.
+///
+/// Data and size are preserved in cause of failure.
+///
+/// @return "data" is NULL only when failure (non-null data and size=0 for
+/// valid empty string)
+String unpack_string(const char **data, size_t *size)
+{
+  const char *data2 = *data;
+  size_t size2 = *size;
+  mpack_token_t tok;
+
+  // TODO(bfredl): this code is hot a f, specialize!
+  int result = mpack_rtoken(&data2, &size2, &tok);
+  if (result || (tok.type != MPACK_TOKEN_STR && tok.type != MPACK_TOKEN_BIN)) {
+    return (String)STRING_INIT;
+  }
+  if (*size < tok.length) {
+    // result = MPACK_EOF;
+    return (String)STRING_INIT;
+  }
+  (*data) = data2 + tok.length;
+  (*size) = size2 - tok.length;
+  return cbuf_as_string((char *)data2, tok.length);
+}
+
+/// @return -1 if not an array or EOF. otherwise size of valid array
+ssize_t unpack_array(const char **data, size_t *size)
+{
+  // TODO(bfredl): this code is hot, specialize!
+  mpack_token_t tok;
+  int result = mpack_rtoken(data, size, &tok);
+  if (result || tok.type != MPACK_TOKEN_ARRAY) {
+    return -1;
+  }
+  return tok.length;
+}
+
+/// does not keep "data" untouched on failure
+bool unpack_integer(const char **data, size_t *size, Integer *res)
+{
+  mpack_token_t tok;
+  int result = mpack_rtoken(data, size, &tok);
+  if (result) {
+    return false;
+  }
+  return unpack_uint_or_sint(tok, res);
+}
+
+bool unpack_uint_or_sint(mpack_token_t tok, Integer *res)
+{
+  if (tok.type == MPACK_TOKEN_UINT) {
+    *res = (Integer)mpack_unpack_uint(tok);
+    return true;
+  } else if (tok.type == MPACK_TOKEN_SINT) {
+    *res = (Integer)mpack_unpack_sint(tok);
+    return true;
+  }
+  return false;
+}
+
+static void parse_nop(mpack_parser_t *parser, mpack_node_t *node)
+{
+}
+
+int unpack_skip(const char **data, size_t *size)
+{
+  mpack_parser_t parser;
+  mpack_parser_init(&parser, 0);
+
+  return mpack_parse(&parser, data, size, parse_nop, parse_nop);
+}
+
+void push_additional_data(AdditionalDataBuilder *ad, const char *data, size_t size)
+{
+  if (kv_size(*ad) == 0) {
+    AdditionalData init = { 0 };
+    kv_concat_len(*ad, &init, sizeof(init));
+  }
+  AdditionalData *a = (AdditionalData *)ad->items;
+  a->nitems++;
+  a->nbytes += (uint32_t)size;
+  kv_concat_len(*ad, data, size);
+}
+
+// currently only used for shada, so not re-entrant like unpacker_parse_redraw
+bool unpack_keydict(void *retval, FieldHashfn hashy, AdditionalDataBuilder *ad, const char **data,
+                    size_t *restrict size, char **error)
+{
+  OptKeySet *ks = (OptKeySet *)retval;
+  mpack_token_t tok;
+
+  int result = mpack_rtoken(data, size, &tok);
+  if (result || tok.type != MPACK_TOKEN_MAP) {
+    *error = xstrdup("is not a dictionary");
+    return false;
+  }
+
+  size_t map_size = tok.length;
+
+  for (size_t i = 0; i < map_size; i++) {
+    const char *item_start = *data;
+    // TODO(bfredl): we could specialize a hot path for FIXSTR here
+    String key = unpack_string(data, size);
+    if (!key.data) {
+      *error = arena_printf(NULL, "has key value which is not a string").data;
+      return false;
+    } else if (key.size == 0) {
+      *error = arena_printf(NULL, "has empty key").data;
+      return false;
+    }
+    KeySetLink *field = hashy(key.data, key.size);
+
+    if (!field) {
+      int status = unpack_skip(data, size);
+      if (status) {
+        return false;
+      }
+
+      if (ad) {
+        push_additional_data(ad, item_start, (size_t)(*data - item_start));
+      }
+      continue;
+    }
+
+    assert(field->opt_index >= 0);
+    uint64_t flag = (1ULL << field->opt_index);
+    if (ks->is_set_ & flag) {
+      *error = xstrdup("duplicate key");
+      return false;
+    }
+    ks->is_set_ |= flag;
+
+    char *mem = ((char *)retval + field->ptr_off);
+    switch (field->type) {
+    case kObjectTypeBoolean:
+      if (*size == 0 || (**data & 0xfe) != 0xc2) {
+        *error = arena_printf(NULL, "has %.*s key value which is not a boolean", (int)key.size,
+                              key.data).data;
+        return false;
+      }
+      *(Boolean *)mem = **data & 0x01;
+      (*data)++; (*size)--;
+      break;
+
+    case kObjectTypeInteger:
+      if (!unpack_integer(data, size, (Integer *)mem)) {
+        *error = arena_printf(NULL, "has %.*s key value which is not an integer", (int)key.size,
+                              key.data).data;
+        return false;
+      }
+      break;
+
+    case kObjectTypeString: {
+      String val = unpack_string(data, size);
+      if (!val.data) {
+        *error = arena_printf(NULL, "has %.*s key value which is not a binary", (int)key.size,
+                              key.data).data;
+        return false;
+      }
+      *(String *)mem = val;
+      break;
+    }
+
+    case kUnpackTypeStringArray: {
+      ssize_t len = unpack_array(data, size);
+      if (len < 0) {
+        *error = arena_printf(NULL, "has %.*s key with non-array value", (int)key.size,
+                              key.data).data;
+        return false;
+      }
+      StringArray *a = (StringArray *)mem;
+      kv_ensure_space(*a, (size_t)len);
+      for (size_t j = 0; j < (size_t)len; j++) {
+        String item = unpack_string(data, size);
+        if (!item.data) {
+          *error = arena_printf(NULL, "has %.*s array with non-binary value", (int)key.size,
+                                key.data).data;
+          return false;
+        }
+        kv_push(*a, item);
+      }
+      break;
+    }
+
+    default:
+      abort();  // not supported
+    }
+  }
+
+  return true;
 }

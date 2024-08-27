@@ -339,6 +339,11 @@ Print version information and exit.
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width Fl
+.It Ev NVIM_APPNAME
+The name of sub-directories used within each XDG user directory.
+Defaults to
+.Cm nvim .
+:help $NVIM_APPNAME
 .It Ev NVIM_LOG_FILE
 Low-level log file, usually found at ~/.local/state/nvim/log.
 :help $NVIM_LOG_FILE
@@ -382,10 +387,10 @@ features like
 .El
 .Sh FILES
 .Bl -tag -width "~/.config/nvim/init.vim"
-.It Pa ~/.config/nvim/init.vim
+.It Pa ~/.config/nvim/init.lua
 User-local
 .Nm
-configuration file.
+Lua configuration file.
 .It Pa ~/.config/nvim
 User-local
 .Nm

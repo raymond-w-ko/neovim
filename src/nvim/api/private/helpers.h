@@ -1,19 +1,16 @@
-#ifndef NVIM_API_PRIVATE_HELPERS_H
-#define NVIM_API_PRIVATE_HELPERS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 
 #include "klib/kvec.h"
-#include "nvim/api/private/defs.h"
-#include "nvim/decoration.h"
+#include "nvim/api/private/defs.h"  // IWYU pragma: keep
+#include "nvim/buffer_defs.h"  // IWYU pragma: keep
+#include "nvim/eval/typval_defs.h"  // IWYU pragma: keep
 #include "nvim/ex_eval_defs.h"
-#include "nvim/getchar.h"
-#include "nvim/globals.h"
-#include "nvim/macros.h"
-#include "nvim/map.h"
-#include "nvim/memory.h"
-#include "nvim/vim.h"
+#include "nvim/macros_defs.h"
+#include "nvim/map_defs.h"
+#include "nvim/message_defs.h"  // IWYU pragma: keep
 
 #define OBJECT_OBJ(o) o
 
@@ -35,6 +32,10 @@
 
 #define CSTR_AS_OBJ(s) STRING_OBJ(cstr_as_string(s))
 #define CSTR_TO_OBJ(s) STRING_OBJ(cstr_to_string(s))
+#define CSTR_TO_ARENA_STR(arena, s) arena_string(arena, cstr_as_string(s))
+#define CSTR_TO_ARENA_OBJ(arena, s) STRING_OBJ(CSTR_TO_ARENA_STR(arena, s))
+#define CBUF_TO_ARENA_STR(arena, s, len) arena_string(arena, cbuf_as_string((char *)(s), len))
+#define CBUF_TO_ARENA_OBJ(arena, s, len) STRING_OBJ(CBUF_TO_ARENA_STR(arena, s, len))
 
 #define BUFFER_OBJ(s) ((Object) { \
     .type = kObjectTypeBuffer, \
@@ -63,8 +64,9 @@
 #define NIL ((Object)OBJECT_INIT)
 #define NULL_STRING ((String)STRING_INIT)
 
-// currently treat key=vim.NIL as if the key was missing
-#define HAS_KEY(o) ((o).type != kObjectTypeNil)
+#define HAS_KEY(d, typ, key) (((d)->is_set__##typ##_ & (1 << KEYSET_OPTIDX_##typ##__##key)) != 0)
+
+#define GET_BOOL_OR_TRUE(d, typ, key) (HAS_KEY(d, typ, key) ? (d)->key : true)
 
 #define PUT(dict, k, v) \
   kv_push(dict, ((KeyValuePair) { .key = cstr_to_string(k), .value = v }))
@@ -72,7 +74,8 @@
 #define PUT_C(dict, k, v) \
   kv_push_c(dict, ((KeyValuePair) { .key = cstr_as_string(k), .value = v }))
 
-#define PUT_BOOL(dict, name, condition) PUT(dict, name, BOOLEAN_OBJ(condition));
+#define PUT_KEY(d, typ, key, v) \
+  do { (d).is_set__##typ##_ |= (1 << KEYSET_OPTIDX_##typ##__##key); (d).key = v; } while (0)
 
 #define ADD(array, item) \
   kv_push(array, item)
@@ -91,6 +94,8 @@
   KeyValuePair name##__items[maxsize]; \
   name.capacity = maxsize; \
   name.items = name##__items; \
+
+typedef kvec_withinit_t(Object, 16) ArrayBuilder;
 
 #define cbuf_as_string(d, s) ((String) { .data = d, .size = s })
 
@@ -118,16 +123,11 @@
 #define api_init_array = ARRAY_DICT_INIT
 #define api_init_dictionary = ARRAY_DICT_INIT
 
-#define api_free_boolean(value)
-#define api_free_integer(value)
-#define api_free_float(value)
-#define api_free_buffer(value)
-#define api_free_window(value)
-#define api_free_tabpage(value)
+#define KEYDICT_INIT { 0 }
 
-EXTERN PMap(int) buffer_handles INIT(= MAP_INIT);
-EXTERN PMap(int) window_handles INIT(= MAP_INIT);
-EXTERN PMap(int) tabpage_handles INIT(= MAP_INIT);
+EXTERN PMap(int) buffer_handles INIT( = MAP_INIT);
+EXTERN PMap(int) window_handles INIT( = MAP_INIT);
+EXTERN PMap(int) tabpage_handles INIT( = MAP_INIT);
 
 #define handle_get_buffer(h) pmap_get(int)(&buffer_handles, (h))
 #define handle_get_window(h) pmap_get(int)(&window_handles, (h))
@@ -198,5 +198,3 @@ typedef struct {
     current_channel_id = save_channel_id; \
     current_sctx = save_current_sctx; \
   } while (0);
-
-#endif  // NVIM_API_PRIVATE_HELPERS_H

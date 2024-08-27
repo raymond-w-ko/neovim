@@ -5,16 +5,18 @@ local F = {}
 --- If all arguments are nil, returns nil.
 ---
 --- Examples:
---- <pre>
+---
+--- ```lua
 --- local a = nil
 --- local b = nil
 --- local c = 42
 --- local d = true
 --- assert(vim.F.if_nil(a, b, c, d) == 42)
---- </pre>
+--- ```
 ---
----@param ... any
----@return any
+---@generic T
+---@param ... T
+---@return T
 function F.if_nil(...)
   local nargs = select('#', ...)
   for i = 1, nargs do

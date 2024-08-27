@@ -1,46 +1,10 @@
-#ifndef NVIM_EVENT_PROCESS_H
-#define NVIM_EVENT_PROCESS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
-#include "nvim/eval/typval_defs.h"
-#include "nvim/event/loop.h"
-#include "nvim/event/multiqueue.h"
-#include "nvim/event/rstream.h"
-#include "nvim/event/stream.h"
-#include "nvim/event/wstream.h"
-
-struct process;
-
-typedef enum {
-  kProcessTypeUv,
-  kProcessTypePty,
-} ProcessType;
-
-typedef struct process Process;
-typedef void (*process_exit_cb)(Process *proc, int status, void *data);
-typedef void (*internal_process_cb)(Process *proc);
-
-struct process {
-  ProcessType type;
-  Loop *loop;
-  void *data;
-  int pid, status, refcount;
-  uint8_t exit_signal;  // Signal used when killing (on Windows).
-  uint64_t stopped_time;  // process_stop() timestamp
-  const char *cwd;
-  char **argv;
-  const char *exepath;
-  dict_T *env;
-  Stream in, out, err;
-  /// Exit handler. If set, user must call process_free().
-  process_exit_cb cb;
-  internal_process_cb internal_exit_cb, internal_close_cb;
-  bool closed, detach, overlapped, fwd_err;
-  MultiQueue *events;
-};
+#include "nvim/event/defs.h"  // IWYU pragma: keep
+#include "nvim/types_defs.h"
 
 static inline Process process_init(Loop *loop, ProcessType type, void *data)
 {
@@ -57,8 +21,8 @@ static inline Process process_init(Loop *loop, ProcessType type, void *data)
     .argv = NULL,
     .exepath = NULL,
     .in = { .closed = false },
-    .out = { .closed = false },
-    .err = { .closed = false },
+    .out = { .s.closed = false },
+    .err = { .s.closed = false },
     .cb = NULL,
     .closed = false,
     .internal_close_cb = NULL,
@@ -83,4 +47,3 @@ static inline bool process_is_stopped(Process *proc)
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "event/process.h.generated.h"
 #endif
-#endif  // NVIM_EVENT_PROCESS_H

@@ -58,7 +58,7 @@ check_core_dumps() {
 }
 
 check_logs() {
-  # Iterate through each log to remove an useless warning.
+  # Iterate through each log to remove a useless warning.
   # shellcheck disable=SC2044
   for log in $(find "${1}" -type f -name "${2}"); do
     sed -i "${log}" \
@@ -85,7 +85,5 @@ valgrind_check() {
 }
 
 check_sanitizer() {
-  if test -n "${CLANG_SANITIZER}"; then
-    check_logs "${1}" "*san.*" | cat
-  fi
+  check_logs "${1}" "*san.*"
 }

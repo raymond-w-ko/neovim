@@ -1,12 +1,18 @@
-#ifndef NVIM_MBYTE_DEFS_H
-#define NVIM_MBYTE_DEFS_H
+#pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
-#include "nvim/iconv.h"
+#include "nvim/iconv_defs.h"
 
-/// max length of an unicode char
-enum { MB_MAXCHAR = 6, };
+enum {
+  /// Maximum number of bytes in a multi-byte character.  It can be one 32-bit
+  /// character of up to 6 bytes, or one 16-bit character of up to three bytes
+  /// plus six following composing characters of three bytes each.
+  MB_MAXBYTES = 21,
+  /// Maximum length of a Unicode character, excluding composing characters.
+  MB_MAXCHAR = 6,
+};
 
 /// properties used in enc_canon_table[] (first three mutually exclusive)
 enum {
@@ -51,4 +57,17 @@ typedef struct {
                   ///< otherwise use '?'.
 } vimconv_T;
 
-#endif  // NVIM_MBYTE_DEFS_H
+typedef struct {
+  int32_t value;  ///< Code point.
+  int len;        ///< Length in bytes.
+} CharInfo;
+
+typedef struct {
+  char *ptr;     ///< Pointer to the first byte of the character.
+  CharInfo chr;  ///< Information about the character.
+} StrCharInfo;
+
+typedef struct {
+  int8_t begin_off;  ///< Offset to the first byte of the codepoint.
+  int8_t end_off;    ///< Offset to one past the end byte of the codepoint.
+} CharBoundsOff;

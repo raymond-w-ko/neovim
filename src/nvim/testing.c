@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // testing.c: Support for tests
 
 #include <inttypes.h>
@@ -9,26 +6,30 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/encode.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/garray_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
-#include "nvim/macros.h"
+#include "nvim/hashtab_defs.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/os/os.h"
+#include "nvim/os/fs.h"
 #include "nvim/runtime.h"
+#include "nvim/runtime_defs.h"
 #include "nvim/strings.h"
 #include "nvim/testing.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 /// Type of assert_* check being performed
 typedef enum {
@@ -45,7 +46,8 @@ typedef enum {
 #endif
 
 static const char e_assert_fails_second_arg[]
-  = N_("E856: \"assert_fails()\" second argument must be a string or a list with one or two strings");
+  = N_(
+      "E856: \"assert_fails()\" second argument must be a string or a list with one or two strings");
 static const char e_assert_fails_fourth_argument[]
   = N_("E1115: \"assert_fails()\" fourth argument must be a number");
 static const char e_assert_fails_fifth_argument[]
@@ -128,7 +130,7 @@ static void ga_concat_shorten_esc(garray_T *gap, const char *str)
     return;
   }
 
-  for (const char *p = str; *p != NUL; p++) {
+  for (const char *p = str; *p != NUL;) {
     int same_len = 1;
     const char *s = p;
     const int c = mb_cptr2char_adv(&s);
@@ -144,9 +146,10 @@ static void ga_concat_shorten_esc(garray_T *gap, const char *str)
       vim_snprintf(buf, NUMBUFLEN, "%d", same_len);
       ga_concat(gap, buf);
       ga_concat(gap, " times]");
-      p = s - 1;
+      p = s;
     } else {
       ga_concat_esc(gap, p, clen);
+      p += clen;
     }
   }
 }
@@ -155,7 +158,6 @@ static void ga_concat_shorten_esc(garray_T *gap, const char *str)
 static void fill_assert_error(garray_T *gap, typval_T *opt_msg_tv, const char *exp_str,
                               typval_T *exp_tv_arg, typval_T *got_tv_arg, assert_type_T atype)
 {
-  char *tofree;
   typval_T *exp_tv = exp_tv_arg;
   typval_T *got_tv = got_tv_arg;
   bool did_copy = false;
@@ -165,7 +167,7 @@ static void fill_assert_error(garray_T *gap, typval_T *opt_msg_tv, const char *e
       && !(opt_msg_tv->v_type == VAR_STRING
            && (opt_msg_tv->vval.v_string == NULL
                || *opt_msg_tv->vval.v_string == NUL))) {
-    tofree = encode_tv2echo(opt_msg_tv, NULL);
+    char *tofree = encode_tv2echo(opt_msg_tv, NULL);
     ga_concat(gap, tofree);
     xfree(tofree);
     ga_concat(gap, ": ");
@@ -197,7 +199,7 @@ static void fill_assert_error(garray_T *gap, typval_T *opt_msg_tv, const char *e
         if (!HASHITEM_EMPTY(hi)) {
           dictitem_T *item2 = tv_dict_find(got_d, hi->hi_key, -1);
           if (item2 == NULL
-              || !tv_equal(&TV_DICT_HI2DI(hi)->di_tv, &item2->di_tv, false, false)) {
+              || !tv_equal(&TV_DICT_HI2DI(hi)->di_tv, &item2->di_tv, false)) {
             // item of exp_d not present in got_d or values differ.
             const size_t key_len = strlen(hi->hi_key);
             tv_dict_add_tv(exp_tv->vval.v_dict, hi->hi_key, key_len, &TV_DICT_HI2DI(hi)->di_tv);
@@ -226,7 +228,7 @@ static void fill_assert_error(garray_T *gap, typval_T *opt_msg_tv, const char *e
       }
     }
 
-    tofree = encode_tv2string(exp_tv, NULL);
+    char *tofree = encode_tv2string(exp_tv, NULL);
     ga_concat_shorten_esc(gap, tofree);
     xfree(tofree);
   } else {
@@ -247,7 +249,7 @@ static void fill_assert_error(garray_T *gap, typval_T *opt_msg_tv, const char *e
     } else {
       ga_concat(gap, " but got ");
     }
-    tofree = encode_tv2string(got_tv, NULL);
+    char *tofree = encode_tv2string(got_tv, NULL);
     ga_concat_shorten_esc(gap, tofree);
     xfree(tofree);
 
@@ -270,8 +272,7 @@ static int assert_equal_common(typval_T *argvars, assert_type_T atype)
 {
   garray_T ga;
 
-  if (tv_equal(&argvars[0], &argvars[1], false, false)
-      != (atype == ASSERT_EQUAL)) {
+  if (tv_equal(&argvars[0], &argvars[1], false) != (atype == ASSERT_EQUAL)) {
     prepare_assert_error(&ga);
     fill_assert_error(&ga, &argvars[2], NULL,
                       &argvars[0], &argvars[1], atype);
@@ -703,7 +704,7 @@ static int assert_inrange(typval_T *argvars)
       char expected_str[200];
       vim_snprintf(expected_str, sizeof(expected_str),
                    "range %" PRIdVARNUMBER " - %" PRIdVARNUMBER ",",
-                   lower, upper);  // -V576
+                   lower, upper);
       fill_assert_error(&ga, &argvars[3], expected_str, NULL, &argvars[2], ASSERT_OTHER);
       assert_error(&ga);
       ga_clear(&ga);

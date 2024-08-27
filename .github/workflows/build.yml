@@ -1,12 +1,5 @@
 name: build
 on:
-  push:
-    paths:
-      - '**.cmake'
-      - '**/CMakeLists.txt'
-      - '**/CMakePresets.json'
-      - 'cmake.*/**'
-      - '.github/**'
   pull_request:
     branches:
       - 'master'
@@ -17,45 +10,42 @@ on:
       - '**/CMakePresets.json'
       - 'cmake.*/**'
       - '.github/**'
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.repository_owner == 'neovim' && github.sha || github.ref_name }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   BIN_DIR: ${{ github.workspace }}/bin
   INSTALL_PREFIX: ${{ github.workspace }}/nvim-install
 
 jobs:
-  macos-universal:
-    runs-on: macos-latest
-    timeout-minutes: 20
+  wasmtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.test }}
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: ./.github/scripts/install_deps.sh
-
-      - run: printf 'NVIM_BUILD_TYPE=Release\n' >> $GITHUB_ENV
-
-      - name: Build universal binary
-        run: ./.github/scripts/build_universal_macos.sh
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: |
+          cmake -S cmake.deps --preset ci -D ENABLE_WASMTIME=ON
+          cmake --build .deps
+          cmake --preset ci -D ENABLE_WASMTIME=ON
+          cmake --build build
 
   old-cmake:
     name: Test oldest supported cmake
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CMAKE_URL: 'https://cmake.org/files/v3.10/cmake-3.10.0-Linux-x86_64.sh'
-      CMAKE_VERSION: '3.10.0'
+      CMAKE_URL: 'https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.sh'
+      CMAKE_VERSION: '3.13.0'
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up environment
-        run: echo "$BIN_DIR" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: ./.github/scripts/install_deps.sh
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
 
       - name: Install minimum required version of cmake
         run: |
@@ -81,12 +71,10 @@ jobs:
 
   use-existing-src:
     name: Test USE_EXISTING_SRC_DIR=ON builds with no network access
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Install build dependencies
-        run: ./.github/scripts/install_deps.sh
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
 
       - name: Build bundled dependencies
         run: make deps

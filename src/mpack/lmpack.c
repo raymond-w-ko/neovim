@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /*
  * This module exports three classes, and each instance of those classes has its
  * own private registry for temporary reference storage(keeping state between
@@ -27,7 +24,7 @@
 #include <lua.h>
 #include <luaconf.h>
 
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 
 #include "lmpack.h"
 
@@ -233,7 +230,7 @@ static mpack_uint32_t lmpack_objlen(lua_State *L, int *is_array)
   while (lua_next(L, -2)) {
     lua_pop(L, 1);  /* pop value */
     isarr = isarr
-      && lua_isnumber(L, -1)            /* lua number */
+      && lua_type(L, -1) == LUA_TNUMBER /* lua number */
       && (n = lua_tonumber(L, -1)) > 0  /* greater than 0 */
       && (size_t)n == n;                /* and integer */
     max = isarr && (size_t)n > max ? (size_t)n : max;
@@ -246,7 +243,7 @@ static mpack_uint32_t lmpack_objlen(lua_State *L, int *is_array)
   }
 
 end:
-  if ((size_t)-1 > (mpack_uint32_t)-1 && len > (mpack_uint32_t)-1) // -V560
+  if ((size_t)-1 > (mpack_uint32_t)-1 && len > (mpack_uint32_t)-1)
     /* msgpack spec doesn't allow lengths > 32 bits */
     len = (mpack_uint32_t)-1;
   assert(top == lua_gettop(L));
@@ -885,7 +882,9 @@ static int lmpack_session_receive(lua_State *L)
   luaL_argcheck(L, (size_t)startpos <= len, 3,
       "start position must be less than or equal to the input string length");
 
-  str += (size_t)startpos - 1;
+  size_t offset = (size_t)startpos - 1 ;
+  str += offset;
+  len -= offset;
 
   if (session->unpacker != LUA_REFNIL) {
     lmpack_geti(L, session->reg, session->unpacker);

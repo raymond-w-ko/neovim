@@ -1,12 +1,11 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/eval/typval.h"
+#include "nvim/event/loop.h"
+#include "nvim/log.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/os/os.h"
@@ -24,9 +23,19 @@ static void CALLBACK pty_process_finish1(void *context, BOOLEAN unused)
   Process *proc = (Process *)ptyproc;
 
   os_conpty_free(ptyproc->conpty);
-  uv_timer_init(&proc->loop->uv, &ptyproc->wait_eof_timer);
-  ptyproc->wait_eof_timer.data = (void *)ptyproc;
-  uv_timer_start(&ptyproc->wait_eof_timer, wait_eof_timer_cb, 200, 200);
+  // NB: pty_process_finish1() is called on a separate thread,
+  // but the timer only works properly if it's started by the main thread.
+  loop_schedule_fast(proc->loop, event_create(start_wait_eof_timer, ptyproc));
+}
+
+static void start_wait_eof_timer(void **argv)
+  FUNC_ATTR_NONNULL_ALL
+{
+  PtyProcess *ptyproc = (PtyProcess *)argv[0];
+
+  if (ptyproc->finish_wait != NULL) {
+    uv_timer_start(&ptyproc->wait_eof_timer, wait_eof_timer_cb, 200, 200);
+  }
 }
 
 /// @returns zero on success, or negative error code.
@@ -46,7 +55,7 @@ int pty_process_spawn(PtyProcess *ptyproc)
   wchar_t *env = NULL;
   const char *emsg = NULL;
 
-  assert(proc->err.closed);
+  assert(proc->err.s.closed);
 
   if (!os_has_conpty_working() || (conpty_object = os_conpty_init(&in_name,
                                                                   &out_name, ptyproc->width,
@@ -63,10 +72,10 @@ int pty_process_spawn(PtyProcess *ptyproc)
                     pty_process_connect_cb);
   }
 
-  if (!proc->out.closed) {
+  if (!proc->out.s.closed) {
     out_req = xmalloc(sizeof(uv_connect_t));
     uv_pipe_connect(out_req,
-                    &proc->out.uv.pipe,
+                    &proc->out.s.uv.pipe,
                     out_name,
                     pty_process_connect_cb);
   }
@@ -107,6 +116,8 @@ int pty_process_spawn(PtyProcess *ptyproc)
   }
   proc->pid = (int)GetProcessId(process_handle);
 
+  uv_timer_init(&proc->loop->uv, &ptyproc->wait_eof_timer);
+  ptyproc->wait_eof_timer.data = (void *)ptyproc;
   if (!RegisterWaitForSingleObject(&ptyproc->finish_wait,
                                    process_handle,
                                    pty_process_finish1,
@@ -166,6 +177,16 @@ void pty_process_close(PtyProcess *ptyproc)
 
   pty_process_close_master(ptyproc);
 
+  if (ptyproc->finish_wait != NULL) {
+    UnregisterWaitEx(ptyproc->finish_wait, NULL);
+    ptyproc->finish_wait = NULL;
+    uv_close((uv_handle_t *)&ptyproc->wait_eof_timer, NULL);
+  }
+  if (ptyproc->process_handle != NULL) {
+    CloseHandle(ptyproc->process_handle);
+    ptyproc->process_handle = NULL;
+  }
+
   if (proc->internal_close_cb) {
     proc->internal_close_cb(proc);
   }
@@ -194,7 +215,8 @@ static void wait_eof_timer_cb(uv_timer_t *wait_eof_timer)
   PtyProcess *ptyproc = wait_eof_timer->data;
   Process *proc = (Process *)ptyproc;
 
-  if (proc->out.closed || proc->out.did_eof || !uv_is_readable(proc->out.uvstream)) {
+  assert(ptyproc->finish_wait != NULL);
+  if (proc->out.s.closed || proc->out.did_eof || !uv_is_readable(proc->out.s.uvstream)) {
     uv_timer_stop(&ptyproc->wait_eof_timer);
     pty_process_finish2(ptyproc);
   }
@@ -205,15 +227,9 @@ static void pty_process_finish2(PtyProcess *ptyproc)
 {
   Process *proc = (Process *)ptyproc;
 
-  UnregisterWaitEx(ptyproc->finish_wait, NULL);
-  uv_close((uv_handle_t *)&ptyproc->wait_eof_timer, NULL);
-
   DWORD exit_code = 0;
   GetExitCodeProcess(ptyproc->process_handle, &exit_code);
   proc->status = proc->exit_signal ? 128 + proc->exit_signal : (int)exit_code;
-
-  CloseHandle(ptyproc->process_handle);
-  ptyproc->process_handle = NULL;
 
   proc->internal_exit_cb(proc);
 }
@@ -256,9 +272,9 @@ static int build_cmd_line(char **argv, wchar_t **cmd_line, bool is_cmdexe)
   QUEUE_FOREACH(q, &args_q, {
     ArgNode *arg_node = QUEUE_DATA(q, ArgNode, node);
     xstrlcat(utf8_cmd_line, arg_node->arg, utf8_cmd_line_len);
+    QUEUE_REMOVE(q);
     xfree(arg_node->arg);
     xfree(arg_node);
-    QUEUE_REMOVE(q);
     if (!QUEUE_EMPTY(&args_q)) {
       xstrlcat(utf8_cmd_line, " ", utf8_cmd_line_len);
     }
@@ -383,7 +399,7 @@ static int build_env_block(dict_T *denv, wchar_t **env_block)
     QUEUE_INSERT_TAIL(&env_q, &env_node->node);
   }
 
-  // Additional '\0' after the final entry
+  // Additional NUL after the final entry
   env_block_len++;
 
   *env_block = xmalloc(sizeof(**env_block) * env_block_len);
@@ -409,4 +425,16 @@ cleanup:
   }
 
   return rc;
+}
+
+PtyProcess pty_process_init(Loop *loop, void *data)
+{
+  PtyProcess rv;
+  rv.process = process_init(loop, kProcessTypePty, data);
+  rv.width = 80;
+  rv.height = 24;
+  rv.conpty = NULL;
+  rv.finish_wait = NULL;
+  rv.process_handle = NULL;
+  return rv;
 }

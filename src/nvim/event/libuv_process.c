@@ -1,18 +1,17 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
+#include <locale.h>
 #include <stdint.h>
 #include <uv.h>
 
 #include "nvim/eval/typval.h"
+#include "nvim/event/defs.h"
 #include "nvim/event/libuv_process.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/process.h"
-#include "nvim/event/stream.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui_client.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -68,25 +67,22 @@ int libuv_process_spawn(LibuvProcess *uvproc)
 #ifdef MSWIN
     uvproc->uvstdio[0].flags |= proc->overlapped ? UV_OVERLAPPED_PIPE : 0;
 #endif
-    uvproc->uvstdio[0].data.stream = STRUCT_CAST(uv_stream_t,
-                                                 &proc->in.uv.pipe);
+    uvproc->uvstdio[0].data.stream = (uv_stream_t *)(&proc->in.uv.pipe);
   }
 
-  if (!proc->out.closed) {
+  if (!proc->out.s.closed) {
     uvproc->uvstdio[1].flags = UV_CREATE_PIPE | UV_WRITABLE_PIPE;
 #ifdef MSWIN
     // pipe must be readable for IOCP to work on Windows.
-    uvproc->uvstdio[1].flags |= proc->overlapped ?
-                                (UV_READABLE_PIPE | UV_OVERLAPPED_PIPE) : 0;
+    uvproc->uvstdio[1].flags |= proc->overlapped
+                                ? (UV_READABLE_PIPE | UV_OVERLAPPED_PIPE) : 0;
 #endif
-    uvproc->uvstdio[1].data.stream = STRUCT_CAST(uv_stream_t,
-                                                 &proc->out.uv.pipe);
+    uvproc->uvstdio[1].data.stream = (uv_stream_t *)(&proc->out.s.uv.pipe);
   }
 
-  if (!proc->err.closed) {
+  if (!proc->err.s.closed) {
     uvproc->uvstdio[2].flags = UV_CREATE_PIPE | UV_WRITABLE_PIPE;
-    uvproc->uvstdio[2].data.stream = STRUCT_CAST(uv_stream_t,
-                                                 &proc->err.uv.pipe);
+    uvproc->uvstdio[2].data.stream = (uv_stream_t *)(&proc->err.s.uv.pipe);
   } else if (proc->fwd_err) {
     uvproc->uvstdio[2].flags = UV_INHERIT_FD;
     uvproc->uvstdio[2].data.fd = STDERR_FILENO;
@@ -94,7 +90,7 @@ int libuv_process_spawn(LibuvProcess *uvproc)
 
   int status;
   if ((status = uv_spawn(&proc->loop->uv, &uvproc->uv, &uvproc->uvopts))) {
-    ELOG("uv_spawn(%s) failed: %s", uvproc->uvopts.file, uv_strerror(status));
+    ILOG("uv_spawn(%s) failed: %s", uvproc->uvopts.file, uv_strerror(status));
     if (uvproc->uvopts.env) {
       os_free_fullenv(uvproc->uvopts.env);
     }
@@ -132,4 +128,12 @@ static void exit_cb(uv_process_t *handle, int64_t status, int term_signal)
 #endif
   proc->status = term_signal ? 128 + term_signal : (int)status;
   proc->internal_exit_cb(proc);
+}
+
+LibuvProcess libuv_process_init(Loop *loop, void *data)
+{
+  LibuvProcess rv = {
+    .process = process_init(loop, kProcessTypeUv, data)
+  };
+  return rv;
 }

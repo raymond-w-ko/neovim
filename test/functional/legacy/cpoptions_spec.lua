@@ -1,8 +1,9 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local command = helpers.command
-local feed = helpers.feed
+
+local clear = n.clear
+local command = n.command
+local feed = n.feed
 
 before_each(clear)
 
@@ -15,19 +16,13 @@ describe('cpoptions', function()
     feed('c2w')
     screen:expect([[
       ^one tw$ three                 |
-      ~                             |
-      ~                             |
-      ~                             |
-      ~                             |
-      -- INSERT --                  |
+      {1:~                             }|*4
+      {5:-- INSERT --}                  |
     ]])
     feed('vim<Esc>')
     screen:expect([[
       vi^m three                     |
-      ~                             |
-      ~                             |
-      ~                             |
-      ~                             |
+      {1:~                             }|*4
                                     |
     ]])
   end)

@@ -6,8 +6,6 @@ endif
 
 source check.vim
 source screendump.vim
-
-" Needed for testing basic rightleft: Test_edit_rightleft
 source view_util.vim
 
 " Needs to come first until the bug in getchar() is
@@ -446,31 +444,31 @@ endfunc
 " terminal.
 func Test_autoindent_remove_indent()
   CheckRunVimInTerminal
-  let buf = RunVimInTerminal('-N Xfile', {'rows': 6, 'cols' : 20})
+  let buf = RunVimInTerminal('-N Xarifile', {'rows': 6, 'cols' : 20})
   call TermWait(buf)
   call term_sendkeys(buf, ":set autoindent\n")
   " leaving insert mode in a new line with indent added by autoindent, should
   " remove the indent.
   call term_sendkeys(buf, "i\<Tab>foo\<CR>\<Esc>")
-  " Need to delay for sometime, otherwise the code in getchar.c will not be
+  " Need to delay for some time, otherwise the code in getchar.c will not be
   " exercised.
   call TermWait(buf, 50)
   " when a line is wrapped and the cursor is at the start of the second line,
   " leaving insert mode, should move the cursor back to the first line.
   call term_sendkeys(buf, "o" .. repeat('x', 20) .. "\<Esc>")
-  " Need to delay for sometime, otherwise the code in getchar.c will not be
+  " Need to delay for some time, otherwise the code in getchar.c will not be
   " exercised.
   call TermWait(buf, 50)
   call term_sendkeys(buf, ":w\n")
   call TermWait(buf)
   call StopVimInTerminal(buf)
-  call assert_equal(["\tfoo", '', repeat('x', 20)], readfile('Xfile'))
-  call delete('Xfile')
+  call assert_equal(["\tfoo", '', repeat('x', 20)], readfile('Xarifile'))
+  call delete('Xarifile')
 endfunc
 
 func Test_edit_CR()
   " Test for <CR> in insert mode
-  " basically only in quickfix mode ist tested, the rest
+  " basically only in quickfix mode it's tested, the rest
   " has been taken care of by other tests
   CheckFeature quickfix
   botright new
@@ -1137,6 +1135,8 @@ func Test_edit_CTRL_V()
 endfunc
 
 func Test_edit_F1()
+  CheckFeature quickfix
+
   " Pressing <f1>
   new
   " call feedkeys(":set im\<cr>\<f1>\<c-l>", 'tnix')
@@ -1235,7 +1235,7 @@ func Test_edit_LEFT_RIGHT()
 endfunc
 
 func Test_edit_MOUSE()
-  " This is a simple test, since we not really using the mouse here
+  " This is a simple test, since we're not really using the mouse here
   CheckFeature mouse
   10new
   call setline(1, range(1, 100))
@@ -1318,9 +1318,9 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
   call assert_equal([0, 13, 1, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 5, 1, 0], getpos('.'))
+  call assert_equal([0, 10, 1, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   " <S-Up> is the same as <PageUp>
   " <S-Down> is the same as <PageDown>
   call cursor(1, 1)
@@ -1341,9 +1341,9 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
   call assert_equal([0, 13, 1, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 5, 1, 0], getpos('.'))
+  call assert_equal([0, 10, 1, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   set nostartofline
   call cursor(30, 11)
   norm! zt
@@ -1354,9 +1354,9 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
   call assert_equal([0, 13, 11, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call cursor(1, 1)
   call feedkeys("A\<PageDown>\<esc>", 'tnix')
   call assert_equal([0, 9, 11, 0], getpos('.'))
@@ -1379,9 +1379,9 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
   call assert_equal([0, 13, 11, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 5, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call cursor(1, 1)
   call feedkeys("A\<S-Down>\<esc>", 'tnix')
   call assert_equal([0, 9, 11, 0], getpos('.'))
@@ -1517,33 +1517,11 @@ func Test_edit_rightleft()
   bw!
 endfunc
 
-func Test_edit_backtick()
-  next a\`b c
-  call assert_equal('a`b', expand('%'))
-  next
-  call assert_equal('c', expand('%'))
-  call assert_equal('a\`b c', expand('##'))
-endfunc
-
-func Test_edit_quit()
-  edit foo.txt
-  split
-  new
-  call setline(1, 'hello')
-  3wincmd w
-  redraw!
-  call assert_fails('1q', 'E37:')
-  bwipe! foo.txt
-  only
-endfunc
-
 func Test_edit_complete_very_long_name()
-  if !has('unix')
-    " Long directory names only work on Unix.
-    return
-  endif
+  " Long directory names only work on Unix.
+  CheckUnix
 
-  let dirname = getcwd() . "/Xdir"
+  let dirname = getcwd() . "/Xlongdir"
   let longdirname = dirname . repeat('/' . repeat('d', 255), 4)
   try
     call mkdir(longdirname, 'p')
@@ -1581,7 +1559,7 @@ func Test_edit_complete_very_long_name()
   let longfilename = longdirname . '/' . repeat('a', 255)
   call writefile(['Totum', 'Table'], longfilename)
   new
-  exe "next Xfile " . longfilename
+  exe "next Xnofile " . longfilename
   exe "normal iT\<C-N>"
 
   bwipe!
@@ -1592,6 +1570,26 @@ func Test_edit_complete_very_long_name()
     exe 'winpos ' . winposx . ' ' . winposy
   endif
   set swapfile&
+endfunc
+
+func Test_edit_backtick()
+  next a\`b c
+  call assert_equal('a`b', expand('%'))
+  next
+  call assert_equal('c', expand('%'))
+  call assert_equal('a\`b c', expand('##'))
+endfunc
+
+func Test_edit_quit()
+  edit foo.txt
+  split
+  new
+  call setline(1, 'hello')
+  3wincmd w
+  redraw!
+  call assert_fails('1q', 'E37:')
+  bwipe! foo.txt
+  only
 endfunc
 
 func Test_edit_alt()
@@ -1760,7 +1758,7 @@ endfunc
 " Test for editing a directory
 func Test_edit_is_a_directory()
   CheckEnglish
-  let dirname = getcwd() . "/Xdir"
+  let dirname = getcwd() . "/Xeditdir"
   call mkdir(dirname, 'p')
 
   new
@@ -1785,19 +1783,19 @@ endfunc
 " Test for editing a file using invalid file encoding
 func Test_edit_invalid_encoding()
   CheckEnglish
-  call writefile([], 'Xfile')
+  call writefile([], 'Xinvfile')
   redir => msg
-  new ++enc=axbyc Xfile
+  new ++enc=axbyc Xinvfile
   redir END
   call assert_match('\[NOT converted\]', msg)
-  call delete('Xfile')
+  call delete('Xinvfile')
   close!
 endfunc
 
 " Test for the "charconvert" option
 func Test_edit_charconvert()
   CheckEnglish
-  call writefile(['one', 'two'], 'Xfile')
+  call writefile(['one', 'two'], 'Xccfile')
 
   " set 'charconvert' to a non-existing function
   set charconvert=NonExitingFunc()
@@ -1805,7 +1803,7 @@ func Test_edit_charconvert()
   let caught_e117 = v:false
   try
     redir => msg
-    edit ++enc=axbyc Xfile
+    edit ++enc=axbyc Xccfile
   catch /E117:/
     let caught_e117 = v:true
   finally
@@ -1817,13 +1815,13 @@ func Test_edit_charconvert()
   close!
   set charconvert&
 
-  " 'charconvert' function doesn't create a output file
+  " 'charconvert' function doesn't create an output file
   func Cconv1()
   endfunc
   set charconvert=Cconv1()
   new
   redir => msg
-  edit ++enc=axbyc Xfile
+  edit ++enc=axbyc Xccfile
   redir END
   call assert_equal(['one', 'two'], getline(1, '$'))
   call assert_match("can't read output of 'charconvert'", msg)
@@ -1838,10 +1836,10 @@ func Test_edit_charconvert()
     call writefile(data, v:fname_out)
   endfunc
   set charconvert=Cconv2()
-  new Xfile
-  write ++enc=ucase Xfile1
-  call assert_equal(['ONE', 'TWO'], readfile('Xfile1'))
-  call delete('Xfile1')
+  new Xccfile
+  write ++enc=ucase Xccfile1
+  call assert_equal(['ONE', 'TWO'], readfile('Xccfile1'))
+  call delete('Xccfile1')
   close!
   delfunc Cconv2
   set charconvert&
@@ -1852,13 +1850,13 @@ func Test_edit_charconvert()
   endfunc
   set charconvert=Cconv3()
   new
-  call assert_fails('edit ++enc=lcase Xfile', 'E202:')
+  call assert_fails('edit ++enc=lcase Xccfile', 'E202:')
   call assert_equal([''], getline(1, '$'))
   close!
   delfunc Cconv3
   set charconvert&
 
-  call delete('Xfile')
+  call delete('Xccfile')
 endfunc
 
 " Test for editing a file without read permission
@@ -1866,17 +1864,17 @@ func Test_edit_file_no_read_perm()
   CheckUnix
   CheckNotRoot
 
-  call writefile(['one', 'two'], 'Xfile')
-  call setfperm('Xfile', '-w-------')
+  call writefile(['one', 'two'], 'Xnrpfile')
+  call setfperm('Xnrpfile', '-w-------')
   new
   redir => msg
-  edit Xfile
+  edit Xnrpfile
   redir END
   call assert_equal(1, &readonly)
   call assert_equal([''], getline(1, '$'))
   call assert_match('\[Permission Denied\]', msg)
   close!
-  call delete('Xfile')
+  call delete('Xnrpfile')
 endfunc
 
 " Using :edit without leaving 'insertmode' should not cause Insert mode to be
@@ -1975,6 +1973,11 @@ func Test_edit_insert_reg()
   let @r = 'sample'
   call feedkeys("a\<C-R>=SaveFirstLine()\<CR>", "xt")
   call assert_equal('"', g:Line)
+
+  " Test for inserting an null and an empty list
+  call feedkeys("a\<C-R>=test_null_list()\<CR>", "xt")
+  call feedkeys("a\<C-R>=[]\<CR>", "xt")
+  call assert_equal(['r'], getbufline('', 1, '$'))
   call test_override('ALL', 0)
   close!
 endfunc
@@ -1985,8 +1988,8 @@ func Test_edit_ctrl_r_failed()
 
   let buf = RunVimInTerminal('', #{rows: 6, cols: 60})
 
-  " trying to insert a dictionary produces an error
-  call term_sendkeys(buf, "i\<C-R>={}\<CR>")
+  " trying to insert a blob produces an error
+  call term_sendkeys(buf, "i\<C-R>=0z\<CR>")
 
   " ending Insert mode should put the cursor back on the ':'
   call term_sendkeys(buf, ":\<Esc>")
@@ -2067,7 +2070,10 @@ func Test_edit_revins()
   call setline(1, 'one two three')
   exe "normal! wi\nfour"
   call assert_equal(['one two three', 'ruof'], getline(1, '$'))
-  set revins&
+  set backspace=indent,eol,start
+  exe "normal! ggA\<BS>:"
+  call assert_equal(['one two three:ruof'], getline(1, '$'))
+  set revins& backspace&
   bw!
 endfunc
 
@@ -2111,12 +2117,175 @@ func Test_edit_overlong_file_name()
   file %%%%%%%%%%%%%%%%%%%%%%%%%%
   file %%%%%%
   set readonly
-  set ls=2 
+  set ls=2
 
   redraw!
   set noreadonly ls&
   bwipe!
 endfunc
 
+func Test_edit_Ctrl_RSB()
+  new
+  let g:triggered = []
+  autocmd InsertCharPre <buffer> let g:triggered += [v:char]
+
+  " i_CTRL-] should not trigger InsertCharPre
+  exe "normal! A\<C-]>"
+  call assert_equal([], g:triggered)
+
+  " i_CTRL-] should expand abbreviations but not trigger InsertCharPre
+  inoreabbr <buffer> f foo
+  exe "normal! Af\<C-]>a"
+  call assert_equal(['f', 'f', 'o', 'o', 'a'], g:triggered)
+  call assert_equal('fooa', getline(1))
+
+  " CTRL-] followed by i_CTRL-V should not expand abbreviations
+  " i_CTRL-V doesn't trigger InsertCharPre
+  call setline(1, '')
+  exe "normal! Af\<C-V>\<C-]>"
+  call assert_equal("f\<C-]>", getline(1))
+
+  let g:triggered = []
+  call setline(1, '')
+
+  " Also test assigning to v:char
+  autocmd InsertCharPre <buffer> let v:char = 'f'
+  exe "normal! Ag\<C-]>h"
+  call assert_equal(['g', 'f', 'o', 'o', 'h'], g:triggered)
+  call assert_equal('ffff', getline(1))
+
+  autocmd! InsertCharPre
+  unlet g:triggered
+  bwipe!
+endfunc
+
+func s:check_backspace(expected)
+  let g:actual = []
+  inoremap <buffer> <F2> <Cmd>let g:actual += [getline('.')]<CR>
+  set backspace=indent,eol,start
+
+  exe "normal i" .. repeat("\<BS>\<F2>", len(a:expected))
+  call assert_equal(a:expected, g:actual)
+
+  set backspace&
+  iunmap <buffer> <F2>
+  unlet g:actual
+endfunc
+
+" Test that backspace works with 'smarttab' and mixed Tabs and spaces.
+func Test_edit_backspace_smarttab_mixed()
+  set smarttab
+  call NewWindow(1, 30)
+  setlocal tabstop=4 shiftwidth=4
+
+  call setline(1, "\t    \t         \t a")
+  normal! $
+  call s:check_backspace([
+        \ "\t    \t         \ta",
+        \ "\t    \t        a",
+        \ "\t    \t    a",
+        \ "\t    \ta",
+        \ "\t    a",
+        \ "\ta",
+        \ "a",
+        \ ])
+
+  call CloseWindow()
+  set smarttab&
+endfunc
+
+" Test that backspace works with 'smarttab' and 'varsofttabstop'.
+func Test_edit_backspace_smarttab_varsofttabstop()
+  CheckFeature vartabs
+
+  set smarttab
+  call NewWindow(1, 30)
+  setlocal tabstop=8 varsofttabstop=6,2,5,3
+
+  call setline(1, "a\t    \t a")
+  normal! $
+  call s:check_backspace([
+        \ "a\t    \ta",
+        \ "a\t     a",
+        \ "a\ta",
+        \ "a     a",
+        \ "aa",
+        \ "a",
+        \ ])
+
+  call CloseWindow()
+  set smarttab&
+endfunc
+
+" Test that backspace works with 'smarttab' when a Tab is shown as "^I".
+func Test_edit_backspace_smarttab_list()
+  set smarttab
+  call NewWindow(1, 30)
+  setlocal tabstop=4 shiftwidth=4 list listchars=
+
+  call setline(1, "\t    \t         \t a")
+  normal! $
+  call s:check_backspace([
+        \ "\t    \t        a",
+        \ "\t    \t    a",
+        \ "\t    \ta",
+        \ "\t  a",
+        \ "a",
+        \ ])
+
+  call CloseWindow()
+  set smarttab&
+endfunc
+
+" Test that backspace works with 'smarttab' and 'breakindent'.
+func Test_edit_backspace_smarttab_breakindent()
+  CheckFeature linebreak
+
+  set smarttab
+  call NewWindow(3, 17)
+  setlocal tabstop=4 shiftwidth=4 breakindent breakindentopt=min:5
+
+  call setline(1, "\t    \t         \t a")
+  normal! $
+  call s:check_backspace([
+        \ "\t    \t         \ta",
+        \ "\t    \t        a",
+        \ "\t    \t    a",
+        \ "\t    \ta",
+        \ "\t    a",
+        \ "\ta",
+        \ "a",
+        \ ])
+
+  call CloseWindow()
+  set smarttab&
+endfunc
+
+" Test that backspace works with 'smarttab' and virtual text.
+func Test_edit_backspace_smarttab_virtual_text()
+  CheckFeature textprop
+
+  set smarttab
+  call NewWindow(1, 50)
+  setlocal tabstop=4 shiftwidth=4
+
+  call setline(1, "\t    \t         \t a")
+  call prop_type_add('theprop', {})
+  call prop_add(1, 3, {'type': 'theprop', 'text': 'text'})
+  normal! $
+  call s:check_backspace([
+        \ "\t    \t         \ta",
+        \ "\t    \t        a",
+        \ "\t    \t    a",
+        \ "\t    \ta",
+        \ "\t    a",
+        \ "\ta",
+        \ "a",
+        \ ])
+
+  call CloseWindow()
+  call prop_type_delete('theprop')
+  set smarttab&
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

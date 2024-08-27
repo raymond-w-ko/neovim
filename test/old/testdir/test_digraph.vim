@@ -37,6 +37,9 @@ func Test_digraphs()
   call Put_Dig("=P")
   call Put_Dig("P=")
   call assert_equal(['Р']+repeat(["₽"],2)+['П'], getline(line('.')-3,line('.')))
+  " Quadruple prime
+  call Put_Dig("'4")
+  call assert_equal("⁗", getline('.'))
   " Not a digraph
   call Put_Dig("a\<bs>")
   call Put_Dig("\<bs>a")
@@ -51,7 +54,7 @@ func Test_digraphs()
   call Put_Dig("'e")
   call Put_Dig("b'") " not defined
   call assert_equal(["á", "é", "'"], getline(line('.')-2,line('.')))
-  " Cicumflex
+  " Circumflex
   call Put_Dig("a>")
   call Put_Dig(">e")
   call Put_Dig("b>") " not defined
@@ -453,9 +456,7 @@ func Test_digraphs_output()
 endfunc
 
 func Test_loadkeymap()
-  if !has('keymap')
-    return
-  endif
+  CheckFeature keymap
   new
   set keymap=czech
   set iminsert=0
@@ -495,13 +496,10 @@ endfunc
 
 " Test for error in a keymap file
 func Test_loadkeymap_error()
-  if !has('keymap')
-    return
-  endif
+  CheckFeature keymap
   call assert_fails('loadkeymap', 'E105:')
-  call writefile(['loadkeymap', 'a'], 'Xkeymap')
+  call writefile(['loadkeymap', 'a'], 'Xkeymap', 'D')
   call assert_fails('source Xkeymap', 'E791:')
-  call delete('Xkeymap')
 endfunc
 
 " Test for the characters displayed on the screen when entering a digraph
@@ -541,6 +539,8 @@ func Test_digraph_set_function()
   call assert_fails('call digraph_set("あ", "あ")', 'E1214: Digraph must be just two characters: あ')
   call assert_fails('call digraph_set("aa", "ああ")', 'E1215: Digraph must be one character: ああ')
   call assert_fails('call digraph_set("aa", "か" .. nr2char(0x3099))',  'E1215: Digraph must be one character: か' .. nr2char(0x3099))
+  call assert_fails('call digraph_set(v:_null_string, "い")',  'E1214: Digraph must be just two characters')
+  call assert_fails('call digraph_set("aa", 0z10)',  'E976: Using a Blob as a String')
   bwipe!
 endfunc
 
@@ -558,6 +558,8 @@ func Test_digraph_get_function()
   call assert_equal('う', digraph_get('  '))
   call assert_fails('call digraph_get("aaa")', 'E1214: Digraph must be just two characters: aaa')
   call assert_fails('call digraph_get("b")', 'E1214: Digraph must be just two characters: b')
+  call assert_fails('call digraph_get(v:_null_string)', 'E1214: Digraph must be just two characters:')
+  call assert_fails('call digraph_get(0z10)', 'E976: Using a Blob as a String')
 endfunc
 
 func Test_digraph_get_function_encode()
@@ -582,8 +584,12 @@ func Test_digraph_setlist_function()
   call assert_equal('く', digraph_get('bb'))
 
   call assert_fails('call digraph_setlist([[]])', 'E1216:')
-  call assert_fails('call digraph_setlist([["aa", "b", "cc"]])', '1216:')
+  call assert_fails('call digraph_setlist([["aa", "b", "cc"]])', 'E1216:')
   call assert_fails('call digraph_setlist([["あ", "あ"]])', 'E1214: Digraph must be just two characters: あ')
+  call assert_fails('call digraph_setlist([v:_null_list])', 'E1216:')
+  call assert_fails('call digraph_setlist({})', 'E1216:')
+  call assert_fails('call digraph_setlist([{}])', 'E1216:')
+  call assert_true(digraph_setlist(v:_null_list))
 endfunc
 
 func Test_digraph_getlist_function()
@@ -591,13 +597,15 @@ func Test_digraph_getlist_function()
   call digraph_setlist([['aa', 'き'], ['bb', 'く']])
 
   for pair in digraph_getlist(1)
-    call assert_equal(digraph_get(pair[0]), pair[1])
+    call assert_equal(pair[1], digraph_get(pair[0]))
   endfor
 
   " We don't know how many digraphs are registered before, so check the number
   " of digraphs returned.
   call assert_equal(digraph_getlist()->len(), digraph_getlist(0)->len())
-  call assert_notequal((digraph_getlist()->len()), digraph_getlist(1)->len())
+  call assert_notequal(digraph_getlist()->len(), digraph_getlist(1)->len())
+
+  call assert_fails('call digraph_getlist(0z12)', 'E974: Using a Blob as a Number')
 endfunc
 
 

@@ -1,13 +1,11 @@
-#ifndef NVIM_API_PRIVATE_DEFS_H
-#define NVIM_API_PRIVATE_DEFS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "klib/kvec.h"
-#include "nvim/func_attr.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 
 #define ARRAY_DICT_INIT KV_INITIAL_VALUE
 #define STRING_INIT { .data = NULL, .size = 0 }
@@ -21,6 +19,9 @@
 # define ArrayOf(...) Array
 # define DictionaryOf(...) Dictionary
 # define Dict(name) KeyDict_##name
+# define DictHash(name) KeyDict_##name##_get_field
+# define DictKey(name)
+# include "api/private/defs.h.inline.generated.h"
 #endif
 
 // Basic types
@@ -48,15 +49,13 @@ typedef enum {
 /// Internal call from Lua code
 #define LUA_INTERNAL_CALL (VIML_INTERNAL_CALL + 1)
 
-static inline bool is_internal_call(uint64_t channel_id)
-  REAL_FATTR_ALWAYS_INLINE REAL_FATTR_CONST;
-
 /// Check whether call is internal
 ///
 /// @param[in]  channel_id  Channel id.
 ///
 /// @return true if channel_id refers to internal channel.
 static inline bool is_internal_call(const uint64_t channel_id)
+  FUNC_ATTR_ALWAYS_INLINE FUNC_ATTR_CONST
 {
   return !!(channel_id & INTERNAL_CALL_MASK);
 }
@@ -91,6 +90,8 @@ typedef kvec_t(Object) Array;
 typedef struct key_value_pair KeyValuePair;
 typedef kvec_t(KeyValuePair) Dictionary;
 
+typedef kvec_t(String) StringArray;
+
 typedef enum {
   kObjectTypeNil = 0,
   kObjectTypeBoolean,
@@ -105,6 +106,18 @@ typedef enum {
   kObjectTypeWindow,
   kObjectTypeTabpage,
 } ObjectType;
+
+typedef enum {
+  kUnpackTypeStringArray = -1,
+} UnpackType;
+
+/// Value by which objects represented as EXT type are shifted
+///
+/// Subtracted when packing, added when unpacking. Used to allow moving
+/// buffer/window/tabpage block inside ObjectType enum. This block yet cannot be
+/// split or reordered.
+#define EXT_OBJECT_TYPE_SHIFT kObjectTypeBuffer
+#define EXT_OBJECT_TYPE_MAX (kObjectTypeTabpage - EXT_OBJECT_TYPE_SHIFT)
 
 struct object {
   ObjectType type;
@@ -124,10 +137,20 @@ struct key_value_pair {
   Object value;
 };
 
-typedef Object *(*field_hash)(void *retval, const char *str, size_t len);
+typedef uint64_t OptionalKeys;
+typedef Integer HLGroupID;
+
+// this is the prefix of all keysets with optional keys
+typedef struct {
+  OptionalKeys is_set_;
+} OptKeySet;
+
 typedef struct {
   char *str;
   size_t ptr_off;
+  int type;  // ObjectType or UnpackType. kObjectTypeNil == untyped
+  int opt_index;
+  bool is_hlgroup;
 } KeySetLink;
 
-#endif  // NVIM_API_PRIVATE_DEFS_H
+typedef KeySetLink *(*FieldHashfn)(const char *str, size_t len);

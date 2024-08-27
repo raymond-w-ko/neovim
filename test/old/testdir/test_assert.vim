@@ -48,8 +48,17 @@ func Test_assert_equal()
   call assert_match("Expected 'bar' but got 'foo'", v:errors[0])
   call remove(v:errors, 0)
 
+  let s = 'αβγ'
+  call assert_equal(1, assert_equal('δεζ', s))
+  call assert_match("Expected 'δεζ' but got 'αβγ'", v:errors[0])
+  call remove(v:errors, 0)
+
   call assert_equal('XxxxxxxxxxxxxxxxxxxxxxX', 'XyyyyyyyyyyyyyyyyyyyyyyyyyX')
   call assert_match("Expected 'X\\\\\\[x occurs 21 times]X' but got 'X\\\\\\[y occurs 25 times]X'", v:errors[0])
+  call remove(v:errors, 0)
+
+  call assert_equal('ΩωωωωωωωωωωωωωωωωωωωωωΩ', 'ΩψψψψψψψψψψψψψψψψψψψψψψψψψΩ')
+  call assert_match("Expected 'Ω\\\\\\[ω occurs 21 times]Ω' but got 'Ω\\\\\\[ψ occurs 25 times]Ω'", v:errors[0])
   call remove(v:errors, 0)
 
   " special characters are escaped
@@ -92,12 +101,12 @@ func Test_assert_equalfile()
   call remove(v:errors, 0)
 
   let goodtext = ["one", "two", "three"]
-  call writefile(goodtext, 'Xone')
+  call writefile(goodtext, 'Xone', 'D')
   call assert_equal(1, 'Xone'->assert_equalfile('xyzxyz'))
   call assert_match("E485: Can't read file xyzxyz", v:errors[0])
   call remove(v:errors, 0)
 
-  call writefile(goodtext, 'Xtwo')
+  call writefile(goodtext, 'Xtwo', 'D')
   call assert_equal(0, assert_equalfile('Xone', 'Xtwo'))
 
   call writefile([goodtext[0]], 'Xone')
@@ -127,9 +136,6 @@ func Test_assert_equalfile()
   call assert_equal(1, assert_equalfile('Xone', 'Xtwo', 'a message'))
   call assert_match("a message: difference at byte 234, line 1 after", v:errors[0])
   call remove(v:errors, 0)
-
-  call delete('Xone')
-  call delete('Xtwo')
 endfunc
 
 func Test_assert_notequal()
@@ -190,6 +196,22 @@ func Test_wrong_error_type()
   let verrors = v:errors
   let v:errors = save_verrors
   call assert_equal(type([]), type(verrors))
+endfunc
+
+func Test_compare_fail()
+  let s:v = {}
+  let s:x = {"a": s:v}
+  let s:v["b"] = s:x
+  let s:w = {"c": s:x, "d": ''}
+  try
+    call assert_equal(s:w, '')
+  catch
+    call assert_equal(0, assert_exception('E724:'))
+    " Nvim: expected value isn't shown as NULL
+    " call assert_match("Expected NULL but got ''", v:errors[0])
+    call assert_match("Expected .* but got ''", v:errors[0])
+    call remove(v:errors, 0)
+  endtry
 endfunc
 
 func Test_match()

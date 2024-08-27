@@ -1,33 +1,38 @@
-local luv = require('luv')
-local helpers = require('test.unit.helpers')(after_each)
-local itp = helpers.gen_itp(it)
+local uv = vim.uv
+local t = require('test.unit.testutil')
+local itp = t.gen_itp(it)
 
-local cimport = helpers.cimport
-local eq = helpers.eq
-local neq = helpers.neq
-local ffi = helpers.ffi
-local cstr = helpers.cstr
-local to_cstr = helpers.to_cstr
-local NULL = helpers.NULL
-local OK = helpers.OK
-local FAIL = helpers.FAIL
-local mkdir = helpers.mkdir
+local cimport = t.cimport
+local eq = t.eq
+local neq = t.neq
+local ffi = t.ffi
+local cstr = t.cstr
+local to_cstr = t.to_cstr
+local NULL = t.NULL
+local OK = t.OK
+local FAIL = t.FAIL
+local mkdir = t.mkdir
 
 cimport('string.h')
 local cimp = cimport('./src/nvim/os/os.h', './src/nvim/path.h')
-local options = cimport('./src/nvim/option_defs.h')
+local options = cimport('./src/nvim/option_vars.h')
 
 local length = 0
 local buffer = nil
 
 describe('path.c', function()
   describe('path_full_dir_name', function()
+    local old_dir
+
     setup(function()
+      old_dir = uv.cwd()
       mkdir('unit-test-directory')
+      uv.fs_symlink(old_dir .. '/unit-test-directory', 'unit-test-symlink')
     end)
 
     teardown(function()
-      luv.fs_rmdir('unit-test-directory')
+      uv.fs_unlink('unit-test-symlink')
+      uv.fs_rmdir('unit-test-directory')
     end)
 
     local function path_full_dir_name(directory, buf, len)
@@ -37,35 +42,64 @@ describe('path.c', function()
 
     before_each(function()
       -- Create empty string buffer which will contain the resulting path.
-      length = string.len(luv.cwd()) + 22
+      length = string.len(old_dir) + 22
       buffer = cstr(length, '')
     end)
 
+    after_each(function()
+      uv.chdir(old_dir)
+    end)
+
     itp('returns the absolute directory name of a given relative one', function()
-      local result = path_full_dir_name('..', buffer, length)
-      eq(OK, result)
-      local old_dir = luv.cwd()
-      luv.chdir('..')
-      local expected = luv.cwd()
-      luv.chdir(old_dir)
-      eq(expected, (ffi.string(buffer)))
+      eq(OK, path_full_dir_name('..', buffer, length))
+      uv.chdir('..')
+      local expected = uv.cwd()
+      uv.chdir(old_dir)
+      eq(expected, ffi.string(buffer))
     end)
 
     itp('returns the current directory name if the given string is empty', function()
-      eq(OK, (path_full_dir_name('', buffer, length)))
-      eq(luv.cwd(), (ffi.string(buffer)))
+      eq(OK, path_full_dir_name('', buffer, length))
+      eq(old_dir, ffi.string(buffer))
+    end)
+
+    local function test_full_dir_absolute()
+      itp('works with a normal absolute dir', function()
+        eq(OK, path_full_dir_name(old_dir .. '/unit-test-directory', buffer, length))
+        eq(old_dir .. '/unit-test-directory', ffi.string(buffer))
+      end)
+
+      itp('works with a symlinked absolute dir', function()
+        eq(OK, path_full_dir_name(old_dir .. '/unit-test-symlink', buffer, length))
+        eq(old_dir .. '/unit-test-directory', ffi.string(buffer))
+      end)
+    end
+
+    test_full_dir_absolute()
+
+    describe('when cwd does not exist #28786', function()
+      before_each(function()
+        mkdir('dir-to-remove')
+        uv.chdir('dir-to-remove')
+        uv.fs_rmdir(old_dir .. '/dir-to-remove')
+      end)
+
+      test_full_dir_absolute()
     end)
 
     itp('works with a normal relative dir', function()
-      local result = path_full_dir_name('unit-test-directory', buffer, length)
-      eq(luv.cwd() .. '/unit-test-directory', (ffi.string(buffer)))
-      eq(OK, result)
+      eq(OK, path_full_dir_name('unit-test-directory', buffer, length))
+      eq(old_dir .. '/unit-test-directory', ffi.string(buffer))
+    end)
+
+    itp('works with a symlinked relative dir', function()
+      eq(OK, path_full_dir_name('unit-test-symlink', buffer, length))
+      eq(old_dir .. '/unit-test-directory', ffi.string(buffer))
     end)
 
     itp('works with a non-existing relative dir', function()
-      local result = path_full_dir_name('does-not-exist', buffer, length)
-      eq(luv.cwd() .. '/does-not-exist', (ffi.string(buffer)))
-      eq(OK, result)
+      eq(OK, path_full_dir_name('does-not-exist', buffer, length))
+      eq(old_dir .. '/does-not-exist', ffi.string(buffer))
     end)
 
     itp('fails with a non-existing absolute dir', function()
@@ -184,7 +218,7 @@ describe('path.c', function()
 
     itp('returns the executable name of an invocation given a relative invocation', function()
       local invk, len = invocation_path_tail('directory/exe a b c')
-      compare("exe a b c", invk, len)
+      compare('exe a b c', invk, len)
       eq(3, len)
     end)
 
@@ -202,7 +236,7 @@ describe('path.c', function()
 
     itp('does not count arguments to the executable as part of its path', function()
       local invk, len = invocation_path_tail('exe a/b\\c')
-      compare("exe a/b\\c", invk, len)
+      compare('exe a/b\\c', invk, len)
       eq(3, len)
     end)
 
@@ -212,17 +246,17 @@ describe('path.c', function()
     end)
 
     itp('is equivalent to path_tail when args do not contain a path separator', function()
-      local ptail = cimp.path_tail(to_cstr("a/b/c x y z"))
+      local ptail = cimp.path_tail(to_cstr('a/b/c x y z'))
       neq(NULL, ptail)
       local tail = ffi.string(ptail)
-      local invk, _ = invocation_path_tail("a/b/c x y z")
+      local invk, _ = invocation_path_tail('a/b/c x y z')
       eq(tail, ffi.string(invk))
     end)
 
     itp('is not equivalent to path_tail when args contain a path separator', function()
-      local ptail = cimp.path_tail(to_cstr("a/b/c x y/z"))
+      local ptail = cimp.path_tail(to_cstr('a/b/c x y/z'))
       neq(NULL, ptail)
-      local invk, _ = invocation_path_tail("a/b/c x y/z")
+      local invk, _ = invocation_path_tail('a/b/c x y/z')
       neq((ffi.string(ptail)), (ffi.string(invk)))
     end)
   end)
@@ -270,27 +304,27 @@ describe('path.c', function()
 end)
 
 describe('path_try_shorten_fname', function()
-  local cwd = luv.cwd()
+  local cwd = uv.cwd()
 
   before_each(function()
     mkdir('ut_directory')
   end)
 
   after_each(function()
-    luv.chdir(cwd)
-    luv.fs_rmdir('ut_directory')
+    uv.chdir(cwd)
+    uv.fs_rmdir('ut_directory')
   end)
 
   describe('path_try_shorten_fname', function()
     itp('returns shortened path if possible', function()
-      luv.chdir('ut_directory')
-      local full = to_cstr(luv.cwd() .. '/subdir/file.txt')
+      uv.chdir('ut_directory')
+      local full = to_cstr(uv.cwd() .. '/subdir/file.txt')
       eq('subdir/file.txt', (ffi.string(cimp.path_try_shorten_fname(full))))
     end)
 
     itp('returns `full_path` if a shorter version is not possible', function()
-      local old = luv.cwd()
-      luv.chdir('ut_directory')
+      local old = uv.cwd()
+      uv.chdir('ut_directory')
       local full = old .. '/subdir/file.txt'
       eq(full, (ffi.string(cimp.path_try_shorten_fname(to_cstr(full)))))
     end)
@@ -302,14 +336,14 @@ describe('path_try_shorten_fname', function()
 end)
 
 describe('path.c path_guess_exepath', function()
-  local cwd = luv.cwd()
+  local cwd = uv.cwd()
 
-  for _,name in ipairs({'./nvim', '.nvim', 'foo/nvim'}) do
-    itp('"'..name..'" returns name catenated with CWD', function()
+  for _, name in ipairs({ './nvim', '.nvim', 'foo/nvim' }) do
+    itp('"' .. name .. '" returns name catenated with CWD', function()
       local bufsize = 255
       local buf = cstr(bufsize, '')
       cimp.path_guess_exepath(name, buf, bufsize)
-      eq(cwd..'/'..name, ffi.string(buf))
+      eq(cwd .. '/' .. name, ffi.string(buf))
     end)
   end
 
@@ -331,10 +365,10 @@ describe('path.c path_guess_exepath', function()
 
   itp('does not crash if $PATH item exceeds MAXPATHL', function()
     local orig_path_env = os.getenv('PATH')
-    local name = 'cat'  -- Some executable in $PATH.
+    local name = 'cat' -- Some executable in $PATH.
     local bufsize = 255
     local buf = cstr(bufsize, '')
-    local insane_path = orig_path_env..':'..(("x/"):rep(4097))
+    local insane_path = orig_path_env .. ':' .. (('x/'):rep(4097))
 
     cimp.os_setenv('PATH', insane_path, true)
     cimp.path_guess_exepath(name, buf, bufsize)
@@ -345,7 +379,7 @@ describe('path.c path_guess_exepath', function()
   end)
 
   itp('returns full path found in $PATH', function()
-    local name = 'cat'  -- Some executable in $PATH.
+    local name = 'cat' -- Some executable in $PATH.
     local bufsize = 255
     local buf = cstr(bufsize, '')
     cimp.path_guess_exepath(name, buf, bufsize)
@@ -356,7 +390,7 @@ end)
 
 describe('path.c', function()
   setup(function()
-    mkdir('unit-test-directory');
+    mkdir('unit-test-directory')
     io.open('unit-test-directory/test.file', 'w'):close()
 
     -- Since the tests are executed, they are called by an executable. We use
@@ -365,12 +399,12 @@ describe('path.c', function()
 
     -- Split absolute_executable into a directory and the actual file name for
     -- later usage.
-    local directory, executable_name = string.match(absolute_executable, '^(.*)/(.*)$')  -- luacheck: ignore
+    local directory, executable_name = string.match(absolute_executable, '^(.*)/(.*)$') -- luacheck: ignore
   end)
 
   teardown(function()
     os.remove('unit-test-directory/test.file')
-    luv.fs_rmdir('unit-test-directory')
+    uv.fs_rmdir('unit-test-directory')
   end)
 
   describe('vim_FullName', function()
@@ -380,8 +414,8 @@ describe('path.c', function()
       return buf, result
     end
 
-    local function get_buf_len(s, t)
-      return math.max(string.len(s), string.len(t)) + 1
+    local function get_buf_len(s, q)
+      return math.max(string.len(s), string.len(q)) + 1
     end
 
     itp('fails if given filename is NULL', function()
@@ -413,16 +447,19 @@ describe('path.c', function()
     end)
 
     itp('fails and uses filename if given filename contains non-existing directory', function()
-      local filename = 'non_existing_dir/test.file'
-      local buflen = string.len(filename) + 1
-      local do_expand = 1
-      local buf, result = vim_FullName(filename, buflen, do_expand)
-      eq(filename, ffi.string(buf))
-      eq(FAIL, result)
+      -- test with different filename lengths
+      for rep = 1, 10 do
+        local filename = ('non_existing_'):rep(rep) .. 'dir/test.file'
+        local buflen = string.len(filename) + 1
+        local do_expand = 1
+        local buf, result = vim_FullName(filename, buflen, do_expand)
+        eq(filename, ffi.string(buf))
+        eq(FAIL, result)
+      end
     end)
 
     itp('concatenates filename if it does not contain a slash', function()
-      local expected = luv.cwd() .. '/test.file'
+      local expected = uv.cwd() .. '/test.file'
       local filename = 'test.file'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -431,8 +468,11 @@ describe('path.c', function()
       eq(OK, result)
     end)
 
-    itp('concatenates directory name if it does not contain a slash', function()
-      local expected = luv.cwd() .. '/..'
+    itp('produces absolute path for .. without a slash', function()
+      local old_dir = uv.cwd()
+      uv.chdir('..')
+      local expected = uv.cwd()
+      uv.chdir(old_dir)
       local filename = '..'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -441,11 +481,11 @@ describe('path.c', function()
       eq(OK, result)
     end)
 
-    itp('enters given directory (instead of just concatenating the strings) if possible and if path contains a slash', function()
-      local old_dir = luv.cwd()
-      luv.chdir('..')
-      local expected = luv.cwd() .. '/test.file'
-      luv.chdir(old_dir)
+    itp('produces absolute path if possible and if path contains a slash', function()
+      local old_dir = uv.cwd()
+      uv.chdir('..')
+      local expected = uv.cwd() .. '/test.file'
+      uv.chdir(old_dir)
       local filename = '../test.file'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -474,7 +514,7 @@ describe('path.c', function()
     end)
 
     itp('works with some "normal" relative path with directories', function()
-      local expected = luv.cwd() .. '/unit-test-directory/test.file'
+      local expected = uv.cwd() .. '/unit-test-directory/test.file'
       local filename = 'unit-test-directory/test.file'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -484,7 +524,7 @@ describe('path.c', function()
     end)
 
     itp('does not modify the given filename', function()
-      local expected = luv.cwd() .. '/unit-test-directory/test.file'
+      local expected = uv.cwd() .. '/unit-test-directory/test.file'
       local filename = to_cstr('unit-test-directory/test.file')
       local buflen = string.len(expected) + 1
       local buf = cstr(buflen, '')
@@ -507,7 +547,7 @@ describe('path.c', function()
     end)
 
     itp('does not remove trailing slash from non-existing relative directory #20847', function()
-      local expected = luv.cwd() .. '/non_existing_dir/'
+      local expected = uv.cwd() .. '/non_existing_dir/'
       local filename = 'non_existing_dir/'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -517,7 +557,7 @@ describe('path.c', function()
     end)
 
     itp('expands "./" to the current directory #7117', function()
-      local expected = luv.cwd() .. '/unit-test-directory/test.file'
+      local expected = uv.cwd() .. '/unit-test-directory/test.file'
       local filename = './unit-test-directory/test.file'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -527,7 +567,7 @@ describe('path.c', function()
     end)
 
     itp('collapses "foo/../foo" to "foo" #7117', function()
-      local expected = luv.cwd() .. '/unit-test-directory/test.file'
+      local expected = uv.cwd() .. '/unit-test-directory/test.file'
       local filename = 'unit-test-directory/../unit-test-directory/test.file'
       local buflen = get_buf_len(expected, filename)
       local do_expand = 1
@@ -544,8 +584,12 @@ describe('path.c', function()
       return ffi.string(c_file)
     end
 
-    before_each(function() mkdir('CamelCase') end)
-    after_each(function() luv.fs_rmdir('CamelCase') end)
+    before_each(function()
+      mkdir('CamelCase')
+    end)
+    after_each(function()
+      uv.fs_rmdir('CamelCase')
+    end)
 
     if ffi.os == 'Windows' or ffi.os == 'OSX' then
       itp('Corrects the case of file names in Mac and Windows', function()
@@ -565,14 +609,14 @@ describe('path.c', function()
       local path1 = cstr(100, 'path1')
       local to_append = to_cstr('path2')
       eq(OK, (cimp.append_path(path1, to_append, 100)))
-      eq("path1/path2", (ffi.string(path1)))
+      eq('path1/path2', (ffi.string(path1)))
     end)
 
     itp('joins given paths without adding an unnecessary slash', function()
       local path1 = cstr(100, 'path1/')
       local to_append = to_cstr('path2')
       eq(OK, cimp.append_path(path1, to_append, 100))
-      eq("path1/path2", (ffi.string(path1)))
+      eq('path1/path2', (ffi.string(path1)))
     end)
 
     itp('fails and uses filename if there is not enough space left for to_append', function()
@@ -610,15 +654,15 @@ describe('path.c', function()
     end
 
     itp('returns true if filename starts with a slash', function()
-      eq(OK, path_is_absolute('/some/directory/'))
+      eq(true, path_is_absolute('/some/directory/'))
     end)
 
     itp('returns true if filename starts with a tilde', function()
-      eq(OK, path_is_absolute('~/in/my/home~/directory'))
+      eq(true, path_is_absolute('~/in/my/home~/directory'))
     end)
 
     itp('returns false if filename starts not with slash nor tilde', function()
-      eq(FAIL, path_is_absolute('not/in/my/home~/directory'))
+      eq(false, path_is_absolute('not/in/my/home~/directory'))
     end)
   end)
 

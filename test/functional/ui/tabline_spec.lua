@@ -1,9 +1,11 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear, command, eq = helpers.clear, helpers.command, helpers.eq
-local insert = helpers.insert
-local meths = helpers.meths
-local assert_alive = helpers.assert_alive
+
+local clear, command, eq = n.clear, n.command, t.eq
+local insert = n.insert
+local api = n.api
+local assert_alive = n.assert_alive
 
 describe('ui/ext_tabline', function()
   local screen
@@ -12,7 +14,7 @@ describe('ui/ext_tabline', function()
   before_each(function()
     clear()
     screen = Screen.new(25, 5)
-    screen:attach({rgb=true, ext_tabline=true})
+    screen:attach({ rgb = true, ext_tabline = true })
     function screen:_handle_tabline_update(curtab, tabs, curbuf, buffers)
       event_curtab = curtab
       event_tabs = tabs
@@ -22,103 +24,105 @@ describe('ui/ext_tabline', function()
   end)
 
   it('publishes UI events', function()
-    command("tabedit another-tab")
+    command('tabedit another-tab')
 
     local expected_tabs = {
-      {tab = { id = 1 }, name = '[No Name]'},
-      {tab = { id = 2 }, name = 'another-tab'},
+      { tab = 1, name = '[No Name]' },
+      { tab = 2, name = 'another-tab' },
     }
-    screen:expect{grid=[[
+    screen:expect {
+      grid = [[
       ^                         |
-      ~                        |
-      ~                        |
-      ~                        |
+      {1:~                        }|*3
                                |
-    ]], condition=function()
-      eq({ id = 2 }, event_curtab)
-      eq(expected_tabs, event_tabs)
-    end}
+    ]],
+      condition = function()
+        eq(2, event_curtab)
+        eq(expected_tabs, event_tabs)
+      end,
+    }
 
-    command("tabNext")
-    screen:expect{grid=[[
+    command('tabNext')
+    screen:expect {
+      grid = [[
       ^                         |
-      ~                        |
-      ~                        |
-      ~                        |
+      {1:~                        }|*3
                                |
-    ]], condition=function()
-      eq({ id = 1 }, event_curtab)
-      eq(expected_tabs, event_tabs)
-    end}
+    ]],
+      condition = function()
+        eq(1, event_curtab)
+        eq(expected_tabs, event_tabs)
+      end,
+    }
   end)
 
   it('buffer UI events', function()
-    local expected_buffers_initial= {
-      {buffer = { id = 1 }, name = '[No Name]'},
+    local expected_buffers_initial = {
+      { buffer = 1, name = '[No Name]' },
     }
 
-    screen:expect{grid=[[
+    screen:expect {
+      grid = [[
       ^                         |
-      ~                        |
-      ~                        |
-      ~                        |
+      {1:~                        }|*3
                                |
-    ]], condition=function()
-      eq({ id = 1}, event_curbuf)
-      eq(expected_buffers_initial, event_buffers)
-    end}
+    ]],
+      condition = function()
+        eq(1, event_curbuf)
+        eq(expected_buffers_initial, event_buffers)
+      end,
+    }
 
-    command("badd another-buffer")
-    command("bnext")
+    command('badd another-buffer')
+    command('bnext')
 
     local expected_buffers = {
-      {buffer = { id = 1 }, name = '[No Name]'},
-      {buffer = { id = 2 }, name = 'another-buffer'},
+      { buffer = 1, name = '[No Name]' },
+      { buffer = 2, name = 'another-buffer' },
     }
-    screen:expect{grid=[[
+    screen:expect {
+      grid = [[
       ^                         |
-      ~                        |
-      ~                        |
-      ~                        |
+      {1:~                        }|*3
                                |
-    ]], condition=function()
-      eq({ id = 2 }, event_curbuf)
-      eq(expected_buffers, event_buffers)
-    end}
+    ]],
+      condition = function()
+        eq(2, event_curbuf)
+        eq(expected_buffers, event_buffers)
+      end,
+    }
   end)
 end)
 
-describe("tabline", function()
+describe('tabline', function()
   local screen
 
   before_each(function()
     clear()
     screen = Screen.new(42, 5)
     screen:attach()
-    screen:set_default_attr_ids({
-      [0] = {bold = true, foreground = Screen.colors.Blue};  -- NonText
-      [1] = {reverse = true};  -- TabLineFill
-    })
   end)
 
   it('redraws when tabline option is set', function()
     command('set tabline=asdf')
     command('set showtabline=2')
-    screen:expect{grid=[[
-      {1:asdf                                      }|
+    screen:expect {
+      grid = [[
+      {2:asdf                                      }|
       ^                                          |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
+    ]],
+    }
     command('set tabline=jkl')
-    screen:expect{grid=[[
-      {1:jkl                                       }|
+    screen:expect {
+      grid = [[
+      {2:jkl                                       }|
       ^                                          |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
+    ]],
+    }
   end)
 
   it('click definitions do not leak memory #21765', function()
@@ -132,46 +136,64 @@ describe("tabline", function()
     command('tabnew')
     insert('tab2')
     command('tabprev')
-    meths.set_option_value('tabline', '%1T口口%2Ta' .. ('b'):rep(38) .. '%999Xc', {})
-    screen:expect{grid=[[
-      {1:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
+    api.nvim_set_option_value('tabline', '%1T口口%2Ta' .. ('b'):rep(38) .. '%999Xc', {})
+    screen:expect {
+      grid = [[
+      {2:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
       tab^1                                      |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
+    ]],
+    }
     assert_alive()
-    meths.input_mouse('left', 'press', '', 0, 0, 1)
-    screen:expect{grid=[[
-      {1:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
+    api.nvim_input_mouse('left', 'press', '', 0, 0, 1)
+    screen:expect {
+      grid = [[
+      {2:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
       tab^2                                      |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
-    meths.input_mouse('left', 'press', '', 0, 0, 0)
-    screen:expect{grid=[[
-      {1:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
+    ]],
+    }
+    api.nvim_input_mouse('left', 'press', '', 0, 0, 0)
+    screen:expect {
+      grid = [[
+      {2:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
       tab^1                                      |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
-    meths.input_mouse('left', 'press', '', 0, 0, 39)
-    screen:expect{grid=[[
-      {1:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
+    ]],
+    }
+    api.nvim_input_mouse('left', 'press', '', 0, 0, 39)
+    screen:expect {
+      grid = [[
+      {2:<abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc }|
       tab^2                                      |
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*2
                                                 |
-    ]]}
-    meths.input_mouse('left', 'press', '', 0, 0, 40)
-    screen:expect{grid=[[
+    ]],
+    }
+    api.nvim_input_mouse('left', 'press', '', 0, 0, 40)
+    screen:expect {
+      grid = [[
       tab^1                                      |
-      {0:~                                         }|
-      {0:~                                         }|
-      {0:~                                         }|
+      {1:~                                         }|*3
                                                 |
-    ]]}
+    ]],
+    }
+  end)
+
+  it('middle-click closes tab', function()
+    command('tabnew')
+    command('tabnew')
+    command('tabnew')
+    command('tabprev')
+    eq({ 3, 4 }, api.nvim_eval('[tabpagenr(), tabpagenr("$")]'))
+    api.nvim_input_mouse('middle', 'press', '', 0, 0, 1)
+    eq({ 2, 3 }, api.nvim_eval('[tabpagenr(), tabpagenr("$")]'))
+    api.nvim_input_mouse('middle', 'press', '', 0, 0, 20)
+    eq({ 2, 2 }, api.nvim_eval('[tabpagenr(), tabpagenr("$")]'))
+    api.nvim_input_mouse('middle', 'press', '', 0, 0, 1)
+    eq({ 1, 1 }, api.nvim_eval('[tabpagenr(), tabpagenr("$")]'))
   end)
 end)

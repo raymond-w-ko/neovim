@@ -308,7 +308,7 @@ func Test_searchcount_in_statusline()
     set hlsearch
     set laststatus=2 statusline+=%{TestSearchCount()}
   END
-  call writefile(lines, 'Xsearchstatusline')
+  call writefile(lines, 'Xsearchstatusline', 'D')
   let buf = RunVimInTerminal('-S Xsearchstatusline', #{rows: 10})
   call TermWait(buf)
   call term_sendkeys(buf, "/something")
@@ -316,7 +316,6 @@ func Test_searchcount_in_statusline()
 
   call term_sendkeys(buf, "\<Esc>")
   call StopVimInTerminal(buf)
-  call delete('Xsearchstatusline')
 endfunc
 
 func Test_search_stat_foldopen()
@@ -330,22 +329,18 @@ func Test_search_stat_foldopen()
     call cursor(1,1)
     norm n
   END
-  call writefile(lines, 'Xsearchstat1')
+  call writefile(lines, 'Xsearchstat1', 'D')
 
   let buf = RunVimInTerminal('-S Xsearchstat1', #{rows: 10})
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_searchstat_3', {})
 
   call term_sendkeys(buf, "n")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_searchstat_3', {})
 
   call term_sendkeys(buf, "n")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_searchstat_3', {})
 
   call StopVimInTerminal(buf)
-  call delete('Xsearchstat1')
 endfunc
 
 func! Test_search_stat_screendump()
@@ -362,18 +357,15 @@ func! Test_search_stat_screendump()
     call cursor(1,1)
     norm n
   END
-  call writefile(lines, 'Xsearchstat')
+  call writefile(lines, 'Xsearchstat', 'D')
   let buf = RunVimInTerminal('-S Xsearchstat', #{rows: 10})
-  call term_wait(buf)
   call VerifyScreenDump(buf, 'Test_searchstat_1', {})
 
   call term_sendkeys(buf, ":nnoremap <silent> n n\<cr>")
   call term_sendkeys(buf, "gg0n")
-  call term_wait(buf)
   call VerifyScreenDump(buf, 'Test_searchstat_2', {})
 
   call StopVimInTerminal(buf)
-  call delete('Xsearchstat')
 endfunc
 
 func Test_search_stat_then_gd()
@@ -384,19 +376,16 @@ func Test_search_stat_then_gd()
     set shortmess-=S
     set hlsearch
   END
-  call writefile(lines, 'Xsearchstatgd')
+  call writefile(lines, 'Xsearchstatgd', 'D')
 
   let buf = RunVimInTerminal('-S Xsearchstatgd', #{rows: 10})
   call term_sendkeys(buf, "/dog\<CR>")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_searchstatgd_1', {})
 
   call term_sendkeys(buf, "G0gD")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_searchstatgd_2', {})
 
   call StopVimInTerminal(buf)
-  call delete('Xsearchstatgd')
 endfunc
 
 func Test_search_stat_and_incsearch()

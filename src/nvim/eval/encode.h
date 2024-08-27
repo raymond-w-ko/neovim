@@ -1,16 +1,10 @@
-#ifndef NVIM_EVAL_ENCODE_H
-#define NVIM_EVAL_ENCODE_H
+#pragma once
 
-#include <msgpack.h>
-#include <msgpack/pack.h>
-#include <stddef.h>
 #include <string.h>
 
-#include "nvim/eval.h"
-#include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
-#include "nvim/garray.h"
-#include "nvim/vim.h"
+#include "nvim/garray_defs.h"
+#include "nvim/msgpack_rpc/packer_defs.h"
 
 /// Convert Vimscript value to msgpack string
 ///
@@ -19,7 +13,7 @@
 /// @param[in]  objname  Object name, used for error message.
 ///
 /// @return OK in case of success, FAIL otherwise.
-int encode_vim_to_msgpack(msgpack_packer *packer, typval_T *tv, const char *objname);
+int encode_vim_to_msgpack(PackerBuffer *packer, typval_T *tv, const char *objname);
 
 /// Convert Vimscript value to :echo output
 ///
@@ -37,20 +31,6 @@ typedef struct {
   size_t offset;  ///< Byte offset inside the read item.
   size_t li_length;  ///< Length of the string inside the read item.
 } ListReaderState;
-
-/// Initialize ListReaderState structure
-static inline ListReaderState encode_init_lrstate(const list_T *const list)
-  FUNC_ATTR_NONNULL_ALL
-{
-  return (ListReaderState) {
-    .list = list,
-    .li = tv_list_first(list),
-    .offset = 0,
-    .li_length = (TV_LIST_ITEM_TV(tv_list_first(list))->vval.v_string == NULL
-                  ? 0
-                  : strlen(TV_LIST_ITEM_TV(tv_list_first(list))->vval.v_string)),
-  };
-}
 
 /// Array mapping values from SpecialVarValue enum to names
 extern const char *const encode_bool_var_names[];
@@ -74,4 +54,3 @@ extern const char *const encode_special_var_names[];
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "eval/encode.h.generated.h"
 #endif
-#endif  // NVIM_EVAL_ENCODE_H

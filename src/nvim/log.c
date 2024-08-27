@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 //
 // Log module
 //
@@ -20,13 +17,15 @@
 #include <uv.h>
 
 #include "auto/config.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/eval.h"
 #include "nvim/globals.h"
 #include "nvim/log.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/path.h"
@@ -47,7 +46,7 @@ static uv_mutex_t mutex;
 
 static bool log_try_create(char *fname)
 {
-  if (fname == NULL || fname[0] == '\0') {
+  if (fname == NULL || fname[0] == NUL) {
     return false;
   }
   FILE *log_file = fopen(fname, "a");
@@ -68,7 +67,7 @@ static void log_path_init(void)
   size_t size = sizeof(log_file_path);
   expand_env("$" ENV_LOGFILE, log_file_path, (int)size - 1);
   if (strequal("$" ENV_LOGFILE, log_file_path)
-      || log_file_path[0] == '\0'
+      || log_file_path[0] == NUL
       || os_isdir(log_file_path)
       || !log_try_create(log_file_path)) {
     // Make $XDG_STATE_HOME if it does not exist.
@@ -89,7 +88,7 @@ static void log_path_init(void)
     }
     // Fall back to stderr
     if (len >= size || !log_try_create(log_file_path)) {
-      log_file_path[0] = '\0';
+      log_file_path[0] = NUL;
       return;
     }
     os_setenv(ENV_LOGFILE, log_file_path, true);
@@ -152,7 +151,17 @@ bool logmsg(int log_level, const char *context, const char *func_name, int line_
 #ifdef EXITFREE
   // Logging after we've already started freeing all our memory will only cause
   // pain.  We need access to VV_PROGPATH, homedir, etc.
-  assert(!entered_free_all_mem);
+  if (entered_free_all_mem) {
+    fprintf(stderr, "FATAL: error in free_all_mem\n %s %s %d: ", context, func_name, line_num);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    if (eol) {
+      fprintf(stderr, "\n");
+    }
+    abort();
+  }
 #endif
 
   log_lock();
@@ -287,7 +296,7 @@ static bool v_do_log_to_file(FILE *log_file, int log_level, const char *context,
   FUNC_ATTR_PRINTF(7, 0)
 {
   // Name of the Nvim instance that produced the log.
-  static char name[16] = { 0 };
+  static char name[32] = { 0 };
 
   static const char *log_levels[] = {
     [LOGLVL_DBG] = "DBG",
@@ -315,7 +324,7 @@ static bool v_do_log_to_file(FILE *log_file, int log_level, const char *context,
 
   // Get a name for this Nvim instance.
   // TODO(justinmk): expose this as v:name ?
-  if (name[0] == '\0') {
+  if (name[0] == NUL) {
     // Parent servername.
     const char *parent = path_tail(os_getenv(ENV_NVIM));
     // Servername. Empty until starting=false.
@@ -332,16 +341,16 @@ static bool v_do_log_to_file(FILE *log_file, int log_level, const char *context,
 
   // Print the log message.
   int rv = (line_num == -1 || func_name == NULL)
-    ? fprintf(log_file, "%s %s.%03d %-10s %s",
-              log_levels[log_level], date_time, millis, name,
-              (context == NULL ? "?:" : context))
-                               : fprintf(log_file, "%s %s.%03d %-10s %s%s:%d: ",
-                                         log_levels[log_level], date_time, millis, name,
-                                         (context == NULL ? "" : context),
-                                         func_name, line_num);
+           ? fprintf(log_file, "%s %s.%03d %-10s %s",
+                     log_levels[log_level], date_time, millis, name,
+                     (context == NULL ? "?:" : context))
+           : fprintf(log_file, "%s %s.%03d %-10s %s%s:%d: ",
+                     log_levels[log_level], date_time, millis, name,
+                     (context == NULL ? "" : context),
+                     func_name, line_num);
   if (name[0] == '?') {
     // No v:servername yet. Clear `name` so that the next log can try again.
-    name[0] = '\0';
+    name[0] = NUL;
   }
 
   if (rv < 0) {

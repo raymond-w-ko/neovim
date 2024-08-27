@@ -1,8 +1,10 @@
-local helpers = require('test.functional.helpers')(after_each)
-local exec_lua = helpers.exec_lua
-local eq = helpers.eq
-local eval = helpers.eval
-local clear = helpers.clear
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local exec_lua = n.exec_lua
+local eq = t.eq
+local eval = n.eval
+local clear = n.clear
 
 describe('vim.inspect_pos', function()
   before_each(function()
@@ -46,9 +48,9 @@ describe('vim.inspect_pos', function()
             hl_group_link = 'Normal',
             ns_id = 1,
             priority = 4096,
-            right_gravity = true
+            right_gravity = true,
           },
-          row = 0
+          row = 0,
         },
         {
           col = 10,
@@ -63,10 +65,10 @@ describe('vim.inspect_pos', function()
             hl_group_link = 'Normal',
             ns_id = 2,
             priority = 4096,
-            right_gravity = true
+            right_gravity = true,
           },
-          row = 0
-        }
+          row = 0,
+        },
       },
       treesitter = {},
       semantic_tokens = {},

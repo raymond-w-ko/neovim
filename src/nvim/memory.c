@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // Various routines dealing with allocation and deallocation of memory.
 
 #include <assert.h>
@@ -12,27 +9,41 @@
 #include <time.h>
 
 #include "nvim/api/extmark.h"
+#include "nvim/api/private/helpers.h"
+#include "nvim/api/ui.h"
 #include "nvim/arglist.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
+#include "nvim/channel.h"
 #include "nvim/context.h"
 #include "nvim/decoration_provider.h"
+#include "nvim/drawline.h"
+#include "nvim/errors.h"
 #include "nvim/eval.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/insexpand.h"
 #include "nvim/lua/executor.h"
 #include "nvim/main.h"
+#include "nvim/map_defs.h"
 #include "nvim/mapping.h"
 #include "nvim/memfile.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
+#include "nvim/option_vars.h"
+#include "nvim/os/input.h"
 #include "nvim/sign.h"
+#include "nvim/state_defs.h"
+#include "nvim/statusline.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
+#include "nvim/ui_client.h"
+#include "nvim/ui_compositor.h"
 #include "nvim/usercmd.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 
 #ifdef UNIT_TESTING
 # define malloc(size) mem_malloc(size)
@@ -192,7 +203,7 @@ void *xmallocz(size_t size)
   }
 
   void *ret = xmalloc(total_size);
-  ((char *)ret)[size] = 0;
+  ((char *)ret)[size] = NUL;
 
   return ret;
 }
@@ -211,6 +222,32 @@ void *xmemdupz(const void *data, size_t len)
 {
   return memcpy(xmallocz(len), data, len);
 }
+
+/// Copies `len` bytes of `src` to `dst` and zero terminates it.
+///
+/// @see {xstrlcpy}
+/// @param[out]  dst  Buffer to store the result.
+/// @param[in]  src  Buffer to be copied.
+/// @param[in]  len  Number of bytes to be copied.
+void *xmemcpyz(void *dst, const void *src, size_t len)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_NONNULL_RET
+{
+  memcpy(dst, src, len);
+  ((char *)dst)[len] = NUL;
+  return dst;
+}
+
+#ifndef HAVE_STRNLEN
+size_t xstrnlen(const char *s, size_t n)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE
+{
+  const char *end = memchr(s, NUL, n);
+  if (end == NULL) {
+    return n;
+  }
+  return (size_t)(end - s);
+}
+#endif
 
 /// A version of strchr() that returns a pointer to the terminating NUL if it
 /// doesn't find `c`.
@@ -251,7 +288,7 @@ void *xmemscan(const void *addr, char c, size_t size)
 void strchrsub(char *str, char c, char x)
   FUNC_ATTR_NONNULL_ALL
 {
-  assert(c != '\0');
+  assert(c != NUL);
   while ((str = strchr(str, c))) {
     *str++ = x;
   }
@@ -266,7 +303,8 @@ void strchrsub(char *str, char c, char x)
 void memchrsub(void *data, char c, char x, size_t len)
   FUNC_ATTR_NONNULL_ALL
 {
-  char *p = data, *end = (char *)data + len;
+  char *p = data;
+  char *end = (char *)data + len;
   while ((p = memchr(p, c, (size_t)(end - p)))) {
     *p++ = x;
   }
@@ -301,7 +339,8 @@ size_t memcnt(const void *data, char c, size_t len)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE
 {
   size_t cnt = 0;
-  const char *ptr = data, *end = ptr + len;
+  const char *ptr = data;
+  const char *end = ptr + len;
   while ((ptr = memchr(ptr, c, (size_t)(end - ptr))) != NULL) {
     cnt++;
     ptr++;  // Skip the instance of c.
@@ -349,7 +388,7 @@ char *xstpcpy(char *restrict dst, const char *restrict src)
 char *xstpncpy(char *restrict dst, const char *restrict src, size_t maxlen)
   FUNC_ATTR_NONNULL_RET FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  const char *p = memchr(src, '\0', maxlen);
+  const char *p = memchr(src, NUL, maxlen);
   if (p) {
     size_t srclen = (size_t)(p - src);
     memcpy(dst, src, srclen);
@@ -381,7 +420,7 @@ size_t xstrlcpy(char *restrict dst, const char *restrict src, size_t dsize)
   if (dsize) {
     size_t len = MIN(slen, dsize - 1);
     memcpy(dst, src, len);
-    dst[len] = '\0';
+    dst[len] = NUL;
   }
 
   return slen;  // Does not include NUL.
@@ -411,7 +450,7 @@ size_t xstrlcat(char *const dst, const char *const src, const size_t dsize)
 
   if (slen > dsize - dlen - 1) {
     memmove(dst + dlen, src, dsize - dlen - 1);
-    dst[dsize - 1] = '\0';
+    dst[dsize - 1] = NUL;
   } else {
     memmove(dst + dlen, src, slen + 1);
   }
@@ -471,7 +510,7 @@ char *xstrndup(const char *str, size_t len)
   FUNC_ATTR_MALLOC FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_RET
   FUNC_ATTR_NONNULL_ALL
 {
-  char *p = memchr(str, '\0', len);
+  char *p = memchr(str, NUL, len);
   return xmemdupz(str, p ? (size_t)(p - str) : len);
 }
 
@@ -495,11 +534,11 @@ bool strequal(const char *a, const char *b)
   return (a == NULL && b == NULL) || (a && b && strcmp(a, b) == 0);
 }
 
-/// Case-insensitive `strequal`.
-bool striequal(const char *a, const char *b)
+/// Returns true if first `n` characters of strings `a` and `b` are equal. Arguments may be NULL.
+bool strnequal(const char *a, const char *b, size_t n)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  return (a == NULL && b == NULL) || (a && b && STRICMP(a, b) == 0);
+  return (a == NULL && b == NULL) || (a && b && strncmp(a, b, n) == 0);
 }
 
 // Avoid repeating the error message many times (they take 1 second each).
@@ -530,7 +569,6 @@ void time_to_bytes(time_t time_, uint8_t buf[8])
   }
 }
 
-#define ARENA_BLOCK_SIZE 4096
 #define REUSE_MAX 4
 
 static struct consumed_blk *arena_reuse_blk;
@@ -559,17 +597,26 @@ ArenaMem arena_finish(Arena *arena)
   return res;
 }
 
-void alloc_block(Arena *arena)
+/// allocate a block of ARENA_BLOCK_SIZE
+///
+/// free it with free_block
+void *alloc_block(void)
 {
-  struct consumed_blk *prev_blk = (struct consumed_blk *)arena->cur_blk;
   if (arena_reuse_blk_count > 0) {
-    arena->cur_blk = (char *)arena_reuse_blk;
+    void *retval = (char *)arena_reuse_blk;
     arena_reuse_blk = arena_reuse_blk->prev;
     arena_reuse_blk_count--;
+    return retval;
   } else {
     arena_alloc_count++;
-    arena->cur_blk = xmalloc(ARENA_BLOCK_SIZE);
+    return xmalloc(ARENA_BLOCK_SIZE);
   }
+}
+
+void arena_alloc_block(Arena *arena)
+{
+  struct consumed_blk *prev_blk = (struct consumed_blk *)arena->cur_blk;
+  arena->cur_blk = alloc_block();
   arena->pos = 0;
   arena->size = ARENA_BLOCK_SIZE;
   struct consumed_blk *blk = arena_alloc(arena, sizeof(struct consumed_blk), true);
@@ -578,7 +625,9 @@ void alloc_block(Arena *arena)
 
 static size_t arena_align_offset(uint64_t off)
 {
+#define ARENA_ALIGN MAX(sizeof(void *), sizeof(double))
   return ((off + (ARENA_ALIGN - 1)) & ~(ARENA_ALIGN - 1));
+#undef ARENA_ALIGN
 }
 
 /// @param arena if NULL, do a global allocation. caller must then free the value!
@@ -589,7 +638,7 @@ void *arena_alloc(Arena *arena, size_t size, bool align)
     return xmalloc(size);
   }
   if (!arena->cur_blk) {
-    alloc_block(arena);
+    arena_alloc_block(arena);
   }
   size_t alloc_pos = align ? arena_align_offset(arena->pos) : arena->pos;
   if (alloc_pos + size > arena->size) {
@@ -611,7 +660,7 @@ void *arena_alloc(Arena *arena, size_t size, bool align)
       cur_blk->prev = fix_blk;
       return alloc + aligned_hdr_size;
     } else {
-      alloc_block(arena);  // resets arena->pos
+      arena_alloc_block(arena);  // resets arena->pos
       alloc_pos = align ? arena_align_offset(arena->pos) : arena->pos;
     }
   }
@@ -621,17 +670,27 @@ void *arena_alloc(Arena *arena, size_t size, bool align)
   return mem;
 }
 
+void free_block(void *block)
+{
+  if (arena_reuse_blk_count < REUSE_MAX) {
+    struct consumed_blk *reuse_blk = block;
+    reuse_blk->prev = arena_reuse_blk;
+    arena_reuse_blk = reuse_blk;
+    arena_reuse_blk_count++;
+  } else {
+    xfree(block);
+  }
+}
+
 void arena_mem_free(ArenaMem mem)
 {
   struct consumed_blk *b = mem;
   // peel of the first block, as it is guaranteed to be ARENA_BLOCK_SIZE,
   // not a custom fix_blk
-  if (arena_reuse_blk_count < REUSE_MAX && b != NULL) {
+  if (b != NULL) {
     struct consumed_blk *reuse_blk = b;
     b = b->prev;
-    reuse_blk->prev = arena_reuse_blk;
-    arena_reuse_blk = reuse_blk;
-    arena_reuse_blk_count++;
+    free_block(reuse_blk);
   }
 
   while (b) {
@@ -641,11 +700,17 @@ void arena_mem_free(ArenaMem mem)
   }
 }
 
-char *arena_memdupz(Arena *arena, const char *buf, size_t size)
+char *arena_allocz(Arena *arena, size_t size)
 {
   char *mem = arena_alloc(arena, size + 1, false);
-  memcpy(mem, buf, size);
   mem[size] = NUL;
+  return mem;
+}
+
+char *arena_memdupz(Arena *arena, const char *buf, size_t size)
+{
+  char *mem = arena_allocz(arena, size);
+  memcpy(mem, buf, size);
   return mem;
 }
 
@@ -656,10 +721,8 @@ char *arena_memdupz(Arena *arena, const char *buf, size_t size)
 # include "nvim/cmdhist.h"
 # include "nvim/diff.h"
 # include "nvim/edit.h"
-# include "nvim/eval/typval.h"
 # include "nvim/ex_cmds.h"
 # include "nvim/ex_docmd.h"
-# include "nvim/ex_getln.h"
 # include "nvim/file_search.h"
 # include "nvim/getchar.h"
 # include "nvim/grid.h"
@@ -699,13 +762,6 @@ void free_all_mem(void)
     do_cmdline_cmd("tabonly!");
   }
 
-  if (!ONE_WINDOW) {
-    // to keep things simple, don't perform this
-    // ritual inside a float
-    curwin = firstwin;
-    do_cmdline_cmd("only!");
-  }
-
   // Free all spell info.
   spell_free_all();
 
@@ -733,6 +789,7 @@ void free_all_mem(void)
   free_all_marks();
   alist_clear(&global_alist);
   free_homedir();
+  free_envmap();
   free_users();
   free_search_patterns();
   free_old_sub();
@@ -767,7 +824,24 @@ void free_all_mem(void)
   // Free all option values.  Must come after closing windows.
   free_all_options();
 
-  free_arshape_buf();
+  // Free all buffers.  Reset 'autochdir' to avoid accessing things that
+  // were freed already.
+  // Must be after eval_clear to avoid it trying to access b:changedtick after
+  // freeing it.
+  p_acd = false;
+  for (buf = firstbuf; buf != NULL;) {
+    bufref_T bufref;
+    set_bufref(&bufref, buf);
+    nextbuf = buf->b_next;
+
+    // Since options (in addition to other stuff) have been freed above we need to ensure no
+    // callbacks are called, so free them before closing the buffer.
+    buf_free_callbacks(buf);
+
+    close_buffer(NULL, buf, DOBUF_WIPE, false, false);
+    // Didn't work, try next one.
+    buf = bufref_valid(&bufref) ? nextbuf : firstbuf;
+  }
 
   // Clear registers.
   clear_registers();
@@ -789,39 +863,34 @@ void free_all_mem(void)
     }
   }
 
+  channel_free_all_mem();
   eval_clear();
   api_extmark_free_all_mem();
   ctx_free_all();
 
-  // Free all buffers.  Reset 'autochdir' to avoid accessing things that
-  // were freed already.
-  // Must be after eval_clear to avoid it trying to access b:changedtick after
-  // freeing it.
-  p_acd = false;
-  for (buf = firstbuf; buf != NULL;) {
-    bufref_T bufref;
-    set_bufref(&bufref, buf);
-    nextbuf = buf->b_next;
-
-    // Since options (in addition to other stuff) have been freed above we need to ensure no
-    // callbacks are called, so free them before closing the buffer.
-    buf_free_callbacks(buf);
-
-    close_buffer(NULL, buf, DOBUF_WIPE, false, false);
-    // Didn't work, try next one.
-    buf = bufref_valid(&bufref) ? nextbuf : firstbuf;
-  }
+  map_destroy(int, &buffer_handles);
+  map_destroy(int, &window_handles);
+  map_destroy(int, &tabpage_handles);
 
   // free screenlines (can't display anything now!)
   grid_free_all_mem();
+  stl_clear_click_defs(tab_page_click_defs, tab_page_click_defs_size);
+  xfree(tab_page_click_defs);
 
   clear_hl_tables(false);
 
   check_quickfix_busy();
 
   decor_free_all_mem();
+  drawline_free_all_mem();
 
+  if (ui_client_channel_id) {
+    ui_client_free_all_mem();
+  }
+
+  remote_ui_free_all_mem();
   ui_free_all_mem();
+  ui_comp_free_all_mem();
   nlua_free_all_mem();
   rpc_free_all_mem();
 

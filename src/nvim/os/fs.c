@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // fs.c -- filesystem access
 #include <assert.h>
 #include <errno.h>
@@ -12,11 +9,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <uv.h>
 
 #ifdef MSWIN
 # include <shlobj.h>
 #endif
+
+#include "auto/config.h"
+#include "nvim/os/fs.h"
+#include "nvim/os/os_defs.h"
 
 #if defined(HAVE_ACL)
 # ifdef HAVE_SYS_ACL_H
@@ -27,21 +29,25 @@
 # endif
 #endif
 
-#include "auto/config.h"
-#include "nvim/ascii.h"
-#include "nvim/gettext.h"
+#ifdef HAVE_XATTR
+# include <sys/xattr.h>
+#endif
+
+#include "nvim/api/private/helpers.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/errors.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
-#include "nvim/main.h"
+#include "nvim/macros_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/option_defs.h"
-#include "nvim/os/fs_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/os.h"
 #include "nvim/path.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/ui.h"
+#include "nvim/vim_defs.h"
 
 #ifdef HAVE_SYS_UIO_H
 # include <sys/uio.h>
@@ -50,13 +56,22 @@
 #ifdef MSWIN
 # include "nvim/mbyte.h"
 # include "nvim/option.h"
+# include "nvim/os/os_win_console.h"
+# include "nvim/strings.h"
 #endif
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "os/fs.c.generated.h"
 #endif
 
-struct iovec;
+#ifdef HAVE_XATTR
+static const char e_xattr_erange[]
+  = N_("E1506: Buffer too small to copy xattr value or key");
+static const char e_xattr_e2big[]
+  = N_("E1508: Size of the extended attribute value is larger than the maximum size allowed");
+static const char e_xattr_other[]
+  = N_("E1509: Error occurred when reading or writing extended attribute");
+#endif
 
 #define RUN_UV_FS_FUNC(ret, func, ...) \
   do { \
@@ -76,10 +91,14 @@ int os_chdir(const char *path)
 {
   if (p_verbose >= 5) {
     verbose_enter();
-    smsg("chdir(%s)", path);
+    smsg(0, "chdir(%s)", path);
     verbose_leave();
   }
-  return uv_chdir(path);
+  int err = uv_chdir(path);
+  if (err == 0) {
+    ui_call_chdir(cstr_as_string(path));
+  }
+  return err;
 }
 
 /// Get the name of current directory.
@@ -283,7 +302,7 @@ static bool is_executable_ext(const char *name, char **abspath)
   char *nameext = strrchr(name, '.');
   size_t nameext_len = nameext ? strlen(nameext) : 0;
   xstrlcpy(os_buf, name, sizeof(os_buf));
-  char *buf_end = xstrchrnul(os_buf, '\0');
+  char *buf_end = xstrchrnul(os_buf, NUL);
   const char *pathext = os_getenv("PATHEXT");
   if (!pathext) {
     pathext = ".com;.exe;.bat;.cmd";
@@ -291,7 +310,7 @@ static bool is_executable_ext(const char *name, char **abspath)
   const char *ext = pathext;
   while (*ext) {
     // If $PATHEXT itself contains dot:
-    if (ext[0] == '.' && (ext[1] == '\0' || ext[1] == ENV_SEPCHAR)) {
+    if (ext[0] == '.' && (ext[1] == NUL || ext[1] == ENV_SEPCHAR)) {
       if (is_executable(name, abspath)) {
         return true;
       }
@@ -337,10 +356,16 @@ static bool is_executable_in_path(const char *name, char **abspath)
   }
 
 #ifdef MSWIN
-  // Prepend ".;" to $PATH.
-  size_t pathlen = strlen(path_env);
-  char *path = memcpy(xmallocz(pathlen + 2), "." ENV_SEPSTR, 2);
-  memcpy(path + 2, path_env, pathlen);
+  char *path = NULL;
+  if (!os_env_exists("NoDefaultCurrentDirectoryInExePath")) {
+    // Prepend ".;" to $PATH.
+    size_t pathlen = strlen(path_env);
+    path = xmallocz(pathlen + 2);
+    memcpy(path, "." ENV_SEPSTR, 2);
+    memcpy(path + 2, path_env, pathlen);
+  } else {
+    path = xstrdup(path_env);
+  }
 #else
   char *path = xstrdup(path_env);
 #endif
@@ -356,8 +381,8 @@ static bool is_executable_in_path(const char *name, char **abspath)
     char *e = xstrchrnul(p, ENV_SEPCHAR);
 
     // Combine the $PATH segment with `name`.
-    xstrlcpy(buf, p, (size_t)(e - p) + 1);
-    append_path(buf, name, buf_len);
+    xmemcpyz(buf, p, (size_t)(e - p));
+    (void)append_path(buf, name, buf_len);
 
 #ifdef MSWIN
     if (is_executable_ext(buf, abspath)) {
@@ -417,7 +442,7 @@ FILE *os_fopen(const char *path, const char *flags)
   assert(flags != NULL && strlen(flags) > 0 && strlen(flags) <= 2);
   int iflags = 0;
   // Per table in fopen(3) manpage.
-  if (flags[1] == '\0' || flags[1] == 'b') {
+  if (flags[1] == NUL || flags[1] == 'b') {
     switch (flags[0]) {
     case 'r':
       iflags = O_RDONLY;
@@ -522,6 +547,22 @@ os_dup_dup:
     }
   }
   return ret;
+}
+
+/// Open the file descriptor for stdin.
+int os_open_stdin_fd(void)
+{
+  int stdin_dup_fd;
+  if (stdin_fd > 0) {
+    stdin_dup_fd = stdin_fd;
+  } else {
+    stdin_dup_fd = os_dup(STDIN_FILENO);
+#ifdef MSWIN
+    // Replace the original stdin with the console input handle.
+    os_replace_stdin_to_conin();
+#endif
+  }
+  return stdin_dup_fd;
 }
 
 /// Read from a file
@@ -743,6 +784,85 @@ int os_setperm(const char *const name, int perm)
   RUN_UV_FS_FUNC(r, uv_fs_chmod, name, perm, NULL);
   return (r == kLibuvSuccess ? OK : FAIL);
 }
+
+#ifdef HAVE_XATTR
+/// Copy extended attributes from_file to to_file
+void os_copy_xattr(const char *from_file, const char *to_file)
+{
+  if (from_file == NULL) {
+    return;
+  }
+
+  // get the length of the extended attributes
+  ssize_t size = listxattr((char *)from_file, NULL, 0);
+  // not supported or no attributes to copy
+  if (size <= 0) {
+    return;
+  }
+  char *xattr_buf = xmalloc((size_t)size);
+  size = listxattr(from_file, xattr_buf, (size_t)size);
+  ssize_t tsize = size;
+
+  errno = 0;
+
+  ssize_t max_vallen = 0;
+  char *val = NULL;
+  const char *errmsg = NULL;
+
+  for (int round = 0; round < 2; round++) {
+    char *key = xattr_buf;
+    if (round == 1) {
+      size = tsize;
+    }
+
+    while (size > 0) {
+      ssize_t vallen = getxattr(from_file, key, val, round ? (size_t)max_vallen : 0);
+      // only set the attribute in the second round
+      if (vallen >= 0 && round
+          && setxattr(to_file, key, val, (size_t)vallen, 0) == 0) {
+        //
+      } else if (errno) {
+        switch (errno) {
+        case E2BIG:
+          errmsg = e_xattr_e2big;
+          goto error_exit;
+        case ENOTSUP:
+        case EACCES:
+        case EPERM:
+          break;
+        case ERANGE:
+          errmsg = e_xattr_erange;
+          goto error_exit;
+        default:
+          errmsg = e_xattr_other;
+          goto error_exit;
+        }
+      }
+
+      if (round == 0 && vallen > max_vallen) {
+        max_vallen = vallen;
+      }
+
+      // add one for terminating null
+      ssize_t keylen = (ssize_t)strlen(key) + 1;
+      size -= keylen;
+      key += keylen;
+    }
+    if (round) {
+      break;
+    }
+
+    val = xmalloc((size_t)max_vallen + 1);
+  }
+error_exit:
+  xfree(xattr_buf);
+  xfree(val);
+
+  if (errmsg != NULL) {
+    emsg(_(errmsg));
+  }
+}
+#endif
 
 // Return a pointer to the ACL of file "fname" in allocated memory.
 // Return NULL if the ACL is not available for whatever reason.
@@ -1207,22 +1327,22 @@ bool os_fileid_equal_fileinfo(const FileID *file_id, const FileInfo *file_info)
 /// Return the canonicalized absolute pathname.
 ///
 /// @param[in] name Filename to be canonicalized.
-/// @param[out] buf Buffer to store the canonicalized values. A minimum length
-//                  of MAXPATHL+1 is required. If it is NULL, memory is
-//                  allocated. In that case, the caller should deallocate this
-//                  buffer.
+/// @param[out] buf Buffer to store the canonicalized values.
+///                 If it is NULL, memory is allocated. In that case, the caller
+///                 should deallocate this buffer.
+/// @param[in] len  The length of the buffer.
 ///
 /// @return pointer to the buf on success, or NULL.
-char *os_realpath(const char *name, char *buf)
+char *os_realpath(const char *name, char *buf, size_t len)
   FUNC_ATTR_NONNULL_ARG(1)
 {
   uv_fs_t request;
   int result = uv_fs_realpath(NULL, &request, name, NULL);
   if (result == kLibuvSuccess) {
     if (buf == NULL) {
-      buf = xmallocz(MAXPATHL);
+      buf = xmalloc(len);
     }
-    xstrlcpy(buf, request.ptr, MAXPATHL + 1);
+    xstrlcpy(buf, request.ptr, len);
   }
   uv_fs_req_cleanup(&request);
   return result == kLibuvSuccess ? buf : NULL;

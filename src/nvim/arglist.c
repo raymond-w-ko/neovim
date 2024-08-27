@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // arglist.c: functions for dealing with the argument list
 
 #include <assert.h>
@@ -10,9 +7,13 @@
 
 #include "auto/config.h"
 #include "nvim/arglist.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/autocmd.h"
 #include "nvim/buffer.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand_defs.h"
+#include "nvim/errors.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/window.h"
@@ -22,22 +23,25 @@
 #include "nvim/ex_getln.h"
 #include "nvim/fileio.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/garray_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mark.h"
 #include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/input.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/regexp.h"
-#include "nvim/types.h"
+#include "nvim/regexp_defs.h"
+#include "nvim/types_defs.h"
 #include "nvim/undo.h"
 #include "nvim/version.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 #include "nvim/window.h"
 
 /// State used by the :all command to open all the files in the argument list in
@@ -137,7 +141,7 @@ void alist_expand(int *fnum_list, int fnum_len)
   // Don't use 'suffixes' here.  This should work like the shell did the
   // expansion.  Also, the vimrc file isn't read yet, thus the user
   // can't set the options.
-  p_su = empty_option;
+  p_su = empty_string_option;
   for (int i = 0; i < GARGCOUNT; i++) {
     old_arg_files[i] = xstrdup(GARGLIST[i].ae_fname);
   }
@@ -199,6 +203,8 @@ void alist_set(alist_T *al, int count, char **files, int use_curbuf, int *fnum_l
 /// Add file "fname" to argument list "al".
 /// "fname" must have been allocated and "al" must have been checked for room.
 ///
+/// May trigger Buf* autocommands
+///
 /// @param set_fnum  1: set buffer number; 2: re-use curbuf
 void alist_add(alist_T *al, char *fname, int set_fnum)
 {
@@ -209,6 +215,7 @@ void alist_add(alist_T *al, char *fname, int set_fnum)
     return;
   }
   arglist_locked = true;
+  curwin->w_locked = true;
 
 #ifdef BACKSLASH_IN_FILENAME
   slash_adjust(fname);
@@ -221,6 +228,7 @@ void alist_add(alist_T *al, char *fname, int set_fnum)
   al->al_ga.ga_len++;
 
   arglist_locked = false;
+  curwin->w_locked = false;
 }
 
 #if defined(BACKSLASH_IN_FILENAME)
@@ -254,9 +262,8 @@ void alist_slash_adjust(void)
 static char *do_one_arg(char *str)
 {
   char *p;
-  bool inbacktick;
 
-  inbacktick = false;
+  bool inbacktick = false;
   for (p = str; *str; str++) {
     // When the backslash is used for escaping the special meaning of a
     // character we need to keep it until wildcard expansion.
@@ -282,7 +289,7 @@ static char *do_one_arg(char *str)
 
 /// Separate the arguments in "str" and return a list of pointers in the
 /// growarray "gap".
-static void get_arglist(garray_T *gap, char *str, int escaped)
+static void get_arglist(garray_T *gap, char *str, bool escaped)
 {
   ga_init(gap, (int)sizeof(char *), 20);
   while (*str != NUL) {
@@ -343,23 +350,20 @@ static void alist_add_list(int count, char **files, int after, bool will_edit)
   int old_argcount = ARGCOUNT;
   ga_grow(&ALIST(curwin)->al_ga, count);
   if (check_arglist_locked() != FAIL) {
-    if (after < 0) {
-      after = 0;
-    }
-    if (after > ARGCOUNT) {
-      after = ARGCOUNT;
-    }
+    after = MIN(MAX(after, 0), ARGCOUNT);
     if (after < ARGCOUNT) {
       memmove(&(ARGLIST[after + count]), &(ARGLIST[after]),
               (size_t)(ARGCOUNT - after) * sizeof(aentry_T));
     }
     arglist_locked = true;
+    curwin->w_locked = true;
     for (int i = 0; i < count; i++) {
       const int flags = BLN_LISTED | (will_edit ? BLN_CURBUF : 0);
       ARGLIST[after + i].ae_fname = files[i];
       ARGLIST[after + i].ae_fnum = buflist_add(files[i], flags);
     }
     arglist_locked = false;
+    curwin->w_locked = false;
     ALIST(curwin)->al_ga.ga_len += count;
     if (old_argcount > 0 && curwin->w_arg_idx >= after) {
       curwin->w_arg_idx += count;
@@ -390,7 +394,7 @@ static void arglist_del_files(garray_T *alist_ga)
 
     bool didone = false;
     for (int match = 0; match < ARGCOUNT; match++) {
-      if (vim_regexec(&regmatch, alist_name(&ARGLIST[match]), (colnr_T)0)) {
+      if (vim_regexec(&regmatch, alist_name(&ARGLIST[match]), 0)) {
         didone = true;
         xfree(ARGLIST[match].ae_fname);
         memmove(ARGLIST + match, ARGLIST + match + 1,
@@ -428,7 +432,7 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
   garray_T new_ga;
   int exp_count;
   char **exp_files;
-  int arg_escaped = true;
+  bool arg_escaped = true;
 
   if (check_arglist_locked() == FAIL) {
     return FAIL;
@@ -475,7 +479,7 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
 /// Redefine the argument list.
 void set_arglist(char *str)
 {
-  do_arglist(str, AL_SET, 0, false);
+  do_arglist(str, AL_SET, 0, true);
 }
 
 /// @return  true if window "win" is editing the file at the current argument
@@ -621,6 +625,8 @@ void ex_argument(exarg_T *eap)
 /// Edit file "argn" of the argument lists.
 void do_argfile(exarg_T *eap, int argn)
 {
+  bool is_split_cmd = *eap->cmd == 's';
+
   int old_arg_idx = curwin->w_arg_idx;
 
   if (argn < 0 || argn >= ARGCOUNT) {
@@ -635,10 +641,16 @@ void do_argfile(exarg_T *eap, int argn)
     return;
   }
 
+  if (!is_split_cmd
+      && (&ARGLIST[argn])->ae_fnum != curbuf->b_fnum
+      && !check_can_set_curbuf_forceit(eap->forceit)) {
+    return;
+  }
+
   setpcmark();
 
   // split window or create new tab page first
-  if (*eap->cmd == 's' || cmdmod.cmod_tab != 0) {
+  if (is_split_cmd || cmdmod.cmod_tab != 0) {
     if (win_split(0, 0) == FAIL) {
       return;
     }
@@ -834,10 +846,8 @@ char *get_arglist_name(expand_T *xp FUNC_ATTR_UNUSED, int idx)
 /// Get the file name for an argument list entry.
 char *alist_name(aentry_T *aep)
 {
-  buf_T *bp;
-
   // Use the name from the associated buffer if it exists.
-  bp = buflist_findnr(aep->ae_fnum);
+  buf_T *bp = buflist_findnr(aep->ae_fnum);
   if (bp == NULL || bp->b_fname == NULL) {
     return aep->ae_fname;
   }
@@ -854,15 +864,23 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
   if (aall->had_tab > 0) {
     goto_tabpage_tp(first_tabpage, true, true);
   }
+
+  // moving tabpages around in an autocommand may cause an endless loop
+  tabpage_move_disallowed++;
   while (true) {
     win_T *wpnext = NULL;
     tabpage_T *tpnext = curtab->tp_next;
-    for (win_T *wp = firstwin; wp != NULL; wp = wpnext) {
+    // Try to close floating windows first
+    for (win_T *wp = lastwin->w_floating ? lastwin : firstwin; wp != NULL; wp = wpnext) {
       int i;
-      wpnext = wp->w_next;
+      wpnext = wp->w_floating
+               ? wp->w_prev->w_floating ? wp->w_prev : firstwin
+               : (wp->w_next == NULL || wp->w_next->w_floating) ? NULL : wp->w_next;
       buf_T *buf = wp->w_buffer;
       if (buf->b_ffname == NULL
-          || (!aall->keep_tabs && (buf->b_nwindows > 1 || wp->w_width != Columns))) {
+          || (!aall->keep_tabs
+              && (buf->b_nwindows > 1 || wp->w_width != Columns
+                  || (wp->w_floating && !is_aucmd_win(wp))))) {
         i = aall->opened_len;
       } else {
         // check if the buffer in this window is in the arglist
@@ -914,10 +932,10 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
           if (!buf_hide(buf) && buf->b_nwindows <= 1 && bufIsChanged(buf)) {
             bufref_T bufref;
             set_bufref(&bufref, buf);
-            (void)autowrite(buf, false);
+            autowrite(buf, false);
             // Check if autocommands removed the window.
             if (!win_valid(wp) || !bufref_valid(&bufref)) {
-              wpnext = firstwin;  // Start all over...
+              wpnext = lastwin->w_floating ? lastwin : firstwin;  // Start all over...
               continue;
             }
           }
@@ -930,7 +948,7 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
             // check if autocommands removed the next window
             if (!win_valid(wpnext)) {
               // start all over...
-              wpnext = firstwin;
+              wpnext = lastwin->w_floating ? lastwin : firstwin;
             }
           }
         }
@@ -948,6 +966,7 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
     }
     goto_tabpage_tp(tpnext, true, true);
   }
+  tabpage_move_disallowed--;
 }
 
 /// Open up to "count" windows for the files in the argument list "aall->alist".
@@ -977,6 +996,8 @@ static void arg_all_open_windows(arg_all_state_T *aall, int count)
             if (aall->keep_tabs) {
               aall->new_curwin = wp;
               aall->new_curtab = curtab;
+            } else if (wp->w_floating) {
+              break;
             } else if (wp->w_frame->fr_parent != curwin->w_frame->fr_parent) {
               emsg(_(e_window_layout_changed_unexpectedly));
               i = count;
@@ -1011,10 +1032,10 @@ static void arg_all_open_windows(arg_all_state_T *aall, int count)
         aall->new_curwin = curwin;
         aall->new_curtab = curtab;
       }
-      (void)do_ecmd(0, alist_name(&AARGLIST(aall->alist)[i]), NULL, NULL, ECMD_ONE,
-                    ((buf_hide(curwin->w_buffer)
-                      || bufIsChanged(curwin->w_buffer)) ? ECMD_HIDE : 0) + ECMD_OLDBUF,
-                    curwin);
+      do_ecmd(0, alist_name(&AARGLIST(aall->alist)[i]), NULL, NULL, ECMD_ONE,
+              ((buf_hide(curwin->w_buffer)
+                || bufIsChanged(curwin->w_buffer)) ? ECMD_HIDE : 0) + ECMD_OLDBUF,
+              curwin);
       if (tab_drop_empty_window && i == count - 1) {
         autocmd_no_enter++;
       }
@@ -1082,11 +1103,6 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   // When the ":tab" modifier was used do this for all tab pages.
   arg_all_close_unused_windows(&aall);
 
-  // Now set the last used tabpage to where we started.
-  if (valid_tabpage(new_lu_tp)) {
-    lastused_tabpage = new_lu_tp;
-  }
-
   // Open a window for files in the argument list that don't have one.
   // ARGCOUNT may change while doing this, because of autocommands.
   if (count > aall.opened_len || count <= 0) {
@@ -1098,7 +1114,8 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   autocmd_no_leave++;
   last_curwin = curwin;
   last_curtab = curtab;
-  win_enter(lastwin, false);
+  // lastwin may be aucmd_win
+  win_enter(lastwin_nofloating(), false);
 
   // Open up to "count" windows.
   arg_all_open_windows(&aall, count);
@@ -1122,6 +1139,12 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   if (valid_tabpage(aall.new_curtab)) {
     goto_tabpage_tp(aall.new_curtab, true, true);
   }
+
+  // Now set the last used tabpage to where we started.
+  if (valid_tabpage(new_lu_tp)) {
+    lastused_tabpage = new_lu_tp;
+  }
+
   if (win_valid(aall.new_curwin)) {
     win_enter(aall.new_curwin, false);
   }

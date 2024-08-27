@@ -1,7 +1,8 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local feed = helpers.feed
-local clear = helpers.clear
+
+local feed = n.feed
+local clear = n.clear
 
 describe(':debug', function()
   local screen
@@ -9,10 +10,10 @@ describe(':debug', function()
     clear()
     screen = Screen.new(30, 14)
     screen:set_default_attr_ids({
-      [1] = {bold = true, foreground = Screen.colors.Blue1},
-      [2] = {bold = true, reverse = true},
-      [3] = {foreground = Screen.colors.Grey100, background = Screen.colors.Red},
-      [4] = {bold = true, foreground = Screen.colors.SeaGreen4},
+      [1] = { bold = true, foreground = Screen.colors.Blue1 },
+      [2] = { bold = true, reverse = true },
+      [3] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
+      [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
     })
     screen:attach()
   end)
@@ -20,14 +21,7 @@ describe(':debug', function()
     feed(':echoerr bork<cr>')
     screen:expect([[
                                     |
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
+      {1:~                             }|*8
       {2:                              }|
       {3:E121: Undefined variable: bork}|
                                     |
@@ -38,11 +32,7 @@ describe(':debug', function()
     feed(':debug echo "aa"| echo "bb"<cr>')
     screen:expect([[
                                     |
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
+      {1:~                             }|*5
       {2:                              }|
       {3:E121: Undefined variable: bork}|
                                     |
@@ -56,8 +46,7 @@ describe(':debug', function()
     feed('step<cr>')
     screen:expect([[
                                     |
-      {1:~                             }|
-      {1:~                             }|
+      {1:~                             }|*2
       {2:                              }|
       {3:E121: Undefined variable: bork}|
                                     |
@@ -92,18 +81,7 @@ describe(':debug', function()
     feed('<cr>')
     screen:expect([[
       ^                              |
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
-      {1:~                             }|
+      {1:~                             }|*12
                                     |
     ]])
   end)

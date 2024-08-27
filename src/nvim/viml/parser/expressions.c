@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// Vimscript expression parser
 
 // Planned incompatibilities (to be included into vim_diff.txt when this parser
@@ -58,17 +55,16 @@
 #include <string.h>
 
 #include "klib/kvec.h"
-#include "nvim/ascii.h"
-#include "nvim/assert.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/assert_defs.h"
 #include "nvim/charset.h"
-#include "nvim/eval/typval.h"
-#include "nvim/gettext.h"
+#include "nvim/eval.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/keycodes.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
 #include "nvim/viml/parser/expressions.h"
 #include "nvim/viml/parser/parser.h"
 
@@ -938,7 +934,6 @@ static const char *intchar2str(const int ch)
 }
 
 #ifdef UNIT_TESTING
-# include <stdio.h>
 
 REAL_FATTR_UNUSED
 static inline void viml_pexpr_debug_print_ast_node(const ExprASTNode *const *const eastnode_p,
@@ -1269,21 +1264,12 @@ static bool viml_pexpr_handle_bop(const ParserState *const pstate, ExprASTStack 
                                    || bop_node->type == kExprNodeSubscript)
                                   ? kEOpLvlSubscript
                                   : node_lvl(*bop_node));
-#ifndef NDEBUG
-  const ExprOpAssociativity bop_node_ass = (
-                                            (bop_node->type == kExprNodeCall
-                                             || bop_node->type == kExprNodeSubscript)
-      ? kEOpAssLeft
-      : node_ass(*bop_node));
-#endif
   do {
     ExprASTNode **new_top_node_p = kv_last(*ast_stack);
     ExprASTNode *new_top_node = *new_top_node_p;
     assert(new_top_node != NULL);
     const ExprOpLvl new_top_node_lvl = node_lvl(*new_top_node);
     const ExprOpAssociativity new_top_node_ass = node_ass(*new_top_node);
-    assert(bop_node_lvl != new_top_node_lvl
-           || bop_node_ass == new_top_node_ass);
     if (top_node_p != NULL
         && ((bop_node_lvl > new_top_node_lvl
              || (bop_node_lvl == new_top_node_lvl
@@ -2207,8 +2193,8 @@ viml_pexpr_parse_process_token:
         cur_node->data.opt.ident_len = 0;
         cur_node->data.opt.scope = (
                                     cur_token.len == 3
-              ? (ExprOptScope)pline.data[cur_token.start.col + 1]
-              : kExprOptScopeUnspecified);
+                                    ? (ExprOptScope)pline.data[cur_token.start.col + 1]
+                                    : kExprOptScopeUnspecified);
       } else {
         cur_node->data.opt.ident = cur_token.data.opt.name;
         cur_node->data.opt.ident_len = cur_token.data.opt.len;

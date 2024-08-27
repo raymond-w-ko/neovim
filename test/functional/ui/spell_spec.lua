@@ -1,14 +1,15 @@
 -- Test for scenarios involving 'spell'
 
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local exec = helpers.exec
-local feed = helpers.feed
-local insert = helpers.insert
-local meths = helpers.meths
-local curbufmeths = helpers.curbufmeths
-local is_os = helpers.is_os
+
+local clear = n.clear
+local exec = n.exec
+local feed = n.feed
+local insert = n.insert
+local api = n.api
+local is_os = t.is_os
 
 describe("'spell'", function()
   local screen
@@ -17,23 +18,26 @@ describe("'spell'", function()
     clear()
     screen = Screen.new(80, 8)
     screen:attach()
-    screen:set_default_attr_ids( {
-      [0] = {bold=true, foreground=Screen.colors.Blue},
-      [1] = {special = Screen.colors.Red, undercurl = true},
-      [2] = {special = Screen.colors.Blue, undercurl = true},
-      [3] = {foreground = tonumber('0x6a0dad')},
-      [4] = {foreground = Screen.colors.Magenta},
-      [5] = {bold = true, foreground = Screen.colors.SeaGreen},
-      [6] = {foreground = Screen.colors.Red},
-      [7] = {foreground = Screen.colors.Blue},
-      [8] = {foreground = Screen.colors.Blue, special = Screen.colors.Red, undercurl = true},
-      [9] = {bold = true},
-      [10] = {background = Screen.colors.LightGrey, foreground = Screen.colors.DarkBlue},
+    screen:set_default_attr_ids({
+      [0] = { bold = true, foreground = Screen.colors.Blue },
+      [1] = { special = Screen.colors.Red, undercurl = true },
+      [2] = { special = Screen.colors.Blue, undercurl = true },
+      [3] = { foreground = tonumber('0x6a0dad') },
+      [4] = { foreground = Screen.colors.Magenta },
+      [5] = { bold = true, foreground = Screen.colors.SeaGreen },
+      [6] = { foreground = Screen.colors.Red },
+      [7] = { foreground = Screen.colors.Blue },
+      [8] = { foreground = Screen.colors.Blue, special = Screen.colors.Red, undercurl = true },
+      [9] = { bold = true },
+      [10] = { background = Screen.colors.LightGrey, foreground = Screen.colors.DarkBlue },
     })
   end)
 
   it('joins long lines #7937', function()
-    if is_os('openbsd') then pending('FIXME #12104', function() end) return end
+    if is_os('openbsd') then
+      pending('FIXME #12104', function() end)
+      return
+    end
     exec('set spell')
     insert([[
     Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
@@ -54,7 +58,6 @@ describe("'spell'", function()
     {0:~                                                                               }|
                                                                                     |
     ]])
-
   end)
 
   -- oldtest: Test_spell_screendump()
@@ -125,8 +128,7 @@ describe("'spell'", function()
       Not                                                                             |
       and her^e                                                                        |
       and here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*2
                                                                                       |
     ]])
     -- Undo also updates the next line (go to command line to remove message)
@@ -137,8 +139,7 @@ describe("'spell'", function()
       Not                                                                             |
       and here^.                                                                       |
       {2:and} here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*2
                                                                                       |
     ]])
     -- Folding an empty line does not remove Cap in next line
@@ -149,8 +150,7 @@ describe("'spell'", function()
       Not                                                                             |
       {10:^+--  2 lines: and here.·························································}|
       {2:and} here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*2
                                                                                       |
     ]])
     -- Folding the end of a sentence does not remove Cap in next line
@@ -161,9 +161,7 @@ describe("'spell'", function()
       {2:another} missing cap her^e                                                        |
       {10:+--  2 lines: Not·······························································}|
       {2:and} here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*3
                                                                                       |
     ]])
     -- Cap is correctly applied in the first row of a window
@@ -172,10 +170,7 @@ describe("'spell'", function()
       {2:another} missing cap her^e                                                        |
       {10:+--  2 lines: Not·······························································}|
       {2:and} here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     -- Adding an empty line does not remove Cap in "mod_bot" area
@@ -186,8 +181,7 @@ describe("'spell'", function()
       {2:another} missing cap here                                                        |
       {10:+--  2 lines: Not·······························································}|
       {2:and} here.                                                                       |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*2
                                                                                       |
     ]])
     -- Multiple empty lines does not remove Cap in the line after
@@ -220,9 +214,7 @@ describe("'spell'", function()
       test test test test$                                                            |
                                                                                       |
       {2:end}                                                                             |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*3
       {9:-- INSERT --}                                                                    |
     ]])
     feed('x')
@@ -231,9 +223,7 @@ describe("'spell'", function()
       test test test test$                                                            |
                                                                                       |
       {2:end}                                                                             |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*3
       {9:-- INSERT --}                                                                    |
     ]])
   end)
@@ -251,10 +241,7 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:spelin^g}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed(']s')
@@ -262,10 +249,7 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:speling}{7: }{8:^mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed(']s')
@@ -273,24 +257,18 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:^speling}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
       {6:search hit BOTTOM, continuing at TOP}                                            |
     ]])
     exec('echo ""')
-    local ns = meths.create_namespace("spell")
+    local ns = api.nvim_create_namespace('spell')
     -- extmark with spell=true enables spell
-    local id = curbufmeths.set_extmark(ns, 1, 4, { end_row = 1, end_col = 10, spell = true })
+    local id = api.nvim_buf_set_extmark(0, ns, 1, 4, { end_row = 1, end_col = 10, spell = true })
     screen:expect([[
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} {1:func}({5:void});                                                                |
       {7:// I am a }{8:^speling}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed('[s')
@@ -298,23 +276,17 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} {1:^func}({5:void});                                                                |
       {7:// I am a }{8:speling}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
-    curbufmeths.del_extmark(ns, id)
+    api.nvim_buf_del_extmark(0, ns, id)
     -- extmark with spell=false disables spell
-    id = curbufmeths.set_extmark(ns, 2, 18, { end_row = 2, end_col = 26, spell = false })
+    id = api.nvim_buf_set_extmark(0, ns, 2, 18, { end_row = 2, end_col = 26, spell = false })
     screen:expect([[
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} ^func({5:void});                                                                |
       {7:// I am a }{8:speling}{7: mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed('[s')
@@ -322,22 +294,16 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:^speling}{7: mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
       {6:search hit TOP, continuing at BOTTOM}                                            |
     ]])
     exec('echo ""')
-    curbufmeths.del_extmark(ns, id)
+    api.nvim_buf_del_extmark(0, ns, id)
     screen:expect([[
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:^speling}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed(']s')
@@ -345,10 +311,7 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:speling}{7: }{8:^mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     -- "noplainbuffer" shouldn't change spellchecking behavior with syntax enabled
@@ -359,10 +322,7 @@ describe("'spell'", function()
       {3:#include }{4:<stdbool.h>}                                                            |
       {5:bool} func({5:void});                                                                |
       {7:// I am a }{8:^speling}{7: }{8:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     -- no spellchecking with "noplainbuffer" and syntax disabled
@@ -371,10 +331,7 @@ describe("'spell'", function()
       #include <stdbool.h>                                                            |
       bool func(void);                                                                |
       // I am a ^speling mistakke                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed(']s')
@@ -382,10 +339,7 @@ describe("'spell'", function()
       #include <stdbool.h>                                                            |
       bool func(void);                                                                |
       // I am a ^speling mistakke                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
       {6:search hit BOTTOM, continuing at TOP}                                            |
     ]])
     exec('echo ""')
@@ -395,10 +349,7 @@ describe("'spell'", function()
       #include <{1:stdbool}.h>                                                            |
       {1:bool} {1:func}(void);                                                                |
       // I am a {1:^speling} {1:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
     feed('[s')
@@ -406,10 +357,7 @@ describe("'spell'", function()
       #include <{1:stdbool}.h>                                                            |
       {1:bool} {1:^func}(void);                                                                |
       // I am a {1:speling} {1:mistakke}                                                      |
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
-      {0:~                                                                               }|
+      {0:~                                                                               }|*4
                                                                                       |
     ]])
   end)
@@ -421,8 +369,8 @@ describe("'spell'", function()
       syntax match Constant "^.*$"
       call setline(1, "This is some text without any spell errors.")
     ]])
-    local ns = meths.create_namespace("spell")
-    curbufmeths.set_extmark(ns, 0, 0, { hl_group = 'WarningMsg', end_col = 43 })
+    local ns = api.nvim_create_namespace('spell')
+    api.nvim_buf_set_extmark(0, ns, 0, 0, { hl_group = 'WarningMsg', end_col = 43 })
     screen:expect([[
       {6:^This is some text without any spell errors.}|
       {0:~                                          }|

@@ -354,7 +354,8 @@ Note:
 
 							*E1255* *E1136*
 <Cmd> commands must terminate, that is, they must be followed by <CR> in the
-{rhs} of the mapping definition.  |Command-line| mode is never entered.
+{rhs} of the mapping definition.  |Command-line| mode is never entered.  To use
+a literal <CR> in the {rhs}, use |<lt>|.
 
 
 1.3 MAPPING AND MODES					*:map-modes*
@@ -604,7 +605,7 @@ instead.  Example: >
 	map <Leader>A  oanother line<Esc>
 Works like: >
 	map \A  oanother line<Esc>
-But after:
+But after: >
 	let mapleader = ","
 It works like: >
 	map ,A  oanother line<Esc>
@@ -849,8 +850,15 @@ For the Meta modifier the "T" character is used.  For example, to map Meta-b
 in Insert mode: >
 	:imap <T-b> terrible
 
+1.12 MAPPING SUPER-KEYS or COMMAND-KEYS		*:map-super-keys* *:map-cmd-key*
 
-1.12 MAPPING AN OPERATOR				*:map-operator*
+The Super / Command modifier is available if the terminal or GUI supports it.
+The character "D" is used for the Super / Command modifier.
+
+For example, to map Command-b in Insert mode: >
+	:imap <D-b> barritone
+
+1.13 MAPPING AN OPERATOR				*:map-operator*
 
 An operator is used before a {motion} command.  To define your own operator
 you must create a mapping that first sets the 'operatorfunc' option and then
@@ -955,7 +963,7 @@ operator to add quotes around text in the current line: >
 				\ ->setline(".")}'<CR>g@
 
 ==============================================================================
-2. Abbreviations			*abbreviations* *Abbreviations*
+2. Abbreviations		*abbreviation* *abbreviations* *Abbreviations*
 
 Abbreviations are used in Insert mode, Replace mode and Command-line mode.
 If you enter a word that is an abbreviation, it is replaced with the word it
@@ -1374,11 +1382,11 @@ completion can be enabled:
 	-complete=arglist	file names in argument list
 	-complete=augroup	autocmd groups
 	-complete=buffer	buffer names
-	-complete=behave	:behave suboptions
 	-complete=color		color schemes
 	-complete=command	Ex command (and arguments)
 	-complete=compiler	compilers
 	-complete=dir		directory names
+	-complete=dir_in_path	directory names in |'cdpath'|
 	-complete=environment	environment variable names
 	-complete=event		autocommand events
 	-complete=expression	Vim expression
@@ -1389,6 +1397,7 @@ completion can be enabled:
 	-complete=help		help subjects
 	-complete=highlight	highlight groups
 	-complete=history	:history suboptions
+	-complete=keymap	keyboard mappings
 	-complete=locale	locale names (as output of locale -a)
 	-complete=lua		Lua expression |:lua|
 	-complete=mapclear	buffer argument

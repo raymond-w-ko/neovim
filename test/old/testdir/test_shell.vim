@@ -5,6 +5,11 @@ source check.vim
 source shared.vim
 
 func Test_shell_options()
+  if has('win32')
+    " FIXME: This test is flaky on MS-Windows.
+    let g:test_is_flaky = 1
+  endif
+
   " The expected value of 'shellcmdflag', 'shellpipe', 'shellquote',
   " 'shellredir', 'shellxescape', 'shellxquote' for the supported shells.
   let shells = []
@@ -114,6 +119,10 @@ func Test_shellescape()
   call assert_equal("'te\\#xt'", shellescape("te#xt", 1))
   call assert_equal("'te!xt'", shellescape("te!xt"))
   call assert_equal("'te\\!xt'", shellescape("te!xt", 1))
+  call assert_equal("'te<cword>xt'", shellescape("te<cword>xt"))
+  call assert_equal("'te\\<cword>xt'", shellescape("te<cword>xt", 1))
+  call assert_equal("'te<cword>%xt'", shellescape("te<cword>%xt"))
+  call assert_equal("'te\\<cword>\\%xt'", shellescape("te<cword>%xt", 1))
 
   call assert_equal("'te\nxt'", shellescape("te\nxt"))
   call assert_equal("'te\\\nxt'", shellescape("te\nxt", 1))
@@ -122,6 +131,29 @@ func Test_shellescape()
   call assert_equal("'te\\\\!xt'", shellescape("te!xt", 1))
   call assert_equal("'te\\\nxt'", shellescape("te\nxt"))
   call assert_equal("'te\\\\\nxt'", shellescape("te\nxt", 1))
+
+  set shell=fish
+  call assert_equal("'text'", shellescape('text'))
+  call assert_equal("'te\"xt'", shellescape('te"xt'))
+  call assert_equal("'te'\\''xt'", shellescape("te'xt"))
+
+  call assert_equal("'te%xt'", shellescape("te%xt"))
+  call assert_equal("'te\\%xt'", shellescape("te%xt", 1))
+  call assert_equal("'te#xt'", shellescape("te#xt"))
+  call assert_equal("'te\\#xt'", shellescape("te#xt", 1))
+  call assert_equal("'te!xt'", shellescape("te!xt"))
+  call assert_equal("'te\\!xt'", shellescape("te!xt", 1))
+
+  call assert_equal("'te\\\\xt'", shellescape("te\\xt"))
+  call assert_equal("'te\\\\xt'", shellescape("te\\xt", 1))
+  call assert_equal("'te\\\\'\\''xt'", shellescape("te\\'xt"))
+  call assert_equal("'te\\\\'\\''xt'", shellescape("te\\'xt", 1))
+  call assert_equal("'te\\\\!xt'", shellescape("te\\!xt"))
+  call assert_equal("'te\\\\\\!xt'", shellescape("te\\!xt", 1))
+  call assert_equal("'te\\\\%xt'", shellescape("te\\%xt"))
+  call assert_equal("'te\\\\\\%xt'", shellescape("te\\%xt", 1))
+  call assert_equal("'te\\\\#xt'", shellescape("te\\#xt"))
+  call assert_equal("'te\\\\\\#xt'", shellescape("te\\#xt", 1))
 
   let &shell = save_shell
 endfunc
@@ -156,7 +188,7 @@ func Test_shellxquote()
   let save_sxq = &shellxquote
   let save_sxe = &shellxescape
 
-  call writefile(['#!/bin/sh', 'echo "Cmd: [$*]" > Xlog'], 'Xtestshell')
+  call writefile(['#!/bin/sh', 'echo "Cmd: [$*]" > Xlog'], 'Xtestshell', 'D')
   call setfperm('Xtestshell', "r-x------")
   set shell=./Xtestshell
 
@@ -180,7 +212,6 @@ func Test_shellxquote()
   let &shell = save_shell
   let &shellxquote = save_sxq
   let &shellxescape = save_sxe
-  call delete('Xtestshell')
   call delete('Xlog')
 endfunc
 

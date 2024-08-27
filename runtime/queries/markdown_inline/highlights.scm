@@ -1,47 +1,26 @@
-;; From MDeiml/tree-sitter-markdown
-[
-  (code_span)
-  (link_title)
-] @text.literal @nospell
+; From MDeiml/tree-sitter-markdown
+(code_span) @markup.raw @nospell
 
-[
-  (emphasis_delimiter)
-  (code_span_delimiter)
-] @punctuation.delimiter
+(emphasis) @markup.italic
 
-(emphasis) @text.emphasis
+(strong_emphasis) @markup.strong
 
-(strong_emphasis) @text.strong
+(strikethrough) @markup.strikethrough
 
-(strikethrough) @text.strike
-
-[
-  (link_destination)
-  (uri_autolink)
-] @text.uri @nospell
-
-[
-  (link_label)
-  (link_text)
-  (image_description)
-] @text.reference
+(shortcut_link
+  (link_text) @nospell)
 
 [
   (backslash_escape)
   (hard_line_break)
 ] @string.escape
 
-(image "!" @punctuation.special)
-(image ["[" "]" "(" ")"] @punctuation.bracket)
-(inline_link ["[" "]" "(" ")"] @punctuation.bracket)
-(shortcut_link ["[" "]"] @punctuation.bracket)
-
 ; Conceal codeblock and text style markers
 ([
   (code_span_delimiter)
   (emphasis_delimiter)
 ] @conceal
-(#set! conceal ""))
+  (#set! conceal ""))
 
 ; Conceal inline links
 (inline_link
@@ -51,8 +30,20 @@
     "("
     (link_destination)
     ")"
-  ] @conceal
+  ] @markup.link
   (#set! conceal ""))
+
+[
+  (link_label)
+  (link_text)
+  (link_title)
+  (image_description)
+] @markup.link.label
+
+(inline_link
+  (link_text) @_label
+  (link_destination) @_url
+  (#set! @_label url @_url))
 
 ; Conceal image links
 (image
@@ -63,7 +54,7 @@
     "("
     (link_destination)
     ")"
-  ] @conceal
+  ] @markup.link
   (#set! conceal ""))
 
 ; Conceal full reference links
@@ -72,7 +63,7 @@
     "["
     "]"
     (link_label)
-  ] @conceal
+  ] @markup.link
   (#set! conceal ""))
 
 ; Conceal collapsed reference links
@@ -80,7 +71,7 @@
   [
     "["
     "]"
-  ] @conceal
+  ] @markup.link
   (#set! conceal ""))
 
 ; Conceal shortcut links
@@ -88,5 +79,45 @@
   [
     "["
     "]"
-  ] @conceal
+  ] @markup.link
   (#set! conceal ""))
+
+[
+  (link_destination)
+  (uri_autolink)
+  (email_autolink)
+] @markup.link.url @nospell
+
+((link_destination) @_url
+  (#set! @_url url @_url))
+
+((uri_autolink) @_url
+  (#offset! @_url 0 1 0 -1)
+  (#set! @_url url @_url))
+
+(entity_reference) @nospell
+
+; Replace common HTML entities.
+((entity_reference) @character.special
+  (#eq? @character.special "&nbsp;")
+  (#set! conceal " "))
+
+((entity_reference) @character.special
+  (#eq? @character.special "&lt;")
+  (#set! conceal "<"))
+
+((entity_reference) @character.special
+  (#eq? @character.special "&gt;")
+  (#set! conceal ">"))
+
+((entity_reference) @character.special
+  (#eq? @character.special "&amp;")
+  (#set! conceal "&"))
+
+((entity_reference) @character.special
+  (#eq? @character.special "&quot;")
+  (#set! conceal "\""))
+
+((entity_reference) @character.special
+  (#any-of? @character.special "&ensp;" "&emsp;")
+  (#set! conceal " "))

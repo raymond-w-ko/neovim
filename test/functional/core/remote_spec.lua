@@ -1,20 +1,21 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 
-local clear = helpers.clear
-local command = helpers.command
-local eq = helpers.eq
-local exec_capture = helpers.exec_capture
-local exec_lua = helpers.exec_lua
-local expect = helpers.expect
-local funcs = helpers.funcs
-local insert = helpers.insert
-local nvim_prog = helpers.nvim_prog
-local new_argv = helpers.new_argv
-local neq = helpers.neq
-local set_session = helpers.set_session
-local spawn = helpers.spawn
-local tmpname = helpers.tmpname
-local write_file = helpers.write_file
+local clear = n.clear
+local command = n.command
+local eq = t.eq
+local exec_capture = n.exec_capture
+local exec_lua = n.exec_lua
+local expect = n.expect
+local fn = n.fn
+local insert = n.insert
+local nvim_prog = n.nvim_prog
+local new_argv = n.new_argv
+local neq = t.neq
+local set_session = n.set_session
+local spawn = n.spawn
+local tmpname = t.tmpname
+local write_file = t.write_file
 
 describe('Remote', function()
   local fname, other_fname
@@ -42,8 +43,7 @@ describe('Remote', function()
     -- Run a `nvim --remote*` command and return { stdout, stderr } of the process
     local function run_remote(...)
       set_session(server)
-      local addr = funcs.serverlist()[1]
-      local client_argv = { nvim_prog, '--clean', '--headless', '--server', addr, ... }
+      local addr = fn.serverlist()[1]
 
       -- Create an nvim instance just to run the remote-invoking nvim. We want
       -- to wait for the remote instance to exit and calling jobwait blocks
@@ -52,7 +52,10 @@ describe('Remote', function()
       local client_starter = spawn(new_argv(), false, nil, true)
       set_session(client_starter)
       -- Call jobstart() and jobwait() in the same RPC request to reduce flakiness.
-      eq({ 0 }, exec_lua([[return vim.fn.jobwait({ vim.fn.jobstart(..., {
+      eq(
+        { 0 },
+        exec_lua(
+          [[return vim.fn.jobwait({ vim.fn.jobstart({...}, {
         stdout_buffered = true,
         stderr_buffered = true,
         on_stdout = function(_, data, _)
@@ -61,7 +64,15 @@ describe('Remote', function()
         on_stderr = function(_, data, _)
           _G.Remote_stderr = table.concat(data, '\n')
         end,
-      }) })]], client_argv))
+      }) })]],
+          nvim_prog,
+          '--clean',
+          '--headless',
+          '--server',
+          addr,
+          ...
+        )
+      )
       local res = exec_lua([[return { _G.Remote_stdout, _G.Remote_stderr }]])
       client_starter:close()
       set_session(server)
@@ -71,20 +82,20 @@ describe('Remote', function()
     it('edit a single file', function()
       eq({ '', '' }, run_remote('--remote', fname))
       expect(contents)
-      eq(2, #funcs.getbufinfo())
+      eq(1, #fn.getbufinfo())
     end)
 
     it('tab edit a single file with a non-changed buffer', function()
       eq({ '', '' }, run_remote('--remote-tab', fname))
       expect(contents)
-      eq(1, #funcs.gettabinfo())
+      eq(1, #fn.gettabinfo())
     end)
 
     it('tab edit a single file with a changed buffer', function()
       insert('hello')
       eq({ '', '' }, run_remote('--remote-tab', fname))
       expect(contents)
-      eq(2, #funcs.gettabinfo())
+      eq(2, #fn.gettabinfo())
     end)
 
     it('edit multiple files', function()
@@ -92,15 +103,15 @@ describe('Remote', function()
       expect(contents)
       command('next')
       expect(other_contents)
-      eq(3, #funcs.getbufinfo())
+      eq(2, #fn.getbufinfo())
     end)
 
     it('send keys', function()
-      eq({ '', '' }, run_remote('--remote-send', ':edit '..fname..'<CR><C-W>v'))
+      eq({ '', '' }, run_remote('--remote-send', ':edit ' .. fname .. '<CR><C-W>v'))
       expect(contents)
-      eq(2, #funcs.getwininfo())
+      eq(2, #fn.getwininfo())
       -- Only a single buffer as we're using edit and not drop like --remote does
-      eq(1, #funcs.getbufinfo())
+      eq(1, #fn.getbufinfo())
     end)
 
     it('evaluate expressions', function()
@@ -117,7 +128,7 @@ describe('Remote', function()
   it('creates server if not found', function()
     clear('--remote', fname)
     expect(contents)
-    eq(1, #funcs.getbufinfo())
+    eq(1, #fn.getbufinfo())
     -- Since we didn't pass silent, we should get a complaint
     neq(nil, string.find(exec_capture('messages'), 'E247:'))
   end)
@@ -125,8 +136,8 @@ describe('Remote', function()
   it('creates server if not found with tabs', function()
     clear('--remote-tab-silent', fname, other_fname)
     expect(contents)
-    eq(2, #funcs.gettabinfo())
-    eq(2, #funcs.getbufinfo())
+    eq(2, #fn.gettabinfo())
+    eq(2, #fn.getbufinfo())
     -- We passed silent, so no message should be issued about the server not being found
     eq(nil, string.find(exec_capture('messages'), 'E247:'))
   end)

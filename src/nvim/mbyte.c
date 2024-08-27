@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// mbyte.c: Code specifically for handling multi-byte characters.
 /// Multibyte extensions partly by Sung-Hoon Baek
 ///
@@ -31,42 +28,47 @@
 #include <iconv.h>
 #include <locale.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
+#include <utf8proc.h>
+#include <uv.h>
 #include <wctype.h>
 
 #include "auto/config.h"
 #include "nvim/arabic.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
 #include "nvim/drawscreen.h"
+#include "nvim/errors.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/grid.h"
 #include "nvim/grid_defs.h"
-#include "nvim/iconv.h"
+#include "nvim/iconv_defs.h"
 #include "nvim/keycodes.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mark.h"
 #include "nvim/mbyte.h"
 #include "nvim/mbyte_defs.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/option_defs.h"
+#include "nvim/move.h"
+#include "nvim/option_vars.h"
 #include "nvim/optionstr.h"
 #include "nvim/os/os.h"
-#include "nvim/os/os_defs.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 typedef struct {
   int rangeStart;
@@ -76,8 +78,8 @@ typedef struct {
 } convertStruct;
 
 struct interval {
-  long first;
-  long last;
+  int first;
+  int last;
 };
 
 // uncrustify:off
@@ -446,24 +448,26 @@ int mb_get_class_tab(const char *p, const uint64_t *const chartab)
 static bool intable(const struct interval *table, size_t n_items, int c)
   FUNC_ATTR_PURE
 {
+  assert(n_items > 0);
   // first quick check for Latin1 etc. characters
   if (c < table[0].first) {
     return false;
   }
 
+  assert(n_items <= SIZE_MAX / 2);
   // binary search in table
-  int bot = 0;
-  int top = (int)(n_items - 1);
-  while (top >= bot) {
-    int mid = (bot + top) / 2;
+  size_t bot = 0;
+  size_t top = n_items;
+  do {
+    size_t mid = (bot + top) >> 1;
     if (table[mid].last < c) {
       bot = mid + 1;
     } else if (table[mid].first > c) {
-      top = mid - 1;
+      top = mid;
     } else {
       return true;
     }
-  }
+  } while (top > bot);
   return false;
 }
 
@@ -477,32 +481,28 @@ static bool intable(const struct interval *table, size_t n_items, int c)
 ///       gen_unicode_tables.lua, which must be manually invoked as needed.
 int utf_char2cells(int c)
 {
-  // Use the value from setcellwidths() at 0x80 and higher, unless the
-  // character is not printable.
-  if (c >= 0x80 && vim_isprintc(c)) {
-    int n = cw_value(c);
-    if (n != 0) {
-      return n;
-    }
+  if (c < 0x80) {
+    return 1;
   }
 
-  if (c >= 0x100) {
-    if (!utf_printable(c)) {
-      return 6;                 // unprintable, displays <xxxx>
-    }
-    if (intable(doublewidth, ARRAY_SIZE(doublewidth), c)) {
-      return 2;
-    }
-    if (p_emoji && intable(emoji_wide, ARRAY_SIZE(emoji_wide), c)) {
-      return 2;
-    }
-  } else if (c >= 0x80 && !vim_isprintc(c)) {
-    // Characters below 0x100 are influenced by 'isprint' option.
-    return 4;                   // unprintable, displays <xx>
+  if (!vim_isprintc(c)) {
+    assert(c <= 0xFFFF);
+    // unprintable is displayed either as <xx> or <xxxx>
+    return c > 0xFF ? 6 : 4;
   }
 
-  if (c >= 0x80 && *p_ambw == 'd'
-      && intable(ambiguous, ARRAY_SIZE(ambiguous), c)) {
+  int n = cw_value(c);
+  if (n != 0) {
+    return n;
+  }
+
+  if (intable(doublewidth, ARRAY_SIZE(doublewidth), c)) {
+    return 2;
+  }
+  if (p_emoji && intable(emoji_wide, ARRAY_SIZE(emoji_wide), c)) {
+    return 2;
+  }
+  if (*p_ambw == 'd' && intable(ambiguous, ARRAY_SIZE(ambiguous), c)) {
     return 2;
   }
 
@@ -527,6 +527,74 @@ int utf_ptr2cells(const char *p)
     return utf_char2cells(c);
   }
   return 1;
+}
+
+/// Convert a UTF-8 byte sequence to a character number.
+/// Doesn't handle ascii! only multibyte and illegal sequences.
+///
+/// @param[in]  p      String to convert.
+/// @param[in]  len    Length of the character in bytes, 0 or 1 if illegal.
+///
+/// @return Unicode codepoint. A negative value when the sequence is illegal.
+int32_t utf_ptr2CharInfo_impl(uint8_t const *p, uintptr_t const len)
+  FUNC_ATTR_PURE FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
+{
+// uint8_t is a reminder for clang to use smaller cmp
+#define CHECK \
+  do { \
+    if (EXPECT((uint8_t)(cur & 0xC0U) != 0x80U, false)) { \
+      return -1; \
+    } \
+  } while (0)
+
+  static uint32_t const corrections[] = {
+    (1U << 31),  // invalid - set invalid bits (safe to add as first 2 bytes
+    (1U << 31),  // won't affect highest bit in normal ret)
+    -(0x80U + (0xC0U << 6)),  // multibyte - subtract added UTF8 bits (1..10xxx and 10xxx)
+    -(0x80U + (0x80U << 6) + (0xE0U << 12)),
+    -(0x80U + (0x80U << 6) + (0x80U << 12) + (0xF0U << 18)),
+    -(0x80U + (0x80U << 6) + (0x80U << 12) + (0x80U << 18) + (0xF8U << 24)),
+    -(0x80U + (0x80U << 6) + (0x80U << 12) + (0x80U << 18) + (0x80U << 24)),  // + (0xFCU << 30)
+  };
+
+  // len is 0-6, but declared uintptr_t to avoid zeroing out upper bits
+  uint32_t const corr = corrections[len];
+  uint8_t cur;
+
+  // reading second byte unconditionally, safe for invalid
+  // as it cannot be the last byte, not safe for ascii
+  uint32_t code_point = ((uint32_t)p[0] << 6) + (cur = p[1]);
+  CHECK;
+  if ((uint32_t)len < 3) {
+    goto ret;  // len == 0, 1, 2
+  }
+
+  code_point = (code_point << 6) + (cur = p[2]);
+  CHECK;
+  if ((uint32_t)len == 3) {
+    goto ret;
+  }
+
+  code_point = (code_point << 6) + (cur = p[3]);
+  CHECK;
+  if ((uint32_t)len == 4) {
+    goto ret;
+  }
+
+  code_point = (code_point << 6) + (cur = p[4]);
+  CHECK;
+  if ((uint32_t)len == 5) {
+    goto ret;
+  }
+
+  code_point = (code_point << 6) + (cur = p[5]);
+  CHECK;
+  // len == 6
+
+ret:
+  return (int32_t)(code_point + corr);
+
+#undef CHECK
 }
 
 /// Like utf_ptr2cells(), but limit string length to "size".
@@ -598,45 +666,62 @@ size_t mb_string2cells_len(const char *str, size_t size)
 ///
 /// @return Unicode codepoint or byte value.
 int utf_ptr2char(const char *const p_in)
-  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
   uint8_t *p = (uint8_t *)p_in;
-  if (p[0] < 0x80) {  // Be quick for ASCII.
-    return p[0];
+
+  uint32_t const v0 = p[0];
+  if (EXPECT(v0 < 0x80U, true)) {  // Be quick for ASCII.
+    return (int)v0;
   }
 
-  const uint8_t len = utf8len_tab_zero[p[0]];
-  if (len > 1 && (p[1] & 0xc0) == 0x80) {
-    if (len == 2) {
-      return ((p[0] & 0x1f) << 6) + (p[1] & 0x3f);
-    }
-    if ((p[2] & 0xc0) == 0x80) {
-      if (len == 3) {
-        return (((p[0] & 0x0f) << 12) + ((p[1] & 0x3f) << 6)
-                + (p[2] & 0x3f));
-      }
-      if ((p[3] & 0xc0) == 0x80) {
-        if (len == 4) {
-          return (((p[0] & 0x07) << 18) + ((p[1] & 0x3f) << 12)
-                  + ((p[2] & 0x3f) << 6) + (p[3] & 0x3f));
-        }
-        if ((p[4] & 0xc0) == 0x80) {
-          if (len == 5) {
-            return (((p[0] & 0x03) << 24) + ((p[1] & 0x3f) << 18)
-                    + ((p[2] & 0x3f) << 12) + ((p[3] & 0x3f) << 6)
-                    + (p[4] & 0x3f));
-          }
-          if ((p[5] & 0xc0) == 0x80 && len == 6) {
-            return (((p[0] & 0x01) << 30) + ((p[1] & 0x3f) << 24)
-                    + ((p[2] & 0x3f) << 18) + ((p[3] & 0x3f) << 12)
-                    + ((p[4] & 0x3f) << 6) + (p[5] & 0x3f));
-          }
-        }
-      }
-    }
+  const uint8_t len = utf8len_tab[v0];
+  if (EXPECT(len < 2, false)) {
+    return (int)v0;
   }
-  // Illegal value: just return the first byte.
-  return p[0];
+
+#define CHECK(v) \
+  do { \
+    if (EXPECT((uint8_t)((v) & 0xC0U) != 0x80U, false)) { \
+      return (int)v0; \
+    } \
+  } while (0)
+#define LEN_RETURN(len_v, result) \
+  do { \
+    if (len == (len_v)) { \
+      return (int)(result); \
+    } \
+  } while (0)
+#define S(s) ((uint32_t)0x80U << (s))
+
+  uint32_t const v1 = p[1];
+  CHECK(v1);
+  LEN_RETURN(2, (v0 << 6) + v1 - ((0xC0U << 6) + S(0)));
+
+  uint32_t const v2 = p[2];
+  CHECK(v2);
+  LEN_RETURN(3, (v0 << 12) + (v1 << 6) + v2 - ((0xE0U << 12) + S(6) + S(0)));
+
+  uint32_t const v3 = p[3];
+  CHECK(v3);
+  LEN_RETURN(4, (v0 << 18) + (v1 << 12) + (v2 << 6) + v3
+             - ((0xF0U << 18) + S(12) + S(6) + S(0)));
+
+  uint32_t const v4 = p[4];
+  CHECK(v4);
+  LEN_RETURN(5, (v0 << 24) + (v1 << 18) + (v2 << 12) + (v3 << 6) + v4
+             - ((0xF8U << 24) + S(18) + S(12) + S(6) + S(0)));
+
+  uint32_t const v5 = p[5];
+  CHECK(v5);
+  // len == 6
+  return (int)((v0 << 30) + (v1 << 24) + (v2 << 18) + (v3 << 12) + (v4 << 6) + v5
+               // - (0xFCU << 30)
+               - (S(24) + S(18) + S(12) + S(6) + S(0)));
+
+#undef S
+#undef CHECK
+#undef LEN_RETURN
 }
 
 // Convert a UTF-8 byte sequence to a wide character.
@@ -694,9 +779,7 @@ static int utf_safe_read_char_adv(const char **s, size_t *n)
 // Note: composing characters are skipped!
 int mb_ptr2char_adv(const char **const pp)
 {
-  int c;
-
-  c = utf_ptr2char(*pp);
+  int c = utf_ptr2char(*pp);
   *pp += utfc_ptr2len(*pp);
   return c;
 }
@@ -705,9 +788,7 @@ int mb_ptr2char_adv(const char **const pp)
 // Note: composing characters are returned as separate characters.
 int mb_cptr2char_adv(const char **pp)
 {
-  int c;
-
-  c = utf_ptr2char(*pp);
+  int c = utf_ptr2char(*pp);
   *pp += utf_ptr2len(*pp);
   return c;
 }
@@ -717,9 +798,7 @@ int mb_cptr2char_adv(const char **pp)
 /// behaves like a composing character.
 bool utf_composinglike(const char *p1, const char *p2)
 {
-  int c2;
-
-  c2 = utf_ptr2char(p2);
+  int c2 = utf_ptr2char(p2);
   if (utf_iscomposing(c2)) {
     return true;
   }
@@ -729,80 +808,78 @@ bool utf_composinglike(const char *p1, const char *p2)
   return arabic_combine(utf_ptr2char(p1), c2);
 }
 
-/// Convert a UTF-8 string to a wide character
-///
-/// Also gets up to #MAX_MCO composing characters.
-///
-/// @param[out]  pcc  Location where to store composing characters. Must have
-///                   space at least for #MAX_MCO + 1 elements.
-///
-/// @return leading character.
-int utfc_ptr2char(const char *p, int *pcc)
+/// Check if the next character is a composing character when it
+/// comes after the first. For Arabic sometimes "ab" is replaced with "c", which
+/// behaves like a composing character.
+/// returns false for negative values
+bool utf_char_composinglike(int32_t const first, int32_t const next)
+  FUNC_ATTR_PURE
 {
-  int i = 0;
-
-  int c = utf_ptr2char(p);
-  int len = utf_ptr2len(p);
-
-  // Only accept a composing char when the first char isn't illegal.
-  if ((len > 1 || (uint8_t)(*p) < 0x80)
-      && (uint8_t)p[len] >= 0x80
-      && utf_composinglike(p, p + len)) {
-    int cc = utf_ptr2char(p + len);
-    while (true) {
-      pcc[i++] = cc;
-      if (i == MAX_MCO) {
-        break;
-      }
-      len += utf_ptr2len(p + len);
-      if ((uint8_t)p[len] < 0x80 || !utf_iscomposing(cc = utf_ptr2char(p + len))) {
-        break;
-      }
-    }
-  }
-
-  if (i < MAX_MCO) {    // last composing char must be 0
-    pcc[i] = 0;
-  }
-
-  return c;
+  return utf_iscomposing(next) || arabic_combine(first, next);
 }
 
-// Convert a UTF-8 byte string to a wide character.  Also get up to MAX_MCO
-// composing characters.  Use no more than p[maxlen].
-//
-// @param [out] pcc: composing chars, last one is 0
-int utfc_ptr2char_len(const char *p, int *pcc, int maxlen)
+/// Get the screen char at the beginning of a string
+///
+/// Caller is expected to check for things like unprintable chars etc
+/// If first char in string is a composing char, prepend a space to display it correctly.
+///
+/// If "p" starts with an invalid sequence, zero is returned.
+///
+/// @param[out] firstc (required) The first codepoint of the screen char,
+///                    or the first byte of an invalid sequence
+///
+/// @return the char
+schar_T utfc_ptr2schar(const char *p, int *firstc)
+  FUNC_ATTR_NONNULL_ALL
+{
+  int c = utf_ptr2char(p);
+  *firstc = c;  // NOT optional, you are gonna need it
+  bool first_compose = utf_iscomposing(c);
+  size_t maxlen = MAX_SCHAR_SIZE - 1 - first_compose;
+  size_t len = (size_t)utfc_ptr2len_len(p, (int)maxlen);
+
+  if (len == 1 && (uint8_t)(*p) >= 0x80) {
+    return 0;  // invalid sequence
+  }
+
+  return schar_from_buf_first(p, len, first_compose);
+}
+
+/// Get the screen char at the beginning of a string with length
+///
+/// Like utfc_ptr2schar but use no more than p[maxlen].
+schar_T utfc_ptr2schar_len(const char *p, int maxlen, int *firstc)
+  FUNC_ATTR_NONNULL_ALL
 {
   assert(maxlen > 0);
 
-  int i = 0;
-
-  int len = utf_ptr2len_len(p, maxlen);
-  // Is it safe to use utf_ptr2char()?
-  bool safe = len > 1 && len <= maxlen;
-  int c = safe ? utf_ptr2char(p) : (uint8_t)(*p);
-
-  // Only accept a composing char when the first char isn't illegal.
-  if ((safe || c < 0x80) && len < maxlen && (uint8_t)p[len] >= 0x80) {
-    for (; i < MAX_MCO; i++) {
-      int len_cc = utf_ptr2len_len(p + len, maxlen - len);
-      safe = len_cc > 1 && len_cc <= maxlen - len;
-      if (!safe || (pcc[i] = utf_ptr2char(p + len)) < 0x80
-          || !(i == 0 ? utf_composinglike(p, p + len) : utf_iscomposing(pcc[i]))) {
-        break;
-      }
-      len += len_cc;
-    }
+  size_t len = (size_t)utf_ptr2len_len(p, maxlen);
+  if (len > (size_t)maxlen || (len == 1 && (uint8_t)(*p) >= 0x80) || len == 0) {
+    // invalid or truncated sequence
+    *firstc = (uint8_t)(*p);
+    return 0;
   }
 
-  if (i < MAX_MCO) {
-    // last composing char must be 0
-    pcc[i] = 0;
-  }
+  int c = utf_ptr2char(p);
+  *firstc = c;
+  bool first_compose = utf_iscomposing(c);
+  maxlen = MIN(maxlen, MAX_SCHAR_SIZE - 1 - first_compose);
+  len = (size_t)utfc_ptr2len_len(p, maxlen);
 
-  return c;
-#undef ISCOMPOSING
+  return schar_from_buf_first(p, len, first_compose);
+}
+
+/// Caller must ensure there is space for `first_compose`
+static schar_T schar_from_buf_first(const char *buf, size_t len, bool first_compose)
+{
+  if (first_compose) {
+    char cbuf[MAX_SCHAR_SIZE];
+    cbuf[0] = ' ';
+    memcpy(cbuf + 1, buf, len);
+    return schar_from_buf(cbuf, len + 1);
+  } else {
+    return schar_from_buf(buf, len);
+  }
 }
 
 /// Get the length of a UTF-8 byte sequence representing a single codepoint
@@ -843,10 +920,9 @@ int utf_byte2len(int b)
 // Never returns zero.
 int utf_ptr2len_len(const char *p, int size)
 {
-  int len;
   int m;
 
-  len = utf8len_tab[(uint8_t)(*p)];
+  int len = utf8len_tab[(uint8_t)(*p)];
   if (len == 1) {
     return 1;           // NUL, ascii or illegal lead byte
   }
@@ -886,8 +962,7 @@ int utfc_ptr2len(const char *const p)
     return 1;
   }
 
-  // Check for composing characters.  We can handle only the first six, but
-  // skip all of them (otherwise the cursor would get stuck).
+  // Check for composing characters.
   int prevlen = 0;
   while (true) {
     if ((uint8_t)p[len] < 0x80 || !utf_composinglike(p + prevlen, p + len)) {
@@ -906,9 +981,6 @@ int utfc_ptr2len(const char *const p)
 /// Returns 1 for an illegal char or an incomplete byte sequence.
 int utfc_ptr2len_len(const char *p, int size)
 {
-  int len;
-  int prevlen;
-
   if (size < 1 || *p == NUL) {
     return 0;
   }
@@ -917,7 +989,7 @@ int utfc_ptr2len_len(const char *p, int size)
   }
 
   // Skip over first UTF-8 char, stopping at a NUL byte.
-  len = utf_ptr2len_len(p, size);
+  int len = utf_ptr2len_len(p, size);
 
   // Check for illegal byte and incomplete byte sequence.
   if ((len == 1 && (uint8_t)p[0] >= 0x80) || len > size) {
@@ -926,17 +998,15 @@ int utfc_ptr2len_len(const char *p, int size)
 
   // Check for composing characters.  We can handle only the first six, but
   // skip all of them (otherwise the cursor would get stuck).
-  prevlen = 0;
+  int prevlen = 0;
   while (len < size) {
-    int len_next_char;
-
     if ((uint8_t)p[len] < 0x80) {
       break;
     }
 
     // Next character length should not go beyond size to ensure that
     // utf_composinglike(...) does not read beyond size.
-    len_next_char = utf_ptr2len_len(p + len, size - len);
+    int len_next_char = utf_ptr2len_len(p + len, size - len);
     if (len_next_char > size - len) {
       break;
     }
@@ -1014,17 +1084,61 @@ int utf_char2bytes(const int c, char *const buf)
   }
 }
 
-// Return true if "c" is a composing UTF-8 character.  This means it will be
-// drawn on top of the preceding character.
-// Based on code from Markus Kuhn.
+/// Return true if "c" is a composing UTF-8 character.
+/// This means it will be drawn on top of the preceding character.
+/// Based on code from Markus Kuhn.
+/// Returns false for negative values.
 bool utf_iscomposing(int c)
 {
   return intable(combining, ARRAY_SIZE(combining), c);
 }
 
+#ifdef __SSE2__
+
+# include <emmintrin.h>
+
 // Return true for characters that can be displayed in a normal way.
 // Only for characters of 0x100 and above!
 bool utf_printable(int c)
+  FUNC_ATTR_CONST
+{
+  if (c < 0x180B || c > 0xFFFF) {
+    return c != 0x70F;
+  }
+
+# define L(v) ((int16_t)((v) - 1))  // lower bound (exclusive)
+# define H(v) ((int16_t)(v))  // upper bound (inclusive)
+
+  // Boundaries of unprintable characters.
+  // Some values are negative when converted to int16_t.
+  // Ranges must not wrap around when converted to int16_t.
+  __m128i const lo = _mm_setr_epi16(L(0x180b), L(0x200b), L(0x202a), L(0x2060),
+                                    L(0xd800), L(0xfeff), L(0xfff9), L(0xfffe));
+
+  __m128i const hi = _mm_setr_epi16(H(0x180e), H(0x200f), H(0x202e), H(0x206f),
+                                    H(0xdfff), H(0xfeff), H(0xfffb), H(0xffff));
+
+# undef L
+# undef H
+
+  __m128i value = _mm_set1_epi16((int16_t)c);
+
+  // Using _mm_cmplt_epi16() is less optimal, since it would require
+  // swapping operands (sse2 only has cmpgt instruction),
+  // and only the second operand can be a memory location.
+
+  // Character is printable when it is above/below both bounds of each range
+  // (corresponding bits in both masks are equal).
+  return _mm_movemask_epi8(_mm_cmpgt_epi16(value, lo))
+         == _mm_movemask_epi8(_mm_cmpgt_epi16(value, hi));
+}
+
+#else
+
+// Return true for characters that can be displayed in a normal way.
+// Only for characters of 0x100 and above!
+bool utf_printable(int c)
+  FUNC_ATTR_PURE
 {
   // Sorted list of non-overlapping intervals.
   // 0xd800-0xdfff is reserved for UTF-16, actually illegal.
@@ -1036,6 +1150,8 @@ bool utf_printable(int c)
 
   return !intable(nonprint, ARRAY_SIZE(nonprint), c);
 }
+
+#endif
 
 // Get class of a Unicode character.
 // 0: white space
@@ -1168,41 +1284,38 @@ bool utf_ambiguous_width(int c)
                        || intable(emoji_all, ARRAY_SIZE(emoji_all), c));
 }
 
-// Generic conversion function for case operations.
-// Return the converted equivalent of "a", which is a UCS-4 character.  Use
-// the given conversion "table".  Uses binary search on "table".
-static int utf_convert(int a, const convertStruct *const table, size_t n_items)
-{
-  // indices into table
-  size_t start = 0;
-  size_t end = n_items;
-  while (start < end) {
-    // need to search further
-    size_t mid = (end + start) / 2;
-    if (table[mid].rangeEnd < a) {
-      start = mid + 1;
-    } else {
-      end = mid;
-    }
-  }
-  if (start < n_items
-      && table[start].rangeStart <= a
-      && a <= table[start].rangeEnd
-      && (a - table[start].rangeStart) % table[start].step == 0) {
-    return a + table[start].offset;
-  }
-  return a;
-}
-
 // Return the folded-case equivalent of "a", which is a UCS-4 character.  Uses
-// simple case folding.
+// full case folding.
 int utf_fold(int a)
 {
   if (a < 0x80) {
     // be fast for ASCII
     return a >= 0x41 && a <= 0x5a ? a + 32 : a;
   }
-  return utf_convert(a, foldCase, ARRAY_SIZE(foldCase));
+
+  // TODO(dundargoc): utf8proc only does full case folding, which breaks some tests. This is a
+  // temporary workaround to circumvent failing tests.
+  //
+  // (0xdf) ß == ss in full casefolding. Using this however breaks the vim spell tests and the error
+  // E763 is thrown. This is due to the test spells relying on the vim spell files.
+  //
+  // (0x130) İ == i̇ in full casefolding.
+  if (a == 0xdf || a == 0x130) {
+    return a;
+  }
+
+  utf8proc_uint8_t input_str[16] = { 0 };
+  utf8proc_encode_char(a, input_str);
+
+  utf8proc_uint8_t *fold_str_utf;
+  utf8proc_map((utf8proc_uint8_t *)input_str, 0, &fold_str_utf,
+               UTF8PROC_NULLTERM | UTF8PROC_CASEFOLD);
+
+  int fold_codepoint_utf = utf_ptr2char((char *)fold_str_utf);
+
+  xfree(fold_str_utf);
+
+  return fold_codepoint_utf;
 }
 
 // Vim's own character class functions.  These exist because many library
@@ -1228,14 +1341,12 @@ int mb_toupper(int a)
     return TOUPPER_LOC(a);
   }
 
-  // For any other characters use the above mapping table.
-  return utf_convert(a, toUpper, ARRAY_SIZE(toUpper));
+  return utf8proc_toupper(a);
 }
 
 bool mb_islower(int a)
 {
-  // German sharp s is lower case but has no upper case equivalent.
-  return (mb_toupper(a) != a) || a == 0xdf;
+  return mb_toupper(a) != a;
 }
 
 /// Return the lower-case equivalent of "a", which is a UCS-4 character.  Use
@@ -1256,8 +1367,7 @@ int mb_tolower(int a)
     return TOLOWER_LOC(a);
   }
 
-  // For any other characters use the above mapping table.
-  return utf_convert(a, toLower, ARRAY_SIZE(toLower));
+  return utf8proc_tolower(a);
 }
 
 bool mb_isupper(int a)
@@ -1271,9 +1381,9 @@ bool mb_isalpha(int a)
   return mb_islower(a) || mb_isupper(a);
 }
 
-static int utf_strnicmp(const char *s1, const char *s2, size_t n1, size_t n2)
+int utf_strnicmp(const char *s1, const char *s2, size_t n1, size_t n2)
 {
-  int c1, c2, cdiff;
+  int c1, c2;
   char buffer[6];
 
   while (true) {
@@ -1288,7 +1398,7 @@ static int utf_strnicmp(const char *s1, const char *s2, size_t n1, size_t n2)
       continue;
     }
 
-    cdiff = utf_fold(c1) - utf_fold(c2);
+    int cdiff = utf_fold(c1) - utf_fold(c2);
     if (cdiff != 0) {
       return cdiff;
     }
@@ -1320,7 +1430,7 @@ static int utf_strnicmp(const char *s1, const char *s2, size_t n1, size_t n2)
   }
 
   while (n1 > 0 && n2 > 0 && *s1 != NUL && *s2 != NUL) {
-    cdiff = (int)((uint8_t)(*s1)) - (int)((uint8_t)(*s2));
+    int cdiff = (int)((uint8_t)(*s1)) - (int)((uint8_t)(*s2));
     if (cdiff != 0) {
       return cdiff;
     }
@@ -1428,7 +1538,7 @@ int utf16_to_utf8(const wchar_t *utf16, int utf16len, char **utf8)
     return uv_translate_sys_error(GetLastError());
   }
 
-  (*utf8)[bufsize] = '\0';
+  (*utf8)[bufsize] = NUL;
   return 0;
 }
 
@@ -1449,7 +1559,8 @@ int utf16_to_utf8(const wchar_t *utf16, int utf16len, char **utf8)
 void mb_utflen(const char *s, size_t len, size_t *codepoints, size_t *codeunits)
   FUNC_ATTR_NONNULL_ALL
 {
-  size_t count = 0, extra = 0;
+  size_t count = 0;
+  size_t extra = 0;
   size_t clen;
   for (size_t i = 0; i < len; i += clen) {
     clen = (size_t)utf_ptr2len_len(s + i, (int)(len - i));
@@ -1469,11 +1580,11 @@ ssize_t mb_utf_index_to_bytes(const char *s, size_t len, size_t index, bool use_
   FUNC_ATTR_NONNULL_ALL
 {
   size_t count = 0;
-  size_t clen, i;
+  size_t clen;
   if (index == 0) {
     return 0;
   }
-  for (i = 0; i < len; i += clen) {
+  for (size_t i = 0; i < len; i += clen) {
     clen = (size_t)utf_ptr2len_len(s + i, (int)(len - i));
     // NB: gets the byte value of invalid sequence bytes.
     // we only care whether the char fits in the BMP or not
@@ -1522,21 +1633,17 @@ int mb_stricmp(const char *s1, const char *s2)
 // 'encoding' has been set to.
 void show_utf8(void)
 {
-  int len;
-  int rlen = 0;
-  char *line;
-  int clen;
-
   // Get the byte length of the char under the cursor, including composing
   // characters.
-  line = get_cursor_pos_ptr();
-  len = utfc_ptr2len(line);
+  char *line = get_cursor_pos_ptr();
+  int len = utfc_ptr2len(line);
   if (len == 0) {
-    msg("NUL");
+    msg("NUL", 0);
     return;
   }
 
-  clen = 0;
+  size_t rlen = 0;
+  int clen = 0;
   for (int i = 0; i < len; i++) {
     if (clen == 0) {
       // start of (composing) character, get its length
@@ -1546,16 +1653,17 @@ void show_utf8(void)
       }
       clen = utf_ptr2len(line + i);
     }
-    sprintf(IObuff + rlen, "%02x ",  // NOLINT(runtime/printf)
-            (line[i] == NL) ? NUL : (uint8_t)line[i]);          // NUL is stored as NL
+    assert(IOSIZE > rlen);
+    snprintf(IObuff + rlen, IOSIZE - rlen, "%02x ",
+             (line[i] == NL) ? NUL : (uint8_t)line[i]);  // NUL is stored as NL
     clen--;
-    rlen += (int)strlen(IObuff + rlen);
+    rlen += strlen(IObuff + rlen);
     if (rlen > IOSIZE - 20) {
       break;
     }
   }
 
-  msg(IObuff);
+  msg(IObuff, 0);
 }
 
 /// Return offset from "p" to the start of a character, including composing characters.
@@ -1651,7 +1759,7 @@ bool utf_allow_break_before(int cc)
     0x2021,  // ‡ double dagger
     0x2026,  // … horizontal ellipsis
     0x2030,  // ‰ per mille sign
-    0x2031,  // ‱ per then thousand sign
+    0x2031,  // ‱ per the thousand sign
     0x203c,  // ‼ double exclamation mark
     0x2047,  // ⁇ double question mark
     0x2048,  // ⁈ question exclamation mark
@@ -1770,105 +1878,72 @@ void mb_copy_char(const char **const fp, char **const tp)
   *fp += l;
 }
 
-/// Return the offset from "p_in" to the first byte of a character.  When "p_in" is
+/// Return the offset from "p" to the first byte of a character.  When "p" is
 /// at the start of a character 0 is returned, otherwise the offset to the next
 /// character.  Can start anywhere in a stream of bytes.
-int mb_off_next(const char *base, const char *p_in)
+int mb_off_next(const char *base, const char *p)
 {
-  const uint8_t *p = (uint8_t *)p_in;
-  int i;
+  int head_off = utf_head_off(base, p);
 
-  if (*p < 0x80) {              // be quick for ASCII
+  if (head_off == 0) {
     return 0;
   }
 
-  // Find the next character that isn't 10xx.xxxx
-  for (i = 0; (p[i] & 0xc0) == 0x80; i++) {}
-  if (i > 0) {
-    int j;
-    // Check for illegal sequence.
-    for (j = 0; p - j > (uint8_t *)base; j++) {
-      if ((p[-j] & 0xc0) != 0x80) {
-        break;
-      }
-    }
-    if (utf8len_tab[p[-j]] != i + j) {
-      return 0;
-    }
-  }
-  return i;
+  return utfc_ptr2len(p - head_off) - head_off;
 }
 
-/// Return the offset from `p_in` to the last byte of the codepoint it points
-/// to.  Can start anywhere in a stream of bytes.
+/// Returns the offset in bytes from "p_in" to the first and one-past-end bytes
+/// of the codepoint it points to.
+/// "p_in" can point anywhere in a stream of bytes.
+/// "p_len" limits number of bytes after "p_in".
 /// Note: Counts individual codepoints of composed characters separately.
-int utf_cp_tail_off(const char *base, const char *p_in)
+CharBoundsOff utf_cp_bounds_len(char const *base, char const *p_in, int p_len)
+  FUNC_ATTR_PURE FUNC_ATTR_NONNULL_ALL
 {
-  const uint8_t *p = (uint8_t *)p_in;
-  int i;
-  int j;
-
-  if (*p == NUL) {
-    return 0;
+  assert(base <= p_in && p_len > 0);
+  uint8_t const *const b = (uint8_t *)base;
+  uint8_t const *const p = (uint8_t *)p_in;
+  if (*p < 0x80U) {  // be quick for ASCII
+    return (CharBoundsOff){ 0, 1 };
   }
 
-  // Find the last character that is 10xx.xxxx
-  for (i = 0; (p[i + 1] & 0xc0) == 0x80; i++) {}
-
-  // Check for illegal sequence.
-  for (j = 0; p_in - j > base; j++) {
-    if ((p[-j] & 0xc0) != 0x80) {
-      break;
+  int const max_first_off = -MIN((int)(p - b), MB_MAXCHAR - 1);
+  int first_off = 0;
+  for (; utf_is_trail_byte(p[first_off]); first_off--) {
+    if (first_off == max_first_off) {  // failed to find first byte
+      return (CharBoundsOff){ 0, 1 };
     }
   }
 
-  if (utf8len_tab[p[-j]] != i + j + 1) {
-    return 0;
+  int const max_end_off = utf8len_tab[p[first_off]] + first_off;
+  if (max_end_off <= 0 || max_end_off > p_len) {  // illegal or incomplete sequence
+    return (CharBoundsOff){ 0, 1 };
   }
-  return i;
+
+  for (int end_off = 1; end_off < max_end_off; end_off++) {
+    if (!utf_is_trail_byte(p[end_off])) {  // not enough trail bytes
+      return (CharBoundsOff){ 0, 1 };
+    }
+  }
+
+  return (CharBoundsOff){ .begin_off = (int8_t)-first_off, .end_off = (int8_t)max_end_off };
 }
 
-/// Return the offset from "p" to the first byte of the codepoint it points
-/// to. Can start anywhere in a stream of bytes.
-/// Note: Unlike `utf_head_off`, this counts individual codepoints of composed characters
-/// separately and returns a negative offset.
-///
-/// @param[in] base  Pointer to start of string
-/// @param[in] p     Pointer to byte for which to return the offset to the previous codepoint
-//
-/// @return 0 if invalid sequence, else offset to previous codepoint
-int utf_cp_head_off(const char *base, const char *p)
+/// Returns the offset in bytes from "p_in" to the first and one-past-end bytes
+/// of the codepoint it points to.
+/// "p_in" can point anywhere in a stream of bytes.
+/// Stream must be NUL-terminated.
+/// Note: Counts individual codepoints of composed characters separately.
+CharBoundsOff utf_cp_bounds(char const *base, char const *p_in)
+  FUNC_ATTR_PURE FUNC_ATTR_NONNULL_ALL
 {
-  int i;
-  int j;
-
-  if (*p == NUL) {
-    return 0;
-  }
-
-  // Find the first character that is not 10xx.xxxx
-  for (i = 0; p - i > base; i--) {
-    if (((uint8_t)p[i] & 0xc0) != 0x80) {
-      break;
-    }
-  }
-
-  // Find the last character that is 10xx.xxxx
-  for (j = 0; ((uint8_t)p[j + 1] & 0xc0) == 0x80; j++) {}
-
-  // Check for illegal sequence.
-  if (utf8len_tab[(uint8_t)p[i]] == 1) {
-    return 0;
-  }
-  return i;
+  return utf_cp_bounds_len(base, p_in, INT_MAX);
 }
 
 // Find the next illegal byte sequence.
 void utf_find_illegal(void)
 {
   pos_T pos = curwin->w_cursor;
-  char *p;
-  int len;
   vimconv_T vimconv;
   char *tofree = NULL;
 
@@ -1882,7 +1957,7 @@ void utf_find_illegal(void)
 
   curwin->w_cursor.coladd = 0;
   while (true) {
-    p = get_cursor_pos_ptr();
+    char *p = get_cursor_pos_ptr();
     if (vimconv.vc_type != CONV_NONE) {
       xfree(tofree);
       tofree = string_convert(&vimconv, p, NULL);
@@ -1895,7 +1970,7 @@ void utf_find_illegal(void)
     while (*p != NUL) {
       // Illegal means that there are not enough trail bytes (checked by
       // utf_ptr2len()) or too many of them (overlong sequence).
-      len = utf_ptr2len(p);
+      int len = utf_ptr2len(p);
       if ((uint8_t)(*p) >= 0x80 && (len == 1 || utf_char2len(utf_ptr2char(p)) != len)) {
         if (vimconv.vc_type == CONV_NONE) {
           curwin->w_cursor.col += (colnr_T)(p - get_cursor_pos_ptr());
@@ -1970,7 +2045,7 @@ void mb_check_adjust_col(void *win_)
 
   // Column 0 is always valid.
   if (oldcol != 0) {
-    char *p = ml_get_buf(win->w_buffer, win->w_cursor.lnum, false);
+    char *p = ml_get_buf(win->w_buffer, win->w_cursor.lnum);
     colnr_T len = (colnr_T)strlen(p);
 
     // Empty line or invalid column?
@@ -2122,7 +2197,6 @@ char *enc_skip(char *p)
 char *enc_canonize(char *enc)
   FUNC_ATTR_NONNULL_RET
 {
-  char *p, *s;
   if (strcmp(enc, "default") == 0) {
     // Use the default encoding as found by set_init_1().
     return xstrdup(fenc_default);
@@ -2131,8 +2205,8 @@ char *enc_canonize(char *enc)
   // copy "enc" to allocated memory, with room for two '-'
   char *r = xmalloc(strlen(enc) + 3);
   // Make it all lower case and replace '_' with '-'.
-  p = r;
-  for (s = enc; *s != NUL; s++) {
+  char *p = r;
+  for (char *s = enc; *s != NUL; s++) {
     if (*s == '_') {
       *p++ = '-';
     } else {
@@ -2264,17 +2338,14 @@ enc_locale_copy_enc:
 // (should return iconv_t, but that causes problems with prototypes).
 void *my_iconv_open(char *to, char *from)
 {
-  iconv_t fd;
 #define ICONV_TESTLEN 400
   char tobuf[ICONV_TESTLEN];
-  char *p;
-  size_t tolen;
   static WorkingStatus iconv_working = kUnknown;
 
   if (iconv_working == kBroken) {
     return (void *)-1;          // detected a broken iconv() previously
   }
-  fd = iconv_open(enc_skip(to), enc_skip(from));
+  iconv_t fd = iconv_open(enc_skip(to), enc_skip(from));
 
   if (fd != (iconv_t)-1 && iconv_working == kUnknown) {
     // Do a dummy iconv() call to check if it actually works.  There is a
@@ -2282,9 +2353,9 @@ void *my_iconv_open(char *to, char *from)
     // because it's wide-spread.  The symptoms are that after outputting
     // the initial shift state the "to" pointer is NULL and conversion
     // stops for no apparent reason after about 8160 characters.
-    p = tobuf;
-    tolen = ICONV_TESTLEN;
-    (void)iconv(fd, NULL, NULL, &p, &tolen);
+    char *p = tobuf;
+    size_t tolen = ICONV_TESTLEN;
+    iconv(fd, NULL, NULL, &p, &tolen);
     if (p == NULL) {
       iconv_working = kBroken;
       iconv_close(fd);
@@ -2305,24 +2376,19 @@ void *my_iconv_open(char *to, char *from)
 static char *iconv_string(const vimconv_T *const vcp, const char *str, size_t slen,
                           size_t *unconvlenp, size_t *resultlenp)
 {
-  const char *from;
-  size_t fromlen;
   char *to;
-  size_t tolen;
   size_t len = 0;
   size_t done = 0;
   char *result = NULL;
-  char *p;
-  int l;
 
-  from = str;
-  fromlen = slen;
+  const char *from = str;
+  size_t fromlen = slen;
   while (true) {
     if (len == 0 || ICONV_ERRNO == ICONV_E2BIG) {
       // Allocate enough room for most conversions.  When re-allocating
       // increase the buffer size.
       len = len + fromlen * 2 + 40;
-      p = xmalloc(len);
+      char *p = xmalloc(len);
       if (done > 0) {
         memmove(p, result, done);
       }
@@ -2331,7 +2397,7 @@ static char *iconv_string(const vimconv_T *const vcp, const char *str, size_t sl
     }
 
     to = result + done;
-    tolen = len - done - 2;
+    size_t tolen = len - done - 2;
     // Avoid a warning for systems with a wrong iconv() prototype by
     // casting the second argument to void *.
     if (iconv(vcp->vc_fd, (void *)&from, &fromlen, &to, &tolen) != SIZE_MAX) {
@@ -2361,7 +2427,7 @@ static char *iconv_string(const vimconv_T *const vcp, const char *str, size_t sl
       if (utf_ptr2cells(from) > 1) {
         *to++ = '?';
       }
-      l = utfc_ptr2len_len(from, (int)fromlen);
+      int l = utfc_ptr2len_len(from, (int)fromlen);
       from += l;
       fromlen -= (size_t)l;
     } else if (ICONV_ERRNO != ICONV_E2BIG) {
@@ -2425,8 +2491,6 @@ int convert_setup(vimconv_T *vcp, char *from, char *to)
 int convert_setup_ext(vimconv_T *vcp, char *from, bool from_unicode_is_utf8, char *to,
                       bool to_unicode_is_utf8)
 {
-  int from_prop;
-  int to_prop;
   int from_is_utf8;
   int to_is_utf8;
 
@@ -2442,8 +2506,8 @@ int convert_setup_ext(vimconv_T *vcp, char *from, bool from_unicode_is_utf8, cha
     return OK;
   }
 
-  from_prop = enc_canon_props(from);
-  to_prop = enc_canon_props(to);
+  int from_prop = enc_canon_props(from);
+  int to_prop = enc_canon_props(to);
   if (from_unicode_is_utf8) {
     from_is_utf8 = from_prop & ENC_UNICODE;
   } else {
@@ -2692,8 +2756,10 @@ static int tv_nr_compare(const void *a1, const void *a2)
 {
   const listitem_T *const li1 = tv_list_first(*(const list_T **)a1);
   const listitem_T *const li2 = tv_list_first(*(const list_T **)a2);
+  const varnumber_T n1 = TV_LIST_ITEM_TV(li1)->vval.v_number;
+  const varnumber_T n2 = TV_LIST_ITEM_TV(li2)->vval.v_number;
 
-  return (int)(TV_LIST_ITEM_TV(li1)->vval.v_number - TV_LIST_ITEM_TV(li2)->vval.v_number);
+  return n1 == n2 ? 0 : n1 > n2 ? 1 : -1;
 }
 
 /// "setcellwidths()" function
@@ -2775,7 +2841,7 @@ void f_setcellwidths(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     const listitem_T *lili = tv_list_first(li_l);
     const varnumber_T n1 = TV_LIST_ITEM_TV(lili)->vval.v_number;
     if (item > 0 && n1 <= table[item - 1].last) {
-      semsg(_(e_overlapping_ranges_for_nr), (long)n1);
+      semsg(_(e_overlapping_ranges_for_nr), (size_t)n1);
       xfree((void *)ptrs);
       xfree(table);
       return;
@@ -2806,6 +2872,7 @@ void f_setcellwidths(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   xfree(cw_table_save);
+  changed_window_setting_all();
   redraw_all_later(UPD_NOT_VALID);
 }
 
@@ -2831,4 +2898,26 @@ void f_charclass(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     return;
   }
   rettv->vval.v_number = mb_get_class(argvars[0].vval.v_string);
+}
+
+/// Function given to ExpandGeneric() to obtain the possible arguments of the
+/// encoding options.
+char *get_encoding_name(expand_T *xp FUNC_ATTR_UNUSED, int idx)
+{
+  if (idx >= (int)ARRAY_SIZE(enc_canon_table)) {
+    return NULL;
+  }
+
+  return (char *)enc_canon_table[idx].name;
+}
+
+/// Compare strings
+///
+/// @param[in]  ic  True if case is to be ignored.
+///
+/// @return 0 if s1 == s2, <0 if s1 < s2, >0 if s1 > s2.
+int mb_strcmp_ic(bool ic, const char *s1, const char *s2)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
+{
+  return (ic ? mb_stricmp(s1, s2) : strcmp(s1, s2));
 }

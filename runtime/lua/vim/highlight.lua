@@ -2,6 +2,13 @@ local api = vim.api
 
 local M = {}
 
+--- Table with default priorities used for highlighting:
+--- - `syntax`: `50`, used for standard syntax highlighting
+--- - `treesitter`: `100`, used for treesitter-based highlighting
+--- - `semantic_tokens`: `125`, used for LSP semantic token highlighting
+--- - `diagnostics`: `150`, used for code analysis such as diagnostics
+--- - `user`: `200`, used for user-triggered highlights such as LSP document
+---   symbols or `on_yank` autocommands
 M.priorities = {
   syntax = 50,
   treesitter = 100,
@@ -10,34 +17,98 @@ M.priorities = {
   user = 200,
 }
 
---- Highlight range between two positions
+--- @class vim.highlight.range.Opts
+--- @inlinedoc
+---
+--- Type of range. See [getregtype()]
+--- (default: `'v'` i.e. charwise)
+--- @field regtype? string
+---
+--- Indicates whether the range is end-inclusive
+--- (default: `false`)
+--- @field inclusive? boolean
+---
+--- Indicates priority of highlight
+--- (default: `vim.highlight.priorities.user`)
+--- @field priority? integer
+
+--- Apply highlight group to range of text.
 ---
 ---@param bufnr integer Buffer number to apply highlighting to
 ---@param ns integer Namespace to add highlight to
 ---@param higroup string Highlight group to use for highlighting
 ---@param start integer[]|string Start of region as a (line, column) tuple or string accepted by |getpos()|
 ---@param finish integer[]|string End of region as a (line, column) tuple or string accepted by |getpos()|
----@param opts table|nil Optional parameters
---             - regtype type of range (see |setreg()|, default charwise)
---             - inclusive boolean indicating whether the range is end-inclusive (default false)
---             - priority number indicating priority of highlight (default priorities.user)
+---@param opts? vim.highlight.range.Opts
 function M.range(bufnr, ns, higroup, start, finish, opts)
   opts = opts or {}
   local regtype = opts.regtype or 'v'
   local inclusive = opts.inclusive or false
   local priority = opts.priority or M.priorities.user
 
-  local region = vim.region(bufnr, start, finish, regtype, inclusive)
-  for linenr, cols in pairs(region) do
-    local end_row
-    if cols[2] == -1 then
-      end_row = linenr + 1
-      cols[2] = 0
+  local v_maxcol = vim.v.maxcol
+
+  local pos1 = type(start) == 'string' and vim.fn.getpos(start)
+    or {
+      bufnr,
+      start[1] + 1,
+      start[2] ~= -1 and start[2] ~= v_maxcol and start[2] + 1 or v_maxcol,
+      0,
+    }
+  local pos2 = type(finish) == 'string' and vim.fn.getpos(finish)
+    or {
+      bufnr,
+      finish[1] + 1,
+      finish[2] ~= -1 and start[2] ~= v_maxcol and finish[2] + 1 or v_maxcol,
+      0,
+    }
+
+  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+  pos1[2] = math.min(pos1[2], buf_line_count)
+  pos2[2] = math.min(pos2[2], buf_line_count)
+
+  if pos1[2] <= 0 or pos1[3] <= 0 or pos2[2] <= 0 or pos2[3] <= 0 then
+    return
+  end
+
+  vim._with({ buf = bufnr }, function()
+    if pos1[3] ~= v_maxcol then
+      local max_col1 = vim.fn.col({ pos1[2], '$' })
+      pos1[3] = math.min(pos1[3], max_col1)
     end
-    api.nvim_buf_set_extmark(bufnr, ns, linenr, cols[1], {
+    if pos2[3] ~= v_maxcol then
+      local max_col2 = vim.fn.col({ pos2[2], '$' })
+      pos2[3] = math.min(pos2[3], max_col2)
+    end
+  end)
+
+  local region = vim.fn.getregionpos(pos1, pos2, {
+    type = regtype,
+    exclusive = not inclusive,
+    eol = true,
+  })
+  -- For non-blockwise selection, use a single extmark.
+  if regtype == 'v' or regtype == 'V' then
+    region = { { region[1][1], region[#region][2] } }
+    if
+      regtype == 'V'
+      or region[1][2][2] == pos1[2] and pos1[3] == v_maxcol
+      or region[1][2][2] == pos2[2] and pos2[3] == v_maxcol
+    then
+      region[1][2][2] = region[1][2][2] + 1
+      region[1][2][3] = 0
+    end
+  end
+
+  for _, res in ipairs(region) do
+    local start_row = res[1][2] - 1
+    local start_col = res[1][3] - 1
+    local end_row = res[2][2] - 1
+    local end_col = res[2][3]
+    api.nvim_buf_set_extmark(bufnr, ns, start_row, start_col, {
       hl_group = higroup,
       end_row = end_row,
-      end_col = cols[2],
+      end_col = end_col,
       priority = priority,
       strict = false,
     })
@@ -45,23 +116,24 @@ function M.range(bufnr, ns, higroup, start, finish, opts)
 end
 
 local yank_ns = api.nvim_create_namespace('hlyank')
-local yank_timer
---- Highlight the yanked region
+local yank_timer --- @type uv.uv_timer_t?
+local yank_cancel --- @type fun()?
+
+--- Highlight the yanked text during a |TextYankPost| event.
 ---
---- use from init.vim via
----   au TextYankPost * lua vim.highlight.on_yank()
---- customize highlight group and timeout via
----   au TextYankPost * lua vim.highlight.on_yank {higroup="IncSearch", timeout=150}
---- customize conditions (here: do not highlight a visual selection) via
----   au TextYankPost * lua vim.highlight.on_yank {on_visual=false}
+--- Add the following to your `init.vim`:
 ---
--- @param opts table|nil Optional parameters
---              - higroup   highlight group for yanked region (default "IncSearch")
---              - timeout   time in ms before highlight is cleared (default 150)
---              - on_macro  highlight when executing macro (default false)
---              - on_visual highlight when yanking visual selection (default true)
---              - event     event structure (default vim.v.event)
---              - priority  integer priority (default |vim.highlight.priorities|`.user`)
+--- ```vim
+--- autocmd TextYankPost * silent! lua vim.highlight.on_yank {higroup='Visual', timeout=300}
+--- ```
+---
+--- @param opts table|nil Optional parameters
+---              - higroup   highlight group for yanked region (default "IncSearch")
+---              - timeout   time in ms before highlight is cleared (default 150)
+---              - on_macro  highlight when executing macro (default false)
+---              - on_visual highlight when yanking visual selection (default true)
+---              - event     event structure (default vim.v.event)
+---              - priority  integer priority (default |vim.highlight.priorities|`.user`)
 function M.on_yank(opts)
   vim.validate({
     opts = {
@@ -94,24 +166,29 @@ function M.on_yank(opts)
   local higroup = opts.higroup or 'IncSearch'
   local timeout = opts.timeout or 150
 
-  local bufnr = api.nvim_get_current_buf()
-  api.nvim_buf_clear_namespace(bufnr, yank_ns, 0, -1)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local winid = vim.api.nvim_get_current_win()
   if yank_timer then
     yank_timer:close()
+    assert(yank_cancel)
+    yank_cancel()
   end
 
+  vim.api.nvim__ns_set(yank_ns, { wins = { winid } })
   M.range(bufnr, yank_ns, higroup, "'[", "']", {
     regtype = event.regtype,
     inclusive = event.inclusive,
     priority = opts.priority or M.priorities.user,
   })
 
-  yank_timer = vim.defer_fn(function()
+  yank_cancel = function()
     yank_timer = nil
-    if api.nvim_buf_is_valid(bufnr) then
-      api.nvim_buf_clear_namespace(bufnr, yank_ns, 0, -1)
-    end
-  end, timeout)
+    yank_cancel = nil
+    pcall(vim.api.nvim_buf_clear_namespace, bufnr, yank_ns, 0, -1)
+    pcall(vim.api.nvim__ns_set, { wins = {} })
+  end
+
+  yank_timer = vim.defer_fn(yank_cancel, timeout)
 end
 
 return M

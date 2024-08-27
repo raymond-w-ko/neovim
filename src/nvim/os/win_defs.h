@@ -1,5 +1,5 @@
-#ifndef NVIM_OS_WIN_DEFS_H
-#define NVIM_OS_WIN_DEFS_H
+#pragma once
+// IWYU pragma: private, include "nvim/os/os_defs.h"
 
 #ifndef MSWIN
 # error Header must be included only when compiling for Windows.
@@ -15,6 +15,9 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <windows.h>
+
+// vterm.h defines an `unsigned int small` in a struct, triggering error C2632
+#undef small
 
 // Windows does not have S_IFLNK but libuv defines it
 // and sets the flag for us when calling uv_fs_stat.
@@ -86,5 +89,3 @@ typedef int mode_t;
 #ifndef STDERR_FILENO
 # define STDERR_FILENO 2
 #endif
-
-#endif  // NVIM_OS_WIN_DEFS_H

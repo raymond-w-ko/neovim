@@ -7,6 +7,8 @@ function s:logger.on_exit(id, data, event)
   call add(self.d_events, [a:event, ['']])
 endfunction
 
+let s:logger.env = #{VIMRUNTIME: $VIMRUNTIME}
+
 " Replace non-printable chars by special sequence, or "<%x>".
 let s:escaped_char = {"\n": '\n', "\r": '\r', "\t": '\t'}
 function! s:escape_non_printable(char) abort
@@ -23,8 +25,7 @@ function Main()
   set lines=25
   set columns=80
   enew
-  " FIXME: using termopen() hangs on Windows CI
-  let job = has('win32') ? jobstart(args, s:logger) : termopen(args, s:logger)
+  let job = termopen(args, s:logger)
   let results = jobwait([job], 5 * 60 * 1000)
   " TODO(ZyX-I): Get colors
   let screen = getline(1, '$')

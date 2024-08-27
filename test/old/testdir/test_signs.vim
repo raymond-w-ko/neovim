@@ -89,8 +89,9 @@ func Test_sign()
   " Place a sign without specifying the filename or buffer
   sign place 77 line=9 name=Sign2
   let a=execute('sign place')
+  " Nvim: sign line clamped to buffer length
   call assert_equal("\n--- Signs ---\nSigns for [NULL]:\n" .
-		\ "    line=9  id=77  name=Sign2  priority=10\n", a)
+		\ "    line=4  id=77  name=Sign2  priority=10\n", a)
   sign unplace *
 
   " Check :jump with file=...
@@ -194,6 +195,11 @@ func Test_sign()
   sign undefine Sign3
   call assert_fails("sign place 41 line=3 name=Sign1 buffer=" .
 			  \ bufnr('%'), 'E155:')
+
+  " Defining a sign without attributes is allowed.
+  sign define Sign1
+  call assert_equal([{'name': 'Sign1'}], sign_getdefined())
+  sign undefine Sign1
 endfunc
 
 func Test_sign_many_bytes()
@@ -240,7 +246,7 @@ func Test_sign_completion()
   call assert_equal('"sign define jump list place undefine unplace', @:)
 
   call feedkeys(":sign define Sign \<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"sign define Sign culhl= icon= linehl= numhl= text= texthl=', @:)
+  call assert_equal('"sign define Sign culhl= icon= linehl= numhl= priority= text= texthl=', @:)
 
   for hl in ['culhl', 'linehl', 'numhl', 'texthl']
     call feedkeys(":sign define Sign "..hl.."=Spell\<C-A>\<C-B>\"\<CR>", 'tx')
@@ -248,8 +254,8 @@ func Test_sign_completion()
                 \ 'SpellLocal SpellRare', @:)
   endfor
 
-  call writefile(repeat(["Sun is shining"], 30), "XsignOne")
-  call writefile(repeat(["Sky is blue"], 30), "XsignTwo")
+  call writefile(repeat(["Sun is shining"], 30), "XsignOne", 'D')
+  call writefile(repeat(["Sky is blue"], 30), "XsignTwo", 'D')
   call feedkeys(":sign define Sign icon=Xsig\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"sign define Sign icon=XsignOne XsignTwo', @:)
 
@@ -326,8 +332,6 @@ func Test_sign_completion()
   sign undefine Sign1
   sign undefine Sign2
   enew
-  call delete('XsignOne')
-  call delete('XsignTwo')
 endfunc
 
 func Test_sign_invalid_commands()
@@ -470,7 +474,7 @@ func Test_sign_funcs()
   call assert_fails('call sign_getdefined({})', 'E731:')
 
   " Tests for sign_place()
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
   edit Xsign
 
   call assert_equal(10, sign_place(10, '', 'sign1', 'Xsign',
@@ -576,7 +580,6 @@ func Test_sign_funcs()
 	      \ 'priority' : 10}]}],
 	      \ sign_getplaced('%', {'lnum' : 22}))
 
-  call delete("Xsign")
   call sign_unplace('*')
   call sign_undefine()
   enew | only
@@ -589,7 +592,7 @@ func Test_sign_group()
   call sign_unplace('*')
   call sign_undefine()
 
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
 
   let attr = {'text' : '=>', 'linehl' : 'Search', 'texthl' : 'Error'}
   call assert_equal(0, sign_define("sign1", attr))
@@ -794,10 +797,11 @@ func Test_sign_group()
   set buftype=nofile
   sign place 25 line=76 name=sign1 priority=99 file=foo
   let a = execute('sign place')
+  " Nvim: sign line clamped to buffer length
   call assert_equal("\n--- Signs ---\nSigns for Xsign:\n" .
 	      \ "    line=10  id=5  name=sign1  priority=10\n" .
 	      \ "Signs for foo:\n" .
-	      \ "    line=76  id=25  name=sign1  priority=99\n", a)
+	      \ "    line=1  id=25  name=sign1  priority=99\n", a)
   close
   bwipe foo
 
@@ -829,7 +833,6 @@ func Test_sign_group()
   " Error cases
   call assert_fails("sign place 3 group= name=sign1 buffer=" . bnum, 'E474:')
 
-  call delete("Xsign")
   call sign_unplace('*')
   call sign_undefine()
   enew | only
@@ -872,8 +875,8 @@ func Test_sign_unplace()
   call sign_undefine()
 
   " Create two files and define signs
-  call writefile(repeat(["Sun is shining"], 30), "Xsign1")
-  call writefile(repeat(["It is beautiful"], 30), "Xsign2")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign1", 'D')
+  call writefile(repeat(["It is beautiful"], 30), "Xsign2", 'D')
 
   let attr = {'text' : '=>', 'linehl' : 'Search', 'texthl' : 'Error'}
   call sign_define("sign1", attr)
@@ -1182,8 +1185,6 @@ func Test_sign_unplace()
   call sign_unplace('*')
   call sign_undefine()
   enew | only
-  call delete("Xsign1")
-  call delete("Xsign2")
 endfunc
 
 " Tests for auto-generating the sign identifier.
@@ -1195,7 +1196,7 @@ func Test_aaa_sign_id_autogen()
   let attr = {'text' : '=>', 'linehl' : 'Search', 'texthl' : 'Error'}
   call assert_equal(0, sign_define("sign1", attr))
 
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
   edit Xsign
 
   call assert_equal(1, sign_place(0, '', 'sign1', 'Xsign',
@@ -1217,7 +1218,6 @@ func Test_aaa_sign_id_autogen()
   call assert_equal(10,
 	      \ sign_getplaced('Xsign', {'id' : 1})[0].signs[0].lnum)
 
-  call delete("Xsign")
   call sign_unplace('*')
   call sign_undefine()
   enew | only
@@ -1233,9 +1233,28 @@ func Test_sign_priority()
   call sign_define("sign1", attr)
   call sign_define("sign2", attr)
   call sign_define("sign3", attr)
+  let attr = {'text' : '=>', 'linehl' : 'Search', 'texthl' : 'Search', 'priority': 60}
+  call sign_define("sign4", attr)
+
+  " Test for :sign list
+  let a = execute('sign list')
+  call assert_equal("\nsign sign1 text==> linehl=Search texthl=Search\n" .
+      \ "sign sign2 text==> linehl=Search texthl=Search\n" .
+      \ "sign sign3 text==> linehl=Search texthl=Search\n" .
+      \ "sign sign4 text==> priority=60 linehl=Search texthl=Search", a)
+
+  " Test for sign_getdefined()
+  let s = sign_getdefined()
+  call assert_equal([
+      \ {'name': 'sign1', 'texthl': 'Search', 'linehl': 'Search', 'text': '=>'},
+      \ {'name': 'sign2', 'texthl': 'Search', 'linehl': 'Search', 'text': '=>'},
+      \ {'name': 'sign3', 'texthl': 'Search', 'linehl': 'Search', 'text': '=>'},
+      \ {'name': 'sign4', 'priority': 60, 'texthl': 'Search', 'linehl': 'Search',
+      \ 'text': '=>'}],
+      \ s)
 
   " Place three signs with different priority in the same line
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
   edit Xsign
 
   call sign_place(1, 'g1', 'sign1', 'Xsign',
@@ -1501,50 +1520,33 @@ func Test_sign_priority()
   call sign_place(3, '', 'sign3', 'Xsign',
               \ {'lnum' : 4, 'priority' : 20})
   let s = sign_getplaced('Xsign', {'group' : '*'})
-  call assert_equal([
+  let se = [
               \ {'id' : 3, 'name' : 'sign3', 'lnum' : 4, 'group' : '',
               \ 'priority' : 20},
               \ {'id' : 2, 'name' : 'sign2', 'lnum' : 4, 'group' : '',
               \ 'priority' : 20},
               \ {'id' : 1, 'name' : 'sign1', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20}],
-              \ s[0].signs)
+              \ 'priority' : 20}]
+  call assert_equal(se, s[0].signs)
+
+  " Nvim: signs are always sorted lnum->priority->sign_id->last_modified
+  " Last modified does not take precedence over sign_id here.
+
   " Place the last sign again with the same priority
   call sign_place(1, '', 'sign1', 'Xsign',
               \ {'lnum' : 4, 'priority' : 20})
   let s = sign_getplaced('Xsign', {'group' : '*'})
-  call assert_equal([
-              \ {'id' : 1, 'name' : 'sign1', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 3, 'name' : 'sign3', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 2, 'name' : 'sign2', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20}],
-              \ s[0].signs)
+  call assert_equal(se, s[0].signs)
   " Place the first sign again with the same priority
   call sign_place(1, '', 'sign1', 'Xsign',
               \ {'lnum' : 4, 'priority' : 20})
   let s = sign_getplaced('Xsign', {'group' : '*'})
-  call assert_equal([
-              \ {'id' : 1, 'name' : 'sign1', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 3, 'name' : 'sign3', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 2, 'name' : 'sign2', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20}],
-              \ s[0].signs)
+  call assert_equal(se, s[0].signs)
   " Place the middle sign again with the same priority
   call sign_place(3, '', 'sign3', 'Xsign',
               \ {'lnum' : 4, 'priority' : 20})
   let s = sign_getplaced('Xsign', {'group' : '*'})
-  call assert_equal([
-              \ {'id' : 3, 'name' : 'sign3', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 1, 'name' : 'sign1', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20},
-              \ {'id' : 2, 'name' : 'sign2', 'lnum' : 4, 'group' : '',
-              \ 'priority' : 20}],
-              \ s[0].signs)
+  call assert_equal(se, s[0].signs)
 
   call sign_unplace('*')
 
@@ -1588,15 +1590,33 @@ func Test_sign_priority()
 	      \ "    line=10  id=5  group=g1  name=sign1  priority=20\n", a)
 
   call sign_unplace('*')
+
+  " Test for sign with default priority.
+  call sign_place(1, 'g1', 'sign4', 'Xsign', {'lnum' : 3})
+  sign place 2 line=5 name=sign4 group=g1 file=Xsign
+
+  let s = sign_getplaced('Xsign', {'group' : '*'})
+  call assert_equal([
+	      \ {'id' : 1, 'name' : 'sign4', 'lnum' : 3, 'group' : 'g1',
+	      \ 'priority' : 60},
+	      \ {'id' : 2, 'name' : 'sign4', 'lnum' : 5, 'group' : 'g1',
+	      \ 'priority' : 60}],
+	      \ s[0].signs)
+
+  let a = execute('sign place group=g1')
+  call assert_equal("\n--- Signs ---\nSigns for Xsign:\n" .
+	      \ "    line=3  id=1  group=g1  name=sign4  priority=60\n" .
+	      \ "    line=5  id=2  group=g1  name=sign4  priority=60\n", a)
+
+  call sign_unplace('*')
   call sign_undefine()
   enew | only
-  call delete("Xsign")
 endfunc
 
 " Tests for memory allocation failures in sign functions
 func Test_sign_memfailures()
   CheckFunction test_alloc_fail
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
   edit Xsign
 
   call test_alloc_fail(GetAllocId('sign_getdefined'), 0, 0)
@@ -1633,7 +1653,6 @@ func Test_sign_memfailures()
   call sign_unplace('*')
   call sign_undefine()
   enew | only
-  call delete("Xsign")
 endfunc
 
 " Test for auto-adjusting the line number of a placed sign.
@@ -1668,36 +1687,35 @@ func Test_sign_lnum_adjust()
 
   " Break the undo. Otherwise the undo operation below will undo all the
   " changes made by this function.
-  let &undolevels=&undolevels
+  let &g:undolevels=&g:undolevels
 
-  " Nvim: make sign adjustment when deleting lines match Vim
-  set signcolumn=yes:1
+  " Nvim: deleting a line removes the signs along with it.
 
-  " Delete the line with the sign
-  call deletebufline('', 4)
-  let l = sign_getplaced(bufnr(''))
-  call assert_equal(4, l[0].signs[0].lnum)
+  " " Delete the line with the sign
+  " call deletebufline('', 4)
+  " let l = sign_getplaced(bufnr(''))
+  " call assert_equal(4, l[0].signs[0].lnum)
 
-  " Undo the delete operation
-  undo
-  let l = sign_getplaced(bufnr(''))
-  call assert_equal(5, l[0].signs[0].lnum)
+  " " Undo the delete operation
+  " undo
+  " let l = sign_getplaced(bufnr(''))
+  " call assert_equal(5, l[0].signs[0].lnum)
 
-  " Break the undo
-  let &undolevels=&undolevels
+  " " Break the undo
+  " let &g:undolevels=&g:undolevels
 
-  " Delete few lines at the end of the buffer including the line with the sign
-  " Sign line number should not change (as it is placed outside of the buffer)
-  call deletebufline('', 3, 6)
-  let l = sign_getplaced(bufnr(''))
-  call assert_equal(5, l[0].signs[0].lnum)
+  " " Delete few lines at the end of the buffer including the line with the sign
+  " " Sign line number should not change (as it is placed outside of the buffer)
+  " call deletebufline('', 3, 6)
+  " let l = sign_getplaced(bufnr(''))
+  " call assert_equal(5, l[0].signs[0].lnum)
 
-  " Undo the delete operation. Sign should be restored to the previous line
-  undo
-  let l = sign_getplaced(bufnr(''))
-  call assert_equal(5, l[0].signs[0].lnum)
+  " " Undo the delete operation. Sign should be restored to the previous line
+  " undo
+  " let l = sign_getplaced(bufnr(''))
+  " call assert_equal(5, l[0].signs[0].lnum)
 
-  set signcolumn&
+  " set signcolumn&
 
   sign unplace * group=*
   sign undefine sign1
@@ -1790,11 +1808,12 @@ func Test_sign_cursor_position()
   let lines =<< trim END
 	call setline(1, [repeat('x', 75), 'mmmm', 'yyyy'])
 	call cursor(2,1)
-   	sign define s1 texthl=Search text==>
+	sign define s1 texthl=Search text==>
+	sign define s2 linehl=Pmenu
 	redraw
-   	sign place 10 line=2 name=s1
+	sign place 10 line=2 name=s1
   END
-  call writefile(lines, 'XtestSigncolumn')
+  call writefile(lines, 'XtestSigncolumn', 'D')
   let buf = RunVimInTerminal('-S XtestSigncolumn', {'rows': 6})
   call VerifyScreenDump(buf, 'Test_sign_cursor_1', {})
 
@@ -1802,15 +1821,18 @@ func Test_sign_cursor_position()
   call term_sendkeys(buf, ":sign define s1 text=-)\<CR>")
   call VerifyScreenDump(buf, 'Test_sign_cursor_2', {})
 
-  " update cursor position calculation
-  call term_sendkeys(buf, "lh")
-  call term_sendkeys(buf, ":sign unplace 10\<CR>")
+  " Also place a line HL sign
+  call term_sendkeys(buf, ":sign place 11 line=2 name=s2\<CR>")
   call VerifyScreenDump(buf, 'Test_sign_cursor_3', {})
 
+  " update cursor position calculation
+  call term_sendkeys(buf, "lh")
+  call term_sendkeys(buf, ":sign unplace 11\<CR>")
+  call term_sendkeys(buf, ":sign unplace 10\<CR>")
+  call VerifyScreenDump(buf, 'Test_sign_cursor_4', {})
 
   " clean up
   call StopVimInTerminal(buf)
-  call delete('XtestSigncolumn')
 endfunc
 
 " Return the 'len' characters in screen starting from (row,col)
@@ -1929,7 +1951,7 @@ endfunc
 
 " Test for managing multiple signs using the sign functions
 func Test_sign_funcs_multi()
-  call writefile(repeat(["Sun is shining"], 30), "Xsign")
+  call writefile(repeat(["Sun is shining"], 30), "Xsign", 'D')
   edit Xsign
   let bnum = bufnr('')
 
@@ -1971,7 +1993,8 @@ func Test_sign_funcs_multi()
   call sign_unplace('*')
 
   " Place multiple signs at once with auto-generated sign identifier
-  call assert_equal([1, 1, 5], sign_placelist([
+  " Nvim: next sign id is not reset and is always incremented
+  call assert_equal([2, 3, 4], sign_placelist([
 	      \ {'group' : 'g1', 'name' : 'sign1',
 	      \ 'buffer' : 'Xsign', 'lnum' : 11},
 	      \ {'group' : 'g2', 'name' : 'sign2',
@@ -1980,17 +2003,17 @@ func Test_sign_funcs_multi()
 	      \ 'buffer' : 'Xsign', 'lnum' : 11}]))
   let s = sign_getplaced('Xsign', {'group' : '*'})
   call assert_equal([
-	      \ {'id' : 5, 'name' : 'sign3', 'lnum' : 11,
+	      \ {'id' : 4, 'name' : 'sign3', 'lnum' : 11,
 	      \ 'group' : '', 'priority' : 10},
-	      \ {'id' : 1, 'name' : 'sign2', 'lnum' : 11,
+	      \ {'id' : 3, 'name' : 'sign2', 'lnum' : 11,
 	      \ 'group' : 'g2', 'priority' : 10},
-	      \ {'id' : 1, 'name' : 'sign1', 'lnum' : 11,
+	      \ {'id' : 2, 'name' : 'sign1', 'lnum' : 11,
 	      \ 'group' : 'g1', 'priority' : 10}], s[0].signs)
 
   " Change an existing sign without specifying the group
-  call assert_equal([5], [{'id' : 5, 'name' : 'sign1', 'buffer' : 'Xsign'}]->sign_placelist())
-  let s = sign_getplaced('Xsign', {'id' : 5, 'group' : ''})
-  call assert_equal([{'id' : 5, 'name' : 'sign1', 'lnum' : 11,
+  call assert_equal([4], [{'id' : 4, 'name' : 'sign1', 'buffer' : 'Xsign'}]->sign_placelist())
+  let s = sign_getplaced('Xsign', {'id' : 4, 'group' : ''})
+  call assert_equal([{'id' : 4, 'name' : 'sign1', 'lnum' : 11,
 	      \ 'group' : '', 'priority' : 10}], s[0].signs)
 
   " Place a sign using '.' as the line number
@@ -2017,8 +2040,8 @@ func Test_sign_funcs_multi()
   call assert_fails('call sign_placelist([100])', "E715:")
 
   " Unplace multiple signs
-  call assert_equal([0, 0, 0], sign_unplacelist([{'id' : 5},
-	      \ {'id' : 1, 'group' : 'g1'}, {'id' : 1, 'group' : 'g2'}]))
+  call assert_equal([0, 0, 0], sign_unplacelist([{'id' : 4},
+	      \ {'id' : 2, 'group' : 'g1'}, {'id' : 3, 'group' : 'g2'}]))
 
   " Invalid arguments
   call assert_equal([], []->sign_unplacelist())
@@ -2041,5 +2064,13 @@ func Test_sign_funcs_multi()
   call sign_unplace('*')
   call sign_undefine()
   enew!
-  call delete("Xsign")
 endfunc
+
+func Test_sign_null_list()
+  eval v:_null_list->sign_define()
+  eval v:_null_list->sign_placelist()
+  eval v:_null_list->sign_undefine()
+  eval v:_null_list->sign_unplacelist()
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab
