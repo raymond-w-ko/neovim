@@ -16,7 +16,7 @@ local function shell_quote(str)
   return str
 end
 
---- This module uses functions from the context of the test runner.
+--- Functions executing in the context of the test runner (not the current nvim test session).
 --- @class test.testutil
 local M = {
   paths = Paths,
@@ -40,6 +40,29 @@ function M.isdir(path)
     return false
   end
   return stat.type == 'directory'
+end
+
+--- (Only on Windows) Replaces yucky "\\" slashes with delicious "/" slashes in a string, or all
+--- string values in a table (recursively).
+---
+--- @param obj string|table
+--- @return any
+function M.fix_slashes(obj)
+  if not M.is_os('win') then
+    return obj
+  end
+  if type(obj) == 'string' then
+    local ret = obj:gsub('\\', '/')
+    return ret
+  elseif type(obj) == 'table' then
+    --- @cast obj table<any,any>
+    local ret = {} --- @type table<any,any>
+    for k, v in pairs(obj) do
+      ret[k] = M.fix_slashes(v)
+    end
+    return ret
+  end
+  assert(false, 'expected string or table of strings, got ' .. type(obj))
 end
 
 --- @param ... string|string[]
@@ -143,7 +166,7 @@ end
 ---
 ---@param pat (string) Lua pattern to match lines in the log file
 ---@param logfile? (string) Full path to log file (default=$NVIM_LOG_FILE)
----@param nrlines? (number) Search up to this many log lines
+---@param nrlines? (number) Search up to this many log lines (default 10)
 ---@param inverse? (boolean) Assert that the pattern does NOT match.
 function M.assert_log(pat, logfile, nrlines, inverse)
   logfile = logfile or os.getenv('NVIM_LOG_FILE') or '.nvimlog'
@@ -402,7 +425,8 @@ end
 local tmpname_id = 0
 local tmpdir = tmpdir_get()
 
---- Generates a unique file path for use by tests, and writes the file unless `create=false`.
+--- Generates a unique filepath for use by tests, in a test-specific "…/Xtest_tmpdir/T42.7"
+--- directory (which is cleaned up by the test runner), and writes the file unless `create=false`.
 ---
 ---@param create? boolean (default true) Write the file.
 function M.tmpname(create)
@@ -418,6 +442,10 @@ function M.tmpname(create)
   end
 
   local fname = os.tmpname()
+  if create == false then
+    os.remove(fname)
+  end
+
   if M.is_os('win') and fname:sub(1, 2) == '\\s' then
     -- In Windows tmpname() returns a filename starting with
     -- special sequence \s, prepend $TEMP path

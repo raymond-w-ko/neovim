@@ -33,6 +33,7 @@ local create_server_definition = t_lsp.create_server_definition
 local fake_lsp_code = t_lsp.fake_lsp_code
 local fake_lsp_logfile = t_lsp.fake_lsp_logfile
 local test_rpc_server = t_lsp.test_rpc_server
+local create_tcp_echo_server = t_lsp.create_tcp_echo_server
 
 local function get_buf_option(name, bufnr)
   bufnr = bufnr or 'BUFFER'
@@ -2672,7 +2673,7 @@ describe('LSP', function()
 
   describe('lsp.util.locations_to_items', function()
     it('Convert Location[] to items', function()
-      local expected = {
+      local expected_template = {
         {
           filename = '/fake/uri',
           lnum = 1,
@@ -2680,20 +2681,11 @@ describe('LSP', function()
           col = 3,
           end_col = 4,
           text = 'testing',
-          user_data = {
-            uri = 'file:///fake/uri',
-            range = {
-              start = { line = 0, character = 2 },
-              ['end'] = { line = 1, character = 3 },
-            },
-          },
+          user_data = {},
         },
       }
-      local actual = exec_lua(function()
-        local bufnr = vim.uri_to_bufnr('file:///fake/uri')
-        local lines = { 'testing', '123' }
-        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, lines)
-        local locations = {
+      local test_params = {
+        {
           {
             uri = 'file:///fake/uri',
             range = {
@@ -2701,10 +2693,29 @@ describe('LSP', function()
               ['end'] = { line = 1, character = 3 },
             },
           },
-        }
-        return vim.lsp.util.locations_to_items(locations, 'utf-16')
-      end)
-      eq(expected, actual)
+        },
+        {
+          {
+            uri = 'file:///fake/uri',
+            range = {
+              start = { line = 0, character = 2 },
+              -- LSP spec: if character > line length, default to the line length.
+              ['end'] = { line = 1, character = 10000 },
+            },
+          },
+        },
+      }
+      for _, params in ipairs(test_params) do
+        local actual = exec_lua(function(params0)
+          local bufnr = vim.uri_to_bufnr('file:///fake/uri')
+          local lines = { 'testing', '123' }
+          vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, lines)
+          return vim.lsp.util.locations_to_items(params0, 'utf-16')
+        end, params)
+        local expected = vim.deepcopy(expected_template)
+        expected[1].user_data = params[1]
+        eq(expected, actual)
+      end
     end)
 
     it('Convert LocationLink[] to items', function()
@@ -3596,21 +3607,21 @@ describe('LSP', function()
             range = {
               ['end'] = {
                 character = 8,
-                line = 9,
+                line = 3,
               },
               start = {
                 character = 6,
-                line = 9,
+                line = 3,
               },
             },
             selectionRange = {
               ['end'] = {
                 character = 8,
-                line = 9,
+                line = 3,
               },
               start = {
                 character = 6,
-                line = 9,
+                line = 3,
               },
             },
             uri = 'file:///home/jiangyinzuo/hello.cpp',
@@ -3640,21 +3651,21 @@ describe('LSP', function()
             range = {
               ['end'] = {
                 character = 8,
-                line = 8,
+                line = 2,
               },
               start = {
                 character = 6,
-                line = 8,
+                line = 2,
               },
             },
             selectionRange = {
               ['end'] = {
                 character = 8,
-                line = 8,
+                line = 2,
               },
               start = {
                 character = 6,
-                line = 8,
+                line = 2,
               },
             },
             uri = 'file:///home/jiangyinzuo/hello.cpp',
@@ -3668,7 +3679,15 @@ describe('LSP', function()
         })
         local client_id = vim.lsp.start({ name = 'dummy', cmd = server.cmd })
         local handler = require 'vim.lsp.handlers'['typeHierarchy/subtypes']
-        handler(nil, clangd_response, { client_id = client_id, bufnr = 1 })
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+          'class B : public A{};',
+          'class C : public B{};',
+          'class D1 : public C{};',
+          'class D2 : public C{};',
+          'class E : public D1, D2 {};',
+        })
+        handler(nil, clangd_response, { client_id = client_id, bufnr = bufnr })
         return vim.fn.getqflist()
       end)
 
@@ -3678,7 +3697,7 @@ describe('LSP', function()
           col = 7,
           end_col = 0,
           end_lnum = 0,
-          lnum = 10,
+          lnum = 4,
           module = '',
           nr = 0,
           pattern = '',
@@ -3692,7 +3711,7 @@ describe('LSP', function()
           col = 7,
           end_col = 0,
           end_lnum = 0,
-          lnum = 9,
+          lnum = 3,
           module = '',
           nr = 0,
           pattern = '',
@@ -3752,7 +3771,15 @@ describe('LSP', function()
         })
         local client_id = vim.lsp.start({ name = 'dummy', cmd = server.cmd })
         local handler = require 'vim.lsp.handlers'['typeHierarchy/subtypes']
-        handler(nil, jdtls_response, { client_id = client_id, bufnr = 1 })
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+          'package mylist;',
+          '',
+          'public class MyList {',
+          ' static class Inner extends MyList{}',
+          '~}',
+        })
+        handler(nil, jdtls_response, { client_id = client_id, bufnr = bufnr })
         return vim.fn.getqflist()
       end)
 
@@ -3829,21 +3856,21 @@ describe('LSP', function()
             range = {
               ['end'] = {
                 character = 8,
-                line = 9,
+                line = 3,
               },
               start = {
                 character = 6,
-                line = 9,
+                line = 3,
               },
             },
             selectionRange = {
               ['end'] = {
                 character = 8,
-                line = 9,
+                line = 3,
               },
               start = {
                 character = 6,
-                line = 9,
+                line = 3,
               },
             },
             uri = 'file:///home/jiangyinzuo/hello.cpp',
@@ -3873,21 +3900,21 @@ describe('LSP', function()
             range = {
               ['end'] = {
                 character = 8,
-                line = 8,
+                line = 2,
               },
               start = {
                 character = 6,
-                line = 8,
+                line = 2,
               },
             },
             selectionRange = {
               ['end'] = {
                 character = 8,
-                line = 8,
+                line = 2,
               },
               start = {
                 character = 6,
-                line = 8,
+                line = 2,
               },
             },
             uri = 'file:///home/jiangyinzuo/hello.cpp',
@@ -3901,7 +3928,16 @@ describe('LSP', function()
         })
         local client_id = vim.lsp.start({ name = 'dummy', cmd = server.cmd })
         local handler = require 'vim.lsp.handlers'['typeHierarchy/supertypes']
-        handler(nil, clangd_response, { client_id = client_id, bufnr = 1 })
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+          'class B : public A{};',
+          'class C : public B{};',
+          'class D1 : public C{};',
+          'class D2 : public C{};',
+          'class E : public D1, D2 {};',
+        })
+
+        handler(nil, clangd_response, { client_id = client_id, bufnr = bufnr })
         return vim.fn.getqflist()
       end)
 
@@ -3911,7 +3947,7 @@ describe('LSP', function()
           col = 7,
           end_col = 0,
           end_lnum = 0,
-          lnum = 10,
+          lnum = 4,
           module = '',
           nr = 0,
           pattern = '',
@@ -3925,7 +3961,7 @@ describe('LSP', function()
           col = 7,
           end_col = 0,
           end_lnum = 0,
-          lnum = 9,
+          lnum = 3,
           module = '',
           nr = 0,
           pattern = '',
@@ -3985,7 +4021,15 @@ describe('LSP', function()
         })
         local client_id = vim.lsp.start({ name = 'dummy', cmd = server.cmd })
         local handler = require 'vim.lsp.handlers'['typeHierarchy/supertypes']
-        handler(nil, jdtls_response, { client_id = client_id, bufnr = 1 })
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+          'package mylist;',
+          '',
+          'public class MyList {',
+          ' static class Inner extends MyList{}',
+          '~}',
+        })
+        handler(nil, jdtls_response, { client_id = client_id, bufnr = bufnr })
         return vim.fn.getqflist()
       end)
 
@@ -4981,26 +5025,33 @@ describe('LSP', function()
   end)
 
   describe('cmd', function()
-    it('can connect to lsp server via rpc.connect', function()
+    it('connects to lsp server via rpc.connect using ip address', function()
+      exec_lua(create_tcp_echo_server)
       local result = exec_lua(function()
-        local uv = vim.uv
-        local server = assert(uv.new_tcp())
-        local init = nil
-        server:bind('127.0.0.1', 0)
-        server:listen(127, function(err)
-          assert(not err, err)
-          local socket = assert(uv.new_tcp())
-          server:accept(socket)
-          socket:read_start(require('vim.lsp.rpc').create_read_loop(function(body)
-            init = body
-            socket:close()
-          end))
-        end)
-        local port = server:getsockname().port
+        local server, port, last_message = _G._create_tcp_server('127.0.0.1')
         vim.lsp.start({ name = 'dummy', cmd = vim.lsp.rpc.connect('127.0.0.1', port) })
         vim.wait(1000, function()
-          return init ~= nil
+          return last_message() ~= nil
         end)
+        local init = last_message()
+        assert(init, 'server must receive `initialize` request')
+        server:close()
+        server:shutdown()
+        return vim.json.decode(init)
+      end)
+      eq('initialize', result.method)
+    end)
+
+    it('connects to lsp server via rpc.connect using hostname', function()
+      skip(is_os('bsd'), 'issue with host resolution in ci')
+      exec_lua(create_tcp_echo_server)
+      local result = exec_lua(function()
+        local server, port, last_message = _G._create_tcp_server('::1')
+        vim.lsp.start({ name = 'dummy', cmd = vim.lsp.rpc.connect('localhost', port) })
+        vim.wait(1000, function()
+          return last_message() ~= nil
+        end)
+        local init = last_message()
         assert(init, 'server must receive `initialize` request')
         server:close()
         server:shutdown()
