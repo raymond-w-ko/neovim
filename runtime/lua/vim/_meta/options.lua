@@ -3577,11 +3577,11 @@ vim.go.js = vim.go.joinspaces
 --- 		|alternate-file` or using `mark-motions` try to
 --- 		restore the `mark-view` in which the action occurred.
 ---
----   unload        Remove unloaded buffers from the jumplist.
+---   clean         Remove unloaded buffers from the jumplist.
 --- 		EXPERIMENTAL: this flag may change in the future.
 ---
 --- @type string
-vim.o.jumpoptions = "unload"
+vim.o.jumpoptions = "clean"
 vim.o.jop = vim.o.jumpoptions
 vim.go.jumpoptions = vim.o.jumpoptions
 vim.go.jop = vim.go.jumpoptions
@@ -7255,7 +7255,7 @@ vim.go.tm = vim.go.timeoutlen
 
 --- When on, the title of the window will be set to the value of
 --- 'titlestring' (if it is not empty), or to:
---- 	filename [+=-] (path) - NVIM
+--- 	filename [+=-] (path) - Nvim
 --- Where:
 --- 	filename	the name of the file being edited
 --- 	-		indicates the file cannot be modified, 'ma' off
@@ -7263,7 +7263,7 @@ vim.go.tm = vim.go.timeoutlen
 --- 	=		indicates the file is read-only
 --- 	=+		indicates the file is read-only and modified
 --- 	(path)		is the path of the file being edited
---- 	- NVIM		the server name `v:servername` or "NVIM"
+--- 	- Nvim		the server name `v:servername` or "Nvim"
 ---
 --- @type boolean
 vim.o.title = false

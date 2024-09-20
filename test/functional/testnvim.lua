@@ -250,6 +250,8 @@ function M.set_method_error(err)
   method_error = err
 end
 
+--- Runs the event loop of the given session.
+---
 --- @param lsession test.Session
 --- @param request_cb function?
 --- @param notification_cb function?
@@ -296,6 +298,7 @@ function M.run_session(lsession, request_cb, notification_cb, setup_cb, timeout)
   return lsession.eof_err
 end
 
+--- Runs the event loop of the current global session.
 function M.run(request_cb, notification_cb, setup_cb, timeout)
   assert(session)
   return M.run_session(session, request_cb, notification_cb, setup_cb, timeout)
@@ -455,7 +458,7 @@ end
 --- @param argv string[]
 --- @param merge boolean?
 --- @param env string[]?
---- @param keep boolean
+--- @param keep boolean?
 --- @param io_extra uv.uv_pipe_t? used for stdin_fd, see :help ui-option
 --- @return test.Session
 function M.spawn(argv, merge, env, keep, io_extra)

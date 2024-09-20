@@ -4515,7 +4515,7 @@ return {
     {
       abbreviation = 'jop',
       cb = 'did_set_jumpoptions',
-      defaults = { if_true = 'unload' },
+      defaults = { if_true = 'clean' },
       deny_duplicates = true,
       desc = [=[
         List of words that change the behavior of the |jumplist|.
@@ -4529,7 +4529,7 @@ return {
         		|alternate-file| or using |mark-motions| try to
         		restore the |mark-view| in which the action occurred.
 
-          unload        Remove unloaded buffers from the jumplist.
+          clean         Remove unloaded buffers from the jumplist.
         		EXPERIMENTAL: this flag may change in the future.
       ]=],
       expand_cb = 'expand_set_jumpoptions',
@@ -9047,7 +9047,7 @@ return {
       desc = [=[
         When on, the title of the window will be set to the value of
         'titlestring' (if it is not empty), or to:
-        	filename [+=-] (path) - NVIM
+        	filename [+=-] (path) - Nvim
         Where:
         	filename	the name of the file being edited
         	-		indicates the file cannot be modified, 'ma' off
@@ -9055,11 +9055,11 @@ return {
         	=		indicates the file is read-only
         	=+		indicates the file is read-only and modified
         	(path)		is the path of the file being edited
-        	- NVIM		the server name |v:servername| or "NVIM"
+        	- Nvim		the server name |v:servername| or "Nvim"
       ]=],
       full_name = 'title',
       scope = { 'global' },
-      short_desc = N_('Vim set the title of the window'),
+      short_desc = N_('set the title of the window'),
       type = 'boolean',
       varname = 'p_title',
     },

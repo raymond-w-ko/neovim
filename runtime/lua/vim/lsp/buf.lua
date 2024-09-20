@@ -29,7 +29,12 @@ local function request(method, params, handler)
 end
 
 --- Displays hover information about the symbol under the cursor in a floating
---- window. Calling the function twice will jump into the floating window.
+--- window. The window will be dismissed on cursor move.
+--- Calling the function twice will jump into the floating window
+--- (thus by default, "KK" will open the hover window and focus it).
+--- In the floating window, all commands and mappings are available as usual,
+--- except that "q" dismisses the window.
+--- You can scroll the contents the same as you would any other buffer.
 function M.hover()
   local params = util.make_position_params()
   request(ms.textDocument_hover, params)
@@ -447,11 +452,9 @@ function M.document_symbol(opts)
   request_with_opts(ms.textDocument_documentSymbol, params, opts)
 end
 
---- @param call_hierarchy_items lsp.CallHierarchyItem[]?
+--- @param call_hierarchy_items lsp.CallHierarchyItem[]
+--- @return lsp.CallHierarchyItem?
 local function pick_call_hierarchy_item(call_hierarchy_items)
-  if not call_hierarchy_items then
-    return
-  end
   if #call_hierarchy_items == 1 then
     return call_hierarchy_items[1]
   end
@@ -476,7 +479,7 @@ local function call_hierarchy(method)
       vim.notify(err.message, vim.log.levels.WARN)
       return
     end
-    if not result then
+    if not result or vim.tbl_isempty(result) then
       vim.notify('No item resolved', vim.log.levels.WARN)
       return
     end

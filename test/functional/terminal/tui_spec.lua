@@ -7,7 +7,7 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local tt = require('test.functional.terminal.testutil')
+local tt = require('test.functional.testterm')
 
 local eq = t.eq
 local feed_data = tt.feed_data
@@ -40,8 +40,8 @@ if t.skip(is_os('win')) then
 end
 
 describe('TUI', function()
-  local screen
-  local child_session
+  local screen --[[@type test.functional.ui.screen]]
+  local child_session --[[@type test.Session]]
   local child_exec_lua
 
   before_each(function()
@@ -1651,12 +1651,13 @@ describe('TUI', function()
     ]])
   end)
 
-  it('in nvim_list_uis()', function()
+  it('in nvim_list_uis(), sets nvim_set_client_info()', function()
     -- $TERM in :terminal.
     local exp_term = is_os('bsd') and 'builtin_xterm' or 'xterm-256color'
+    local ui_chan = 1
     local expected = {
       {
-        chan = 1,
+        chan = ui_chan,
         ext_cmdline = false,
         ext_hlstate = false,
         ext_linegrid = true,
@@ -1679,6 +1680,43 @@ describe('TUI', function()
     }
     local _, rv = child_session:request('nvim_list_uis')
     eq(expected, rv)
+
+    ---@type table
+    local expected_version = ({
+      child_session:request('nvim_exec_lua', 'return vim.version()', {}),
+    })[2]
+    -- vim.version() returns `prerelease` string. Coerce it to boolean.
+    expected_version.prerelease = not not expected_version.prerelease
+
+    local expected_chan_info = {
+      client = {
+        attributes = {
+          license = 'Apache 2',
+          -- pid = 5371,
+          website = 'https://neovim.io',
+        },
+        methods = {},
+        name = 'nvim-tui',
+        type = 'ui',
+        version = expected_version,
+      },
+      id = ui_chan,
+      mode = 'rpc',
+      stream = 'stdio',
+    }
+
+    local status, chan_info = child_session:request('nvim_get_chan_info', ui_chan)
+    ok(status)
+    local info = chan_info.client
+    ok(info.attributes.pid and info.attributes.pid > 0, 'PID', info.attributes.pid or 'nil')
+    ok(info.version.major >= 0)
+    ok(info.version.minor >= 0)
+    ok(info.version.patch >= 0)
+
+    -- Delete variable fields so we can deep-compare.
+    info.attributes.pid = nil
+
+    eq(expected_chan_info, chan_info)
   end)
 
   it('allows grid to assume wider ambiwidth chars than host terminal', function()
@@ -2111,7 +2149,7 @@ describe('TUI', function()
     finally(function()
       os.remove('testF')
     end)
-    local screen = tt.screen_setup(
+    local screen = tt.setup_screen(
       0,
       ('"%s" -u NONE -i NONE --cmd "set noswapfile noshowcmd noruler" --cmd "normal iabc" > /dev/null 2>&1 && cat testF && rm testF'):format(
         nvim_prog
