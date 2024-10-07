@@ -1609,6 +1609,7 @@ static void process_hunk(diff_T **dpp, diff_T **dprevp, int idx_orig, int idx_ne
       for (int i = idx_orig; i < idx_new; i++) {
         if (curtab->tp_diffbuf[i] != NULL) {
           dp->df_lnum[i] -= off;
+          dp->df_count[i] += off;
         }
       }
       dp->df_lnum[idx_new] = hunk->lnum_new;
@@ -1619,11 +1620,7 @@ static void process_hunk(diff_T **dpp, diff_T **dprevp, int idx_orig, int idx_ne
       dp->df_count[idx_new] = (linenr_T)hunk->count_new - off;
     } else {
       // second overlap of new block with existing block
-      dp->df_count[idx_new] += (linenr_T)hunk->count_new - (linenr_T)hunk->count_orig
-                               + dpl->df_lnum[idx_orig] +
-                               dpl->df_count[idx_orig]
-                               - (dp->df_lnum[idx_orig] +
-                                  dp->df_count[idx_orig]);
+      dp->df_count[idx_new] += (linenr_T)hunk->count_new;
     }
 
     // Adjust the size of the block to include all the lines to the
@@ -1632,11 +1629,8 @@ static void process_hunk(diff_T **dpp, diff_T **dprevp, int idx_orig, int idx_ne
           - (dpl->df_lnum[idx_orig] + dpl->df_count[idx_orig]);
 
     if (off < 0) {
-      // new change ends in existing block, adjust the end if not
-      // done already
-      if (*notsetp) {
-        dp->df_count[idx_new] += -off;
-      }
+      // new change ends in existing block, adjust the end
+      dp->df_count[idx_new] += -off;
       off = 0;
     }
 
@@ -2011,7 +2005,7 @@ static void run_linematch_algorithm(diff_T *dp)
 {
   // define buffers for diff algorithm
   mmfile_t diffbufs_mm[DB_COUNT];
-  const char *diffbufs[DB_COUNT];
+  const mmfile_t *diffbufs[DB_COUNT];
   int diff_length[DB_COUNT];
   size_t ndiffs = 0;
   for (int i = 0; i < DB_COUNT; i++) {
@@ -2021,9 +2015,7 @@ static void run_linematch_algorithm(diff_T *dp)
       diff_write_buffer(curtab->tp_diffbuf[i], &diffbufs_mm[ndiffs],
                         dp->df_lnum[i], dp->df_lnum[i] + dp->df_count[i] - 1);
 
-      // we want to get the char* to the diff buffer that was just written
-      // we add it to the array of char*, diffbufs
-      diffbufs[ndiffs] = diffbufs_mm[ndiffs].ptr;
+      diffbufs[ndiffs] = &diffbufs_mm[ndiffs];
 
       // keep track of the length of this diff block to pass it to the linematch
       // algorithm

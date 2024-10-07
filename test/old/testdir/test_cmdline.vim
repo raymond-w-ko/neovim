@@ -1534,7 +1534,7 @@ endfunc
 
 set cpo&
 
-func Test_getcmdtype()
+func Test_getcmdtype_getcmdprompt()
   call feedkeys(":MyCmd a\<C-R>=Check_cmdline(':')\<CR>\<Esc>", "xt")
 
   let cmdtype = ''
@@ -1558,6 +1558,31 @@ func Test_getcmdtype()
   cunmap <F6>
 
   call assert_equal('', getcmdline())
+
+  call assert_equal('', getcmdprompt())
+  augroup test_CmdlineEnter
+    autocmd!
+    autocmd CmdlineEnter * let g:cmdprompt=getcmdprompt()
+  augroup END
+  call feedkeys(":call input('Answer?')\<CR>a\<CR>\<ESC>", "xt")
+  call assert_equal('Answer?', g:cmdprompt)
+  call assert_equal('', getcmdprompt())
+  call feedkeys(":\<CR>\<ESC>", "xt")
+  call assert_equal('', g:cmdprompt)
+  call assert_equal('', getcmdprompt())
+
+  let str = "C" .. repeat("c", 1023) .. "xyz"
+  call feedkeys(":call input('" .. str .. "')\<CR>\<CR>\<ESC>", "xt")
+  call assert_equal(str, g:cmdprompt)
+
+  call feedkeys(':call input("Msg1\nMessage2\nAns?")' .. "\<CR>b\<CR>\<ESC>", "xt")
+  call assert_equal('Ans?', g:cmdprompt)
+  call assert_equal('', getcmdprompt())
+
+  augroup test_CmdlineEnter
+    au!
+  augroup END
+  augroup! test_CmdlineEnter
 endfunc
 
 func Test_getcmdwintype()
@@ -4043,6 +4068,17 @@ func Test_term_option()
   call feedkeys(":set t_\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match(expected, @:)
   let &cpo = _cpo
+endfunc
+
+func Test_cd_bslsh_completion_windows()
+  CheckMSWindows
+  let save_shellslash = &shellslash
+  set noshellslash
+  call system('mkdir XXXa\_b')
+  defer delete('XXXa', 'rf')
+  call feedkeys(":cd XXXa\\_b\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"cd XXXa\_b\', @:)
+  let &shellslash = save_shellslash
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

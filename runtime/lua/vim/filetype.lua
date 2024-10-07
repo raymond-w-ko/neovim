@@ -148,6 +148,9 @@ end
 
 local function detect_noext(path, bufnr)
   local root = fn.fnamemodify(path, ':r')
+  if root == path then
+    return
+  end
   return M.match({ buf = bufnr, filename = root })
 end
 
@@ -575,6 +578,7 @@ local extension = {
   stm = detect.html,
   htt = 'httest',
   htb = 'httest',
+  http = 'http',
   hurl = 'hurl',
   hw = detect.hw,
   module = detect.hw,
@@ -1383,8 +1387,7 @@ local extension = {
   ['dpkg-new'] = detect_noext,
   ['in'] = function(path, bufnr)
     if vim.fs.basename(path) ~= 'configure.in' then
-      local root = fn.fnamemodify(path, ':r')
-      return M.match({ buf = bufnr, filename = root })
+      return detect_noext(path, bufnr)
     end
   end,
   new = detect_noext,
@@ -1579,7 +1582,9 @@ local filename = {
   ['ipf.conf'] = 'ipfilter',
   ['ipf6.conf'] = 'ipfilter',
   ['ipf.rules'] = 'ipfilter',
+  ['.bun_repl_history'] = 'javascript',
   ['.node_repl_history'] = 'javascript',
+  ['deno_history.txt'] = 'javascript',
   ['Pipfile.lock'] = 'json',
   ['.firebaserc'] = 'json',
   ['.prettierrc'] = 'json',
@@ -2107,6 +2112,8 @@ local pattern = {
     ['/bpython/config$'] = 'dosini',
     ['/flatpak/repo/config$'] = 'dosini',
     ['/mypy/config$'] = 'dosini',
+    ['^${HOME}/%.config/notmuch/.*/config$'] = 'dosini',
+    ['^${XDG_CONFIG_HOME}/notmuch/.*/config$'] = 'dosini',
     ['^${XDG_CONFIG_HOME}/git/config$'] = 'gitconfig',
     ['%.git/config%.worktree$'] = 'gitconfig',
     ['%.git/config$'] = 'gitconfig',
@@ -2257,6 +2264,7 @@ local pattern = {
   ['^%.'] = {
     ['^%.cshrc'] = detect.csh,
     ['^%.login'] = detect.csh,
+    ['^%.notmuch%-config%.'] = 'dosini',
     ['^%.gitsendemail%.msg%.......$'] = 'gitsendemail',
     ['^%.kshrc'] = detect.ksh,
     ['^%.article%.%d+$'] = 'mail',
@@ -2831,6 +2839,7 @@ end
 --- Note: this uses |nvim_get_option_value()| but caches the result.
 --- This means |ftplugin| and |FileType| autocommands are only
 --- triggered once and may not reflect later changes.
+--- @since 11
 --- @param filetype string Filetype
 --- @param option string Option name
 --- @return string|boolean|integer: Option value
