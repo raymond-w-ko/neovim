@@ -3008,6 +3008,7 @@ function vim.fn.getcmdwintype() end
 --- runtime    |:runtime| completion
 --- scriptnames  sourced script names |:scriptnames|
 --- shellcmd  Shell command
+--- shellcmdline  Shell command line with filename arguments
 --- sign    |:sign| suboptions
 --- syntax    syntax file names |'syntax'|
 --- syntime    |:syntime| suboptions
@@ -7922,7 +7923,7 @@ function vim.fn.setbufvar(buf, varname, val) end
 --- To clear the overrides pass an empty {list}: >vim
 ---    call setcellwidths([])
 ---
---- <You can use the script $VIMRUNTIME/tools/emoji_list.lua to see
+--- <You can use the script $VIMRUNTIME/scripts/emoji_list.lua to see
 --- the effect for known emoji characters.  Move the cursor
 --- through the text to check if the cell widths of your terminal
 --- match with what Vim knows about each emoji.  If it doesn't
@@ -8228,6 +8229,8 @@ function vim.fn.setpos(expr, list) end
 ---   clear the list: >vim
 ---     call setqflist([], 'r')
 --- <
+--- 'u'  Like 'r', but tries to preserve the current selection
+---   in the quickfix list.
 --- 'f'  All the quickfix lists in the quickfix stack are
 ---   freed.
 ---

@@ -13,7 +13,6 @@ local eq = t.eq
 local feed_data = tt.feed_data
 local clear = n.clear
 local command = n.command
-local dedent = t.dedent
 local exec = n.exec
 local exec_lua = n.exec_lua
 local testprg = n.testprg
@@ -84,6 +83,21 @@ describe('TUI', function()
     retry(nil, nil, function()
       local _, buflines = child_session:request('nvim_buf_get_lines', 0, 0, -1, false)
       eq(expected, buflines)
+    end)
+  end
+
+  -- Ensure both child client and child server have processed pending events.
+  local function poke_both_eventloop()
+    child_exec_lua([[
+      _G.termresponse = nil
+      vim.api.nvim_create_autocmd('TermResponse', {
+        once = true,
+        callback = function(ev) _G.termresponse = ev.data end,
+      })
+    ]])
+    feed_data('\027P0$r\027\\')
+    retry(nil, nil, function()
+      eq('\027P0$r', child_exec_lua('return _G.termresponse'))
     end)
   end
 
@@ -975,6 +989,7 @@ describe('TUI', function()
       {3:-- TERMINAL --}                                    |
     ]])
     feed_data('\027[201~') -- End paste.
+    poke_both_eventloop()
     screen:expect_unchanged()
     feed_data('\027[27u') -- ESC: go to Normal mode.
     wait_for_mode('n')
@@ -1157,6 +1172,7 @@ describe('TUI', function()
     feed_data('\027[200~line 1\nline 2\n')
     wait_for_mode('c')
     feed_data('line 3\nline 4\n\027[201~')
+    poke_both_eventloop()
     wait_for_mode('c')
     screen:expect([[
       foo                                               |
@@ -1201,22 +1217,19 @@ describe('TUI', function()
     expect_cmdline('"stuff 1 more"')
     -- End the paste sequence.
     feed_data('\027[201~')
+    poke_both_eventloop()
     expect_cmdline('"stuff 1 more"')
     feed_data(' typed')
     expect_cmdline('"stuff 1 more typed"')
   end)
 
   it('paste: recovers from vim.paste() failure', function()
-    child_session:request(
-      'nvim_exec_lua',
-      [[
+    child_exec_lua([[
       _G.save_paste_fn = vim.paste
       -- Stack traces for this test are non-deterministic, so disable them
       _G.debug.traceback = function(msg) return msg end
       vim.paste = function(lines, phase) error("fake fail") end
-    ]],
-      {}
-    )
+    ]])
     -- Prepare something for dot-repeat/redo.
     feed_data('ifoo\n\027[27u')
     wait_for_mode('n')
@@ -1269,7 +1282,7 @@ describe('TUI', function()
       {3:-- TERMINAL --}                                    |
     ]])
     -- Paste works if vim.paste() succeeds.
-    child_session:request('nvim_exec_lua', [[vim.paste = _G.save_paste_fn]], {})
+    child_exec_lua([[vim.paste = _G.save_paste_fn]])
     feed_data('\027[200~line A\nline B\n\027[201~')
     screen:expect([[
       foo                                               |
@@ -1285,13 +1298,9 @@ describe('TUI', function()
   it('paste: vim.paste() cancel (retval=false) #10865', function()
     -- This test only exercises the "cancel" case.  Use-case would be "dangling
     -- paste", but that is not implemented yet. #10865
-    child_session:request(
-      'nvim_exec_lua',
-      [[
+    child_exec_lua([[
       vim.paste = function(lines, phase) return false end
-    ]],
-      {}
-    )
+    ]])
     feed_data('\027[200~line A\nline B\n\027[201~')
     expect_child_buf_lines({ '' })
     feed_data('ifoo\n\027[27u')
@@ -1299,22 +1308,18 @@ describe('TUI', function()
   end)
 
   it('paste: vim.paste() cancel (retval=false) with streaming #30462', function()
-    child_session:request(
-      'nvim_exec_lua',
-      [[
-        vim.paste = (function(overridden)
-          return function(lines, phase)
-            for i, line in ipairs(lines) do
-              if line:find('!') then
-                return false
-              end
+    child_exec_lua([[
+      vim.paste = (function(overridden)
+        return function(lines, phase)
+          for i, line in ipairs(lines) do
+            if line:find('!') then
+              return false
             end
-            return overridden(lines, phase)
           end
-        end)(vim.paste)
-      ]],
-      {}
-    )
+          return overridden(lines, phase)
+        end
+      end)(vim.paste)
+    ]])
     feed_data('A')
     wait_for_mode('i')
     feed_data('\027[200~aaa')
@@ -1324,6 +1329,7 @@ describe('TUI', function()
     feed_data('ccc!') -- This chunk is cancelled.
     expect_child_buf_lines({ 'aaabbb' })
     feed_data('ddd\027[201~') -- This chunk is ignored.
+    poke_both_eventloop()
     expect_child_buf_lines({ 'aaabbb' })
     feed_data('\027[27u')
     wait_for_mode('n')
@@ -1334,15 +1340,11 @@ describe('TUI', function()
   end)
 
   it("paste: 'nomodifiable' buffer", function()
-    child_session:request('nvim_command', 'set nomodifiable')
-    child_session:request(
-      'nvim_exec_lua',
-      [[
+    child_exec_lua([[
+      vim.bo.modifiable = false
       -- Truncate the error message to hide the line number
       _G.debug.traceback = function(msg) return msg:sub(-49) end
-    ]],
-      {}
-    )
+    ]])
     feed_data('\027[200~fail 1\nfail 2\n\027[201~')
     screen:expect([[
                                                         |
@@ -1354,7 +1356,7 @@ describe('TUI', function()
       {3:-- TERMINAL --}                                    |
     ]])
     feed_data('\n') -- <Enter> to dismiss hit-enter prompt
-    child_session:request('nvim_command', 'set modifiable')
+    child_exec_lua('vim.bo.modifiable = true')
     feed_data('\027[200~success 1\nsuccess 2\n\027[201~')
     screen:expect([[
       success 1                                         |
@@ -1509,9 +1511,7 @@ describe('TUI', function()
   end)
 
   it('paste: streamed paste with isolated "stop paste" code', function()
-    child_session:request(
-      'nvim_exec_lua',
-      [[
+    child_exec_lua([[
       _G.paste_phases = {}
       vim.paste = (function(overridden)
         return function(lines, phase)
@@ -1519,9 +1519,7 @@ describe('TUI', function()
           overridden(lines, phase)
         end
       end)(vim.paste)
-    ]],
-      {}
-    )
+    ]])
     feed_data('i')
     wait_for_mode('i')
     feed_data('\027[200~pasted') -- phase 1
@@ -1542,8 +1540,9 @@ describe('TUI', function()
     ]])
     -- Send isolated "stop paste" sequence.
     feed_data('\027[201~') -- phase 3
+    poke_both_eventloop()
     screen:expect_unchanged()
-    local _, rv = child_session:request('nvim_exec_lua', [[return _G.paste_phases]], {})
+    local rv = child_exec_lua('return _G.paste_phases')
     -- In rare cases there may be multiple chunks of phase 2 because of timing.
     eq({ 1, 2, 3 }, { rv[1], rv[2], rv[#rv] })
   end)
@@ -1729,9 +1728,7 @@ describe('TUI', function()
     eq(expected, rv)
 
     ---@type table
-    local expected_version = ({
-      child_session:request('nvim_exec_lua', 'return vim.version()', {}),
-    })[2]
+    local expected_version = child_exec_lua('return vim.version()')
     -- vim.version() returns `prerelease` string. Coerce it to boolean.
     expected_version.prerelease = not not expected_version.prerelease
 
@@ -1855,45 +1852,73 @@ describe('TUI', function()
   end)
 
   it('draws correctly when cursor_address overflows #21643', function()
-    t.skip(is_os('mac'), 'FIXME: crashes/errors on macOS')
-    screen:try_resize(77, 855)
+    screen:try_resize(70, 333)
     retry(nil, nil, function()
-      eq({ true, 852 }, { child_session:request('nvim_win_get_height', 0) })
+      eq({ true, 330 }, { child_session:request('nvim_win_get_height', 0) })
+    end)
+    child_session:request('nvim_set_option_value', 'cursorline', true, {})
+    -- Use full screen message so that redrawing afterwards is more deterministic.
+    child_session:notify('nvim_command', 'intro')
+    screen:expect({ any = 'Nvim is open source and freely distributable' })
+    -- Going to top-left corner needs 3 bytes.
+    -- Setting underline attribute needs 9 bytes.
+    -- A Ꝩ character takes 3 bytes.
+    -- The whole line needs 3 + 9 + 3 * 21838 + 3 = 65529 bytes.
+    -- The cursor_address that comes after will overflow the 65535-byte buffer.
+    local line = ('Ꝩ'):rep(21838) .. '℃'
+    child_session:notify('nvim_buf_set_lines', 0, 0, -1, true, { line, 'b' })
+    -- Close the :intro message and redraw the lines.
+    feed_data('\n')
+    screen:expect([[
+      {13:Ꝩ}{12:ꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨ}|
+      {12:ꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨ}|*310
+      {12:ꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨ℃ }|
+      b                                                                     |
+      {4:~                                                                     }|*17
+      {5:[No Name] [+]                                                         }|
+                                                                            |
+      {3:-- TERMINAL --}                                                        |
+    ]])
+  end)
+
+  it('draws correctly when setting title overflows #30793', function()
+    screen:try_resize(67, 327)
+    retry(nil, nil, function()
+      eq({ true, 324 }, { child_session:request('nvim_win_get_height', 0) })
+    end)
+    child_exec_lua([[
+      vim.o.cmdheight = 0
+      vim.o.laststatus = 0
+      vim.o.ruler = false
+      vim.o.showcmd = false
+      vim.o.termsync = false
+      vim.o.title = true
+    ]])
+    retry(nil, nil, function()
+      eq('[No Name] - Nvim', api.nvim_buf_get_var(0, 'term_title'))
+      eq({ true, 326 }, { child_session:request('nvim_win_get_height', 0) })
     end)
     -- Use full screen message so that redrawing afterwards is more deterministic.
     child_session:notify('nvim_command', 'intro')
-    screen:expect({ any = 'Nvim' })
+    screen:expect({ any = 'Nvim is open source and freely distributable' })
     -- Going to top-left corner needs 3 bytes.
-    -- Setting underline attribute needs 9 bytes.
-    -- The whole line needs 3 + 9 + 65513 + 3 = 65528 bytes.
-    -- The cursor_address that comes after will overflow the 65535-byte buffer.
-    local line = ('a'):rep(65513) .. '℃'
-    child_session:notify(
-      'nvim_exec_lua',
-      [[
-      vim.api.nvim_buf_set_lines(0, 0, -1, true, {...})
-      vim.o.cursorline = true
-    ]],
-      { line, 'b' }
-    )
+    -- A Ꝩ character takes 3 bytes.
+    -- The whole line needs 3 + 3 * 21842 = 65529 bytes.
+    -- The title will be updated because the buffer is now modified.
+    -- The start of the OSC 0 sequence to set title can fit in the 65535-byte buffer,
+    -- but the title string cannot.
+    local line = ('Ꝩ'):rep(21842)
+    child_session:notify('nvim_buf_set_lines', 0, 0, -1, true, { line })
     -- Close the :intro message and redraw the lines.
     feed_data('\n')
-    screen:expect(
-      '{13:a}{12:'
-        .. ('a'):rep(76)
-        .. '}|\n'
-        .. ('{12:' .. ('a'):rep(77) .. '}|\n'):rep(849)
-        .. '{12:'
-        .. ('a'):rep(63)
-        .. '℃'
-        .. (' '):rep(13)
-        .. '}|\n'
-        .. dedent([[
-      b                                                                            |
-      {5:[No Name] [+]                                                                }|
-                                                                                   |
-      {3:-- TERMINAL --}                                                               |]])
-    )
+    screen:expect([[
+      {1:Ꝩ}ꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨ|
+      ꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨꝨ|*325
+      {3:-- TERMINAL --}                                                     |
+    ]])
+    retry(nil, nil, function()
+      eq('[No Name] + - Nvim', api.nvim_buf_get_var(0, 'term_title'))
+    end)
   end)
 
   it('visual bell (padding) does not crash #21610', function()
