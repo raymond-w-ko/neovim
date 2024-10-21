@@ -2586,7 +2586,7 @@ describe('LSP', function()
           },
         },
       }
-      eq(false, pcall(exec_lua, 'vim.lsp.util.apply_workspace_edit(...)', edit))
+      eq(false, pcall(exec_lua, 'vim.lsp.util.apply_workspace_edit(...)', edit, 'utf-16'))
       eq(false, vim.uv.fs_stat(tmpfile) ~= nil)
     end)
   end)
@@ -3129,44 +3129,6 @@ describe('LSP', function()
             },
           }
           return vim.lsp.util.symbols_to_items(sym_info, nil)
-        end)
-      )
-    end)
-  end)
-
-  describe('lsp.util._get_symbol_kind_name', function()
-    it('returns the name specified by protocol', function()
-      eq(
-        'File',
-        exec_lua(function()
-          return vim.lsp.util._get_symbol_kind_name(1)
-        end)
-      )
-      eq(
-        'TypeParameter',
-        exec_lua(function()
-          return vim.lsp.util._get_symbol_kind_name(26)
-        end)
-      )
-    end)
-
-    it('returns the name not specified by protocol', function()
-      eq(
-        'Unknown',
-        exec_lua(function()
-          return vim.lsp.util._get_symbol_kind_name(nil)
-        end)
-      )
-      eq(
-        'Unknown',
-        exec_lua(function()
-          return vim.lsp.util._get_symbol_kind_name(vim.NIL)
-        end)
-      )
-      eq(
-        'Unknown',
-        exec_lua(function()
-          return vim.lsp.util._get_symbol_kind_name(1000)
         end)
       )
     end)
@@ -5111,6 +5073,86 @@ describe('LSP', function()
       check_notify('formatting', true, false)
       check_notify('rangeFormatting', false, true)
       check_notify('both', true, true)
+    end)
+  end)
+
+  describe('lsp.buf.definition', function()
+    it('jumps to single location', function()
+      exec_lua(create_server_definition)
+      local result = exec_lua(function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local server = _G._create_server({
+          capabilities = {
+            definitionProvider = true,
+          },
+          handlers = {
+            ['textDocument/definition'] = function(_, _, callback)
+              local location = {
+                range = {
+                  start = { line = 0, character = 0 },
+                  ['end'] = { line = 0, character = 0 },
+                },
+                uri = vim.uri_from_bufnr(bufnr),
+              }
+              callback(nil, location)
+            end,
+          },
+        })
+        local win = vim.api.nvim_get_current_win()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, { 'local x = 10', '', 'print(x)' })
+        vim.api.nvim_win_set_cursor(win, { 3, 6 })
+        local client_id = assert(vim.lsp.start({ name = 'dummy', cmd = server.cmd }))
+        vim.lsp.buf.definition()
+        vim.lsp.stop_client(client_id)
+        return {
+          cursor = vim.api.nvim_win_get_cursor(win),
+          messages = server.messages,
+        }
+      end)
+      eq('textDocument/definition', result.messages[3].method)
+      eq({ 1, 0 }, result.cursor)
+    end)
+    it('merges results from multiple servers', function()
+      exec_lua(create_server_definition)
+      local result = exec_lua(function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local function serveropts(character)
+          return {
+            capabilities = {
+              definitionProvider = true,
+            },
+            handlers = {
+              ['textDocument/definition'] = function(_, _, callback)
+                local location = {
+                  range = {
+                    start = { line = 0, character = character },
+                    ['end'] = { line = 0, character = character },
+                  },
+                  uri = vim.uri_from_bufnr(bufnr),
+                }
+                callback(nil, location)
+              end,
+            },
+          }
+        end
+        local server1 = _G._create_server(serveropts(0))
+        local server2 = _G._create_server(serveropts(7))
+        local win = vim.api.nvim_get_current_win()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, { 'local x = 10', '', 'print(x)' })
+        vim.api.nvim_win_set_cursor(win, { 3, 6 })
+        local client_id1 = assert(vim.lsp.start({ name = 'dummy', cmd = server1.cmd }))
+        local client_id2 = assert(vim.lsp.start({ name = 'dummy', cmd = server2.cmd }))
+        local response
+        vim.lsp.buf.definition({
+          on_list = function(r)
+            response = r
+          end,
+        })
+        vim.lsp.stop_client(client_id1)
+        vim.lsp.stop_client(client_id2)
+        return response
+      end)
+      eq(2, #result.items)
     end)
   end)
 

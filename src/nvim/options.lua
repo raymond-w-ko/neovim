@@ -598,6 +598,7 @@ return {
         separated list of items. For each item that is present, the bell
         will be silenced. This is most useful to specify specific events in
         insert mode to be silenced.
+        You can also make it flash by using 'visualbell'.
 
         item	    meaning when present	~
         all	    All events.
@@ -621,6 +622,7 @@ return {
         register    Unknown register after <C-R> in |Insert-mode|.
         shell	    Bell from shell output |:!|.
         spell	    Error happened on spell suggest.
+        term	    Bell from |:terminal| output.
         wildmode    More matches in |cmdline-completion| available
         	    (depends on the 'wildmode' setting).
 
@@ -9130,7 +9132,9 @@ return {
         window.  This happens only when the 'title' option is on.
 
         When this option contains printf-style '%' items, they will be
-        expanded according to the rules used for 'statusline'.
+        expanded according to the rules used for 'statusline'.  If it contains
+        an invalid '%' format, the value is used as-is and no error or warning
+        will be given when the value is set.
         This option cannot be set in a modeline when 'modelineexpr' is off.
 
         Example: >vim

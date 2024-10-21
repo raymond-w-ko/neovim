@@ -221,16 +221,16 @@ function vim.fn.assert_beeps(cmd) end
 --- @return 0|1
 function vim.fn.assert_equal(expected, actual, msg) end
 
---- When the files {fname-one} and {fname-two} do not contain
+--- When the files {fname_one} and {fname_two} do not contain
 --- exactly the same text an error message is added to |v:errors|.
 --- Also see |assert-return|.
---- When {fname-one} or {fname-two} does not exist the error will
+--- When {fname_one} or {fname_two} does not exist the error will
 --- mention that.
 ---
---- @param fname-one string
---- @param fname-two string
+--- @param fname_one string
+--- @param fname_two string
 --- @return 0|1
-function vim.fn.assert_equalfile(fname-one, fname-two) end
+function vim.fn.assert_equalfile(fname_one, fname_two) end
 
 --- When v:exception does not contain the string {error} an error
 --- message is added to |v:errors|.  Also see |assert-return|.
@@ -8286,9 +8286,9 @@ function vim.fn.setpos(expr, list) end
 --- independent of the 'errorformat' setting.  Use a command like
 --- `:cc 1` to jump to the first position.
 ---
---- @param list any[]
+--- @param list vim.quickfix.entry[]
 --- @param action? string
---- @param what? table
+--- @param what? vim.fn.setqflist.what
 --- @return any
 function vim.fn.setqflist(list, action, what) end
 
@@ -10629,7 +10629,7 @@ function vim.fn.wait(timeout, condition, interval) end
 --- For example to make <c-j> work like <down> in wildmode, use: >vim
 ---     cnoremap <expr> <C-j> wildmenumode() ? "\<Down>\<Tab>" : "\<c-j>"
 --- <
---- (Note, this needs the 'wildcharm' option set appropriately).
+--- (Note: this needs the 'wildcharm' option set appropriately).
 ---
 --- @return any
 function vim.fn.wildmenumode() end

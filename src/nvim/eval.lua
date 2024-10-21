@@ -326,17 +326,17 @@ M.funcs = {
     args = { 2, 3 },
     base = 1,
     desc = [=[
-      When the files {fname-one} and {fname-two} do not contain
+      When the files {fname_one} and {fname_two} do not contain
       exactly the same text an error message is added to |v:errors|.
       Also see |assert-return|.
-      When {fname-one} or {fname-two} does not exist the error will
+      When {fname_one} or {fname_two} does not exist the error will
       mention that.
 
     ]=],
     name = 'assert_equalfile',
-    params = { { 'fname-one', 'string' }, { 'fname-two', 'string' } },
+    params = { { 'fname_one', 'string' }, { 'fname_two', 'string' } },
     returns = '0|1',
-    signature = 'assert_equalfile({fname-one}, {fname-two})',
+    signature = 'assert_equalfile({fname_one}, {fname_two})',
   },
   assert_exception = {
     args = { 1, 2 },
@@ -9955,7 +9955,11 @@ M.funcs = {
 
     ]=],
     name = 'setqflist',
-    params = { { 'list', 'any[]' }, { 'action', 'string' }, { 'what', 'table' } },
+    params = {
+      { 'list', 'vim.quickfix.entry[]' },
+      { 'action', 'string' },
+      { 'what', 'vim.fn.setqflist.what' },
+    },
     signature = 'setqflist({list} [, {action} [, {what}]])',
   },
   setreg = {
@@ -12768,7 +12772,7 @@ M.funcs = {
       For example to make <c-j> work like <down> in wildmode, use: >vim
           cnoremap <expr> <C-j> wildmenumode() ? "\<Down>\<Tab>" : "\<c-j>"
       <
-      (Note, this needs the 'wildcharm' option set appropriately).
+      (Note: this needs the 'wildcharm' option set appropriately).
     ]=],
     name = 'wildmenumode',
     params = {},

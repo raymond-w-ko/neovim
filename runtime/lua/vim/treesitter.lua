@@ -133,10 +133,8 @@ end
 ---
 ---@return vim.treesitter.LanguageTree object to use for parsing
 function M.get_string_parser(str, lang, opts)
-  vim.validate({
-    str = { str, 'string' },
-    lang = { lang, 'string' },
-  })
+  vim.validate('str', str, 'string')
+  vim.validate('lang', lang, 'string')
 
   return LanguageTree.new(str, lang, opts)
 end
@@ -243,11 +241,9 @@ end
 ---
 ---@return boolean True if the {node} contains the {range}
 function M.node_contains(node, range)
-  vim.validate({
-    -- allow a table so nodes can be mocked
-    node = { node, { 'userdata', 'table' } },
-    range = { range, M._range.validate, 'integer list with 4 or 6 elements' },
-  })
+  -- allow a table so nodes can be mocked
+  vim.validate('node', node, { 'userdata', 'table' })
+  vim.validate('range', range, M._range.validate, 'integer list with 4 or 6 elements')
   return M._range.contains({ node:range() }, range)
 end
 

@@ -269,16 +269,16 @@ assert_equal({expected}, {actual} [, {msg}])                    *assert_equal()*
                 Return: ~
                   (`0|1`)
 
-assert_equalfile({fname-one}, {fname-two})                  *assert_equalfile()*
-		When the files {fname-one} and {fname-two} do not contain
+assert_equalfile({fname_one}, {fname_two})                  *assert_equalfile()*
+		When the files {fname_one} and {fname_two} do not contain
 		exactly the same text an error message is added to |v:errors|.
 		Also see |assert-return|.
-		When {fname-one} or {fname-two} does not exist the error will
+		When {fname_one} or {fname_two} does not exist the error will
 		mention that.
 
                 Parameters: ~
-                  • {fname-one} (`string`)
-                  • {fname-two} (`string`)
+                  • {fname_one} (`string`)
+                  • {fname_two} (`string`)
 
                 Return: ~
                   (`0|1`)
@@ -9097,9 +9097,9 @@ setqflist({list} [, {action} [, {what}]])                          *setqflist()*
 		`:cc 1` to jump to the first position.
 
                 Parameters: ~
-                  • {list} (`any[]`)
+                  • {list} (`vim.quickfix.entry[]`)
                   • {action} (`string?`)
-                  • {what} (`table?`)
+                  • {what} (`vim.fn.setqflist.what?`)
 
                 Return: ~
                   (`any`)
@@ -11705,7 +11705,7 @@ wildmenumode()                                                  *wildmenumode()*
 		For example to make <c-j> work like <down> in wildmode, use: >vim
 		    cnoremap <expr> <C-j> wildmenumode() ? "\<Down>\<Tab>" : "\<c-j>"
 <
-		(Note, this needs the 'wildcharm' option set appropriately).
+		(Note: this needs the 'wildcharm' option set appropriately).
 
                 Return: ~
                   (`any`)
