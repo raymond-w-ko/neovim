@@ -37,7 +37,7 @@ local augroup = api.nvim_create_augroup('vim_lsp_inlayhint', {})
 ---@param result lsp.InlayHint[]?
 ---@param ctx lsp.HandlerContext
 ---@private
-function M.on_inlayhint(err, result, ctx, _)
+function M.on_inlayhint(err, result, ctx)
   if err then
     log.error('inlayhint', err)
     return
@@ -70,20 +70,12 @@ function M.on_inlayhint(err, result, ctx, _)
   end
 
   local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  ---@param position lsp.Position
-  ---@return integer
-  local function pos_to_byte(position)
-    local col = position.character
-    if col > 0 then
-      local line = lines[position.line + 1] or ''
-      return util._str_byteindex_enc(line, col, client.offset_encoding)
-    end
-    return col
-  end
 
   for _, hint in ipairs(result) do
     local lnum = hint.position.line
-    hint.position.character = pos_to_byte(hint.position)
+    local line = lines and lines[lnum + 1] or ''
+    hint.position.character =
+      vim.str_byteindex(line, client.offset_encoding, hint.position.character, false)
     table.insert(new_lnum_hints[lnum], hint)
   end
 
@@ -95,7 +87,7 @@ end
 --- |lsp-handler| for the method `workspace/inlayHint/refresh`
 ---@param ctx lsp.HandlerContext
 ---@private
-function M.on_refresh(err, _, ctx, _)
+function M.on_refresh(err, _, ctx)
   if err then
     return vim.NIL
   end

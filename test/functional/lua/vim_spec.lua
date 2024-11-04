@@ -28,6 +28,7 @@ local rmdir = n.rmdir
 local write_file = t.write_file
 local poke_eventloop = n.poke_eventloop
 local assert_alive = n.assert_alive
+local expect = n.expect
 
 describe('lua stdlib', function()
   before_each(clear)
@@ -312,21 +313,106 @@ describe('lua stdlib', function()
       49,
       51,
     }
+    local indices8 = {
+      [0] = 0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+    }
     for i, k in pairs(indices32) do
       eq(k, exec_lua('return vim.str_byteindex(_G.test_text, ...)', i), i)
+      eq(k, exec_lua('return vim.str_byteindex(_G.test_text, ..., false)', i), i)
+      eq(k, exec_lua('return vim.str_byteindex(_G.test_text, "utf-32", ...)', i), i)
     end
     for i, k in pairs(indices16) do
       eq(k, exec_lua('return vim.str_byteindex(_G.test_text, ..., true)', i), i)
+      eq(k, exec_lua('return vim.str_byteindex(_G.test_text, "utf-16", ...)', i), i)
     end
-    eq(
+    for i, k in pairs(indices8) do
+      eq(k, exec_lua('return vim.str_byteindex(_G.test_text, "utf-8", ...)', i), i)
+    end
+    matches(
       'index out of range',
       pcall_err(exec_lua, 'return vim.str_byteindex(_G.test_text, ...)', #indices32 + 1)
     )
-    eq(
+    matches(
       'index out of range',
       pcall_err(exec_lua, 'return vim.str_byteindex(_G.test_text, ..., true)', #indices16 + 1)
     )
-    local i32, i16 = 0, 0
+    matches(
+      'index out of range',
+      pcall_err(exec_lua, 'return vim.str_byteindex(_G.test_text, "utf-16", ...)', #indices16 + 1)
+    )
+    matches(
+      'index out of range',
+      pcall_err(exec_lua, 'return vim.str_byteindex(_G.test_text, "utf-32", ...)', #indices32 + 1)
+    )
+    matches(
+      'invalid encoding',
+      pcall_err(exec_lua, 'return vim.str_byteindex("hello", "madeupencoding", 1)')
+    )
+    eq(
+      indices32[#indices32],
+      exec_lua('return vim.str_byteindex(_G.test_text, "utf-32", 99999, false)')
+    )
+    eq(
+      indices16[#indices16],
+      exec_lua('return vim.str_byteindex(_G.test_text, "utf-16", 99999, false)')
+    )
+    eq(
+      indices8[#indices8],
+      exec_lua('return vim.str_byteindex(_G.test_text, "utf-8", 99999, false)')
+    )
+    eq(2, exec_lua('return vim.str_byteindex("é", "utf-16", 2, false)'))
+    local i32, i16, i8 = 0, 0, 0
     local len = 51
     for k = 0, len do
       if indices32[i32] < k then
@@ -338,9 +424,29 @@ describe('lua stdlib', function()
           i16 = i16 + 1
         end
       end
+      if indices8[i8] < k then
+        i8 = i8 + 1
+      end
       eq({ i32, i16 }, exec_lua('return {vim.str_utfindex(_G.test_text, ...)}', k), k)
+      eq({ i32 }, exec_lua('return {vim.str_utfindex(_G.test_text, "utf-32", ...)}', k), k)
+      eq({ i16 }, exec_lua('return {vim.str_utfindex(_G.test_text, "utf-16", ...)}', k), k)
+      eq({ i8 }, exec_lua('return {vim.str_utfindex(_G.test_text, "utf-8", ...)}', k), k)
     end
-    eq(
+
+    eq({ #indices32, #indices16 }, exec_lua('return {vim.str_utfindex(_G.test_text)}'))
+
+    eq(#indices32, exec_lua('return vim.str_utfindex(_G.test_text, "utf-32", math.huge, false)'))
+    eq(#indices16, exec_lua('return vim.str_utfindex(_G.test_text, "utf-16", math.huge, false)'))
+    eq(#indices8, exec_lua('return vim.str_utfindex(_G.test_text, "utf-8", math.huge, false)'))
+
+    eq(#indices32, exec_lua('return vim.str_utfindex(_G.test_text, "utf-32")'))
+    eq(#indices16, exec_lua('return vim.str_utfindex(_G.test_text, "utf-16")'))
+    eq(#indices8, exec_lua('return vim.str_utfindex(_G.test_text, "utf-8")'))
+    matches(
+      'invalid encoding',
+      pcall_err(exec_lua, 'return vim.str_utfindex(_G.test_text, "madeupencoding", ...)', 1)
+    )
+    matches(
       'index out of range',
       pcall_err(exec_lua, 'return vim.str_utfindex(_G.test_text, ...)', len + 1)
     )
@@ -3206,10 +3312,17 @@ describe('lua stdlib', function()
       eq('inext lines<ESC>', exec_lua [[return table.concat(keys, '')]])
     end)
 
-    it('skips any function that caused an error', function()
+    it('skips any function that caused an error and shows stacktrace', function()
       insert([[hello world]])
 
       exec_lua [[
+        local function ErrF2()
+          error("Dumb Error")
+        end
+        local function ErrF1()
+          ErrF2()
+        end
+
         keys = {}
 
         return vim.on_key(function(buf)
@@ -3220,7 +3333,7 @@ describe('lua stdlib', function()
           table.insert(keys, buf)
 
           if buf == 'l' then
-            error("Dumb Error")
+            ErrF1()
           end
         end)
       ]]
@@ -3230,6 +3343,19 @@ describe('lua stdlib', function()
 
       -- Only the first letter gets added. After that we remove the callback
       eq('inext l', exec_lua [[ return table.concat(keys, '') ]])
+
+      local errmsg = api.nvim_get_vvar('errmsg')
+      matches(
+        [[
+^Error executing vim%.on%_key%(%) callbacks:.*
+With ns%_id %d+: .*: Dumb Error
+stack traceback:
+.*: in function 'error'
+.*: in function 'ErrF2'
+.*: in function 'ErrF1'
+.*]],
+        errmsg
+      )
     end)
 
     it('argument 1 is keys after mapping, argument 2 is typed keys', function()
@@ -3310,6 +3436,71 @@ describe('lua stdlib', function()
         {1:~                                                           }|*8
                                                                     |
       ]])
+    end)
+
+    it('can discard input', function()
+      clear()
+      -- discard every other normal 'x' command
+      exec_lua [[
+        n_key = 0
+
+        vim.on_key(function(buf, typed_buf)
+          if typed_buf == 'x' then
+            n_key = n_key + 1
+          end
+          return (n_key % 2 == 0) and "" or nil
+        end)
+      ]]
+
+      api.nvim_buf_set_lines(0, 0, -1, true, { '54321' })
+
+      feed('x')
+      expect('4321')
+      feed('x')
+      expect('4321')
+      feed('x')
+      expect('321')
+      feed('x')
+      expect('321')
+    end)
+
+    it('callback invalid return', function()
+      clear()
+      -- second key produces an error which removes the callback
+      exec_lua [[
+        n_call = 0
+
+        vim.on_key(function(buf, typed_buf)
+          if typed_buf == 'x' then
+            n_call = n_call + 1
+          end
+          return n_call >= 2 and '!' or nil
+        end)
+      ]]
+
+      api.nvim_buf_set_lines(0, 0, -1, true, { '54321' })
+
+      local function cleanup_msg(msg)
+        return msg:gsub('^Error .*\nWith ns%_id %d+: ', '')
+      end
+
+      feed('x')
+      eq(1, exec_lua [[ return n_call ]])
+
+      eq(1, exec_lua [[ return vim.on_key(nil, nil) ]])
+
+      eq('', cleanup_msg(eval('v:errmsg')))
+      feed('x')
+      eq(2, exec_lua [[ return n_call ]])
+      eq('return string must be empty', cleanup_msg(eval('v:errmsg')))
+      command('let v:errmsg = ""')
+
+      eq(0, exec_lua [[ return vim.on_key(nil, nil) ]])
+
+      feed('x')
+      eq(2, exec_lua [[ return n_call ]])
+      expect('21')
+      eq('', cleanup_msg(eval('v:errmsg')))
     end)
   end)
 

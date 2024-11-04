@@ -55,6 +55,8 @@ DIAGNOSTICS
 
 • |vim.diagnostic.config()| accepts a "jump" table to specify defaults for
   |vim.diagnostic.jump()|.
+• The "underline" diagnostics handler sorts diagnostics by severity when using
+  the "severity_sort" option.
 
 EDITOR
 
@@ -79,14 +81,19 @@ LSP
   customizing the transformation of an LSP CompletionItem to |complete-items|.
 • |vim.lsp.diagnostic.from()| can be used to convert a list of
   |vim.Diagnostic| objects into their LSP diagnostic representation.
-• |vim.lsp.buf.references()| now handles multiple clients but no longer
-  triggers the global `textDocument/references` handler from
-  `vim.lsp.handlers`
-• |vim.lsp.buf.declaration()|, |vim.lsp.buf.definition()|,
-  |vim.lsp.buf.type_definition()| and |vim.lsp.buf.implementation()| now
-  support merging the results of multiple clients but no longer trigger the
-  global handlers from `vim.lsp.handlers`
-
+• |vim.lsp.buf.references()|, |vim.lsp.buf.declaration()|, |vim.lsp.buf.definition()|,
+  |vim.lsp.buf.type_definition()|, |vim.lsp.buf.implementation()| and
+  |vim.lsp.buf.hover()| now support merging the results of multiple clients
+  but no longer trigger the global handlers from `vim.lsp.handlers`
+• |vim.lsp.buf.typehierarchy()| now passes the correct params for each
+  client request.
+• |vim.lsp.handlers.signature_help()| is no longer used.
+• |vim.lsp.diagnostic.on_publish_diagnostics()| and
+  |vim.lsp.diagnostic.on_diagnostic()| no longer accept a config parameter and
+  can no longer be configured with |vim.lsp.with()|.
+  Instead use: >lua
+    vim.diagnostic.config(config, vim.lsp.diagnostic.get_namespace(client_id))
+<
 
 LUA
 
@@ -102,6 +109,12 @@ OPTIONS
   changes according to related options. It takes care of alignment, 'number',
   'relativenumber' and 'signcolumn' set to "number". The now redundant `%r` item
   is no longer treated specially for 'statuscolumn'.
+• `:set {option}<` removes the local value for all |global-local| options instead
+  of just string |global-local| options.
+• `:setlocal {option}<` copies the global value to the local value for number
+  and boolean |global-local| options instead of removing the local value.
+• Setting |hidden-options| now gives an error. In particular, setting
+  'noshellslash' is now only allowed on Windows.
 
 PLUGINS
 
@@ -152,6 +165,7 @@ DEFAULTS
   • |grn| in Normal mode maps to |vim.lsp.buf.rename()|
   • |grr| in Normal mode maps to |vim.lsp.buf.references()|
   • |gri| in Normal mode maps to |vim.lsp.buf.implementation()|
+  • |gO| in Normal mode maps to |vim.lsp.buf.document_symbol()|
   • |gra| in Normal and Visual mode maps to |vim.lsp.buf.code_action()|
   • CTRL-S in Insert mode maps to |vim.lsp.buf.signature_help()|
   • Mouse |popup-menu| includes an "Open in web browser" item when you right-click
@@ -164,6 +178,7 @@ DEFAULTS
     • |[t|, |]t|, |[T|, |]T|, |[CTRL-T|, |]CTRL-T| navigate through the |tag-matchlist|
     • |[a|, |]a|, |[A|, |]A| navigate through the |argument-list|
     • |[b|, |]b|, |[B|, |]B| navigate through the |buffer-list|
+    • |[<Space>|, |]<Space>| add an empty line above and below the cursor
 
 • Snippet:
   • `<Tab>` in Insert and Select mode maps to `vim.snippet.jump({ direction = 1 })`
@@ -185,6 +200,7 @@ EVENTS
 
 • |CompleteDone| now sets the `reason` key in `v:event` which specifies the reason
   for completion being done.
+• |vim.on_key()| callbacks can consume the key by returning an empty string.
 
 LSP
 
@@ -196,12 +212,16 @@ LSP
   `textDocument/rangesFormatting` request).
 • |vim.lsp.buf.code_action()| actions show client name when there are multiple
   clients.
+• |vim.lsp.buf.signature_help()| can now cycle through different signatures
+  using `<C-s>` and also support multiple clients.
 
 LUA
 
 • |vim.fs.rm()| can delete files and directories.
 • |vim.validate()| now has a new signature which uses less tables,
   is more peformant and easier to read.
+• |vim.str_byteindex()| and |vim.str_utfindex()| gained overload signatures
+  supporting two new parameters, `encoding` and `strict_indexing`.
 
 OPTIONS
 

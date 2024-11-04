@@ -151,6 +151,7 @@ of these in your config by simply removing the mapping, e.g. ":unmap Y".
   - |grr|
   - |gra|
   - |gri|
+  - |gO|
 - <C-S> |i_CTRL-S|
 - ]d |]d-default|
 - [d |[d-default|
@@ -162,6 +163,7 @@ of these in your config by simply removing the mapping, e.g. ":unmap Y".
 - |[t|, |]t|, |[T|, |]T|, |[CTRL-T|, |]CTRL-T|
 - |[a|, |]a|, |[A|, |]A|
 - |[b|, |]b|, |[B|, |]B|
+- |[<Space>|, |]<Space>|
 - Nvim LSP client defaults |lsp-defaults|
   - K |K-lsp-default|
 
@@ -339,10 +341,8 @@ Normal commands:
 
 Options:
 
-Local values for global-local number/boolean options are unset when the option
-is set without a scope (e.g. by using |:set|), similarly to how global-local
-string options work.
-
+- `:set {option}<` removes local value for all |global-local| options.
+- `:setlocal {option}<` copies global value to local value for all options.
 - 'autoread'    works in the terminal (if it supports "focus" events)
 - 'cpoptions'   flags: |cpo-_|
 - 'diffopt'     "linematch" feature
@@ -623,7 +623,12 @@ These legacy Vim features are not yet implemented:
 
 - *:gui*
 - *:gvim*
+- *'browsedir'* *'bsdir'*
 - *'completepopup'*
+- *'guioptions'* *'go'*
+- *'guitablabel'* *'gtl'*
+- *'guitabtooltip'* *'gtt'*
+- *'mouseshape'* *'mouses'*
 - *'previewpopup'*
 
 ==============================================================================
@@ -730,6 +735,8 @@ Options:
   CMD-v (macOS), middle-click, …).
 - *'imactivatefunc'* *'imaf'*
 - *'imactivatekey'* *'imak'*
+- *'imcmdline'* *'imc'* *'noimcmdline'* *'noimc'*
+- *'imdisable'* *'imd'* *'noimdisable'* *'noimd'*
 - *'imstatusfunc'* *'imsf'*
 - *'insertmode'* *'im'* Use the following script to emulate 'insertmode': >vim
     autocmd BufWinEnter * startinsert
@@ -767,6 +774,7 @@ Options:
     6 composing chars only.
 - *'maxmem'* Nvim delegates memory-management to the OS.
 - *'maxmemtot'* Nvim delegates memory-management to the OS.
+- *'opendevice'* *'odev'* *'noopendevice'* *'noodev'*
 - printoptions
 - *'printdevice'*
 - *'printencoding'*

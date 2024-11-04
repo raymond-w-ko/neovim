@@ -20,7 +20,8 @@ local M = {}
 --- end)
 --- ```
 ---
----@param items any[] Arbitrary items
+---@generic T
+---@param items T[] Arbitrary items
 ---@param opts table Additional options
 ---     - prompt (string|nil)
 ---               Text of the prompt. Defaults to `Select one of:`
@@ -32,7 +33,7 @@ local M = {}
 ---               Plugins reimplementing `vim.ui.select` may wish to
 ---               use this to infer the structure or semantics of
 ---               `items`, or the context in which select() was called.
----@param on_choice fun(item: any|nil, idx: integer|nil)
+---@param on_choice fun(item: T|nil, idx: integer|nil)
 ---               Called once the user made a choice.
 ---               `idx` is the 1-based index of `item` within `items`.
 ---               `nil` if the user aborted the dialog.
@@ -42,7 +43,9 @@ function M.select(items, opts, on_choice)
   opts = opts or {}
   local choices = { opts.prompt or 'Select one of:' }
   local format_item = opts.format_item or tostring
-  for i, item in ipairs(items) do
+  for i, item in
+    ipairs(items --[[@as any[] ]])
+  do
     table.insert(choices, string.format('%d: %s', i, format_item(item)))
   end
   local choice = vim.fn.inputlist(choices)
@@ -203,7 +206,9 @@ function M._get_urls()
             if vim.treesitter.node_contains(node, range) then
               local url = metadata[id] and metadata[id].url
               if url and match[url] then
-                for _, n in ipairs(match[url]) do
+                for _, n in
+                  ipairs(match[url] --[[@as TSNode[] ]])
+                do
                   urls[#urls + 1] =
                     vim.treesitter.get_node_text(n, bufnr, { metadata = metadata[url] })
                 end

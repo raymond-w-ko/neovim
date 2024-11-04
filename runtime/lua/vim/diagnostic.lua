@@ -71,9 +71,9 @@ local M = {}
 --- (default: `false`)
 --- @field update_in_insert? boolean
 ---
---- Sort diagnostics by severity. This affects the order in which signs and
---- virtual text are displayed. When true, higher severities are displayed
---- before lower severities (e.g. ERROR is displayed before WARN).
+--- Sort diagnostics by severity. This affects the order in which signs,
+--- virtual text, and highlights are displayed. When true, higher severities are
+--- displayed before lower severities (e.g. ERROR is displayed before WARN).
 --- Options:
 ---   - {reverse}? (boolean) Reverse sort order
 --- (default: `false`)
@@ -282,18 +282,17 @@ M.severity = {
   [2] = 'WARN',
   [3] = 'INFO',
   [4] = 'HINT',
+  --- Mappings from qflist/loclist error types to severities
+  E = 1,
+  W = 2,
+  I = 3,
+  N = 4,
 }
 
 --- @alias vim.diagnostic.SeverityInt 1|2|3|4
 
 --- See |diagnostic-severity| and |vim.diagnostic.get()|
 --- @alias vim.diagnostic.SeverityFilter vim.diagnostic.Severity|vim.diagnostic.Severity[]|{min:vim.diagnostic.Severity,max:vim.diagnostic.Severity}
-
--- Mappings from qflist/loclist error types to severities
-M.severity.E = M.severity.ERROR
-M.severity.W = M.severity.WARN
-M.severity.I = M.severity.INFO
-M.severity.N = M.severity.HINT
 
 --- @type vim.diagnostic.Opts
 local global_diagnostic_options = {
@@ -657,6 +656,28 @@ local function save_extmarks(namespace, bufnr)
     api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })
 end
 
+--- Create a function that converts a diagnostic severity to an extmark priority.
+--- @param priority integer Base priority
+--- @param opts vim.diagnostic.OptsResolved
+--- @return fun(severity: vim.diagnostic.Severity): integer
+local function severity_to_extmark_priority(priority, opts)
+  if opts.severity_sort then
+    if type(opts.severity_sort) == 'table' and opts.severity_sort.reverse then
+      return function(severity)
+        return priority + (severity - vim.diagnostic.severity.ERROR)
+      end
+    end
+
+    return function(severity)
+      return priority + (vim.diagnostic.severity.HINT - severity)
+    end
+  end
+
+  return function()
+    return priority
+  end
+end
+
 --- @type table<string,true>
 local registered_autocmds = {}
 
@@ -869,14 +890,14 @@ local function next_diagnostic(search_forward, opts)
   if opts.win_id then
     vim.deprecate('opts.win_id', 'opts.winid', '0.13')
     opts.winid = opts.win_id
-    opts.win_id = nil
+    opts.win_id = nil --- @diagnostic disable-line
   end
 
   -- Support deprecated cursor_position alias
   if opts.cursor_position then
     vim.deprecate('opts.cursor_position', 'opts.pos', '0.13')
     opts.pos = opts.cursor_position
-    opts.cursor_position = nil
+    opts.cursor_position = nil --- @diagnostic disable-line
   end
 
   local winid = opts.winid or api.nvim_get_current_win()
@@ -957,7 +978,7 @@ local function goto_diagnostic(diagnostic, opts)
   if opts.win_id then
     vim.deprecate('opts.win_id', 'opts.winid', '0.13')
     opts.winid = opts.win_id
-    opts.win_id = nil
+    opts.win_id = nil --- @diagnostic disable-line
   end
 
   local winid = opts.winid or api.nvim_get_current_win()
@@ -970,8 +991,9 @@ local function goto_diagnostic(diagnostic, opts)
     vim.cmd('normal! zv')
   end)
 
-  if opts.float then
-    local float_opts = type(opts.float) == 'table' and opts.float or {}
+  local float_opts = opts.float
+  if float_opts then
+    float_opts = type(float_opts) == 'table' and float_opts or {}
     vim.schedule(function()
       M.open_float(vim.tbl_extend('keep', float_opts, {
         bufnr = api.nvim_win_get_buf(winid),
@@ -1295,7 +1317,7 @@ function M.jump(opts)
   if opts.cursor_position then
     vim.deprecate('opts.cursor_position', 'opts.pos', '0.13')
     opts.pos = opts.cursor_position
-    opts.cursor_position = nil
+    opts.cursor_position = nil --- @diagnostic disable-line
   end
 
   local diag = nil
@@ -1352,22 +1374,7 @@ M.handlers.signs = {
 
     -- 10 is the default sign priority when none is explicitly specified
     local priority = opts.signs and opts.signs.priority or 10
-    local get_priority --- @type function
-    if opts.severity_sort then
-      if type(opts.severity_sort) == 'table' and opts.severity_sort.reverse then
-        get_priority = function(severity)
-          return priority + (severity - vim.diagnostic.severity.ERROR)
-        end
-      else
-        get_priority = function(severity)
-          return priority + (vim.diagnostic.severity.HINT - severity)
-        end
-      end
-    else
-      get_priority = function()
-        return priority
-      end
-    end
+    local get_priority = severity_to_extmark_priority(priority, opts)
 
     local ns = M.get_namespace(namespace)
     if not ns.user_data.sign_ns then
@@ -1478,15 +1485,12 @@ M.handlers.underline = {
     end
 
     local underline_ns = ns.user_data.underline_ns
-    for _, diagnostic in ipairs(diagnostics) do
-      --- @type string?
-      local higroup = underline_highlight_map[assert(diagnostic.severity)]
+    local get_priority = severity_to_extmark_priority(vim.hl.priorities.diagnostics, opts)
 
-      if higroup == nil then
-        -- Default to error if we don't have a highlight associated
-        -- TODO(lewis6991): this is always nil since underline_highlight_map only has integer keys
-        higroup = underline_highlight_map.Error
-      end
+    for _, diagnostic in ipairs(diagnostics) do
+      -- Default to error if we don't have a highlight associated
+      local higroup = underline_highlight_map[assert(diagnostic.severity)]
+        or underline_highlight_map[vim.diagnostic.severity.ERROR]
 
       if diagnostic._tags then
         -- TODO(lewis6991): we should be able to stack these.
@@ -1504,7 +1508,7 @@ M.handlers.underline = {
         higroup,
         { diagnostic.lnum, diagnostic.col },
         { diagnostic.end_lnum, diagnostic.end_col },
-        { priority = vim.hl.priorities.diagnostics }
+        { priority = get_priority(diagnostic.severity) }
       )
     end
     save_extmarks(underline_ns, bufnr)
@@ -2106,9 +2110,10 @@ function M.enable(enable, filter)
 
   enable = enable == nil and true or enable
   local bufnr = filter.bufnr
+  local ns_id = filter.ns_id
 
-  if bufnr == nil then
-    if filter.ns_id == nil then
+  if not bufnr then
+    if not ns_id then
       diagnostic_disabled = (
         enable
           -- Enable everything by setting diagnostic_disabled to an empty table.
@@ -2122,12 +2127,12 @@ function M.enable(enable, filter)
         })
       )
     else
-      local ns = M.get_namespace(filter.ns_id)
+      local ns = M.get_namespace(ns_id)
       ns.disabled = not enable
     end
   else
     bufnr = get_bufnr(bufnr)
-    if filter.ns_id == nil then
+    if not ns_id then
       diagnostic_disabled[bufnr] = (not enable) and true or nil
     else
       if type(diagnostic_disabled[bufnr]) ~= 'table' then
@@ -2137,14 +2142,14 @@ function M.enable(enable, filter)
           diagnostic_disabled[bufnr] = {}
         end
       end
-      diagnostic_disabled[bufnr][filter.ns_id] = (not enable) and true or nil
+      diagnostic_disabled[bufnr][ns_id] = (not enable) and true or nil
     end
   end
 
   if enable then
-    M.show(filter.ns_id, bufnr)
+    M.show(ns_id, bufnr)
   else
-    M.hide(filter.ns_id, bufnr)
+    M.hide(ns_id, bufnr)
   end
 end
 

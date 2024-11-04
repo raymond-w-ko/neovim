@@ -1000,22 +1000,6 @@ vim.schedule({fn})                                            *vim.schedule()*
     Parameters: ~
       • {fn}  (`fun()`)
 
-vim.str_byteindex({str}, {index}, {use_utf16})           *vim.str_byteindex()*
-    Convert UTF-32 or UTF-16 {index} to byte index. If {use_utf16} is not
-    supplied, it defaults to false (use UTF-32). Returns the byte index.
-
-    Invalid UTF-8 and NUL is treated like in |vim.str_utfindex()|. An {index}
-    in the middle of a UTF-16 sequence is rounded upwards to the end of that
-    sequence.
-
-    Parameters: ~
-      • {str}        (`string`)
-      • {index}      (`integer`)
-      • {use_utf16}  (`boolean?`)
-
-    Return: ~
-        (`integer`)
-
 vim.str_utf_end({str}, {index})                            *vim.str_utf_end()*
     Gets the distance (in bytes) from the last byte of the codepoint
     (character) that {index} points to.
@@ -1072,23 +1056,6 @@ vim.str_utf_start({str}, {index})                        *vim.str_utf_start()*
 
     Return: ~
         (`integer`)
-
-vim.str_utfindex({str}, {index})                          *vim.str_utfindex()*
-    Convert byte index to UTF-32 and UTF-16 indices. If {index} is not
-    supplied, the length of the string is used. All indices are zero-based.
-
-    Embedded NUL bytes are treated as terminating the string. Invalid UTF-8
-    bytes, and embedded surrogates are counted as one code point each. An
-    {index} in the middle of a UTF-8 sequence is rounded upwards to the end of
-    that sequence.
-
-    Parameters: ~
-      • {str}    (`string`)
-      • {index}  (`integer?`)
-
-    Return (multiple): ~
-        (`integer`) UTF-32 index
-        (`integer`) UTF-16 index
 
 vim.stricmp({a}, {b})                                          *vim.stricmp()*
     Compares strings case-insensitively.
@@ -1668,7 +1635,7 @@ vim.notify_once({msg}, {level}, {opts})                    *vim.notify_once()*
     Return: ~
         (`boolean`) true if message was displayed, else false
 
-vim.on_key({fn}, {ns_id})                                       *vim.on_key()*
+vim.on_key({fn}, {ns_id}, {opts})                               *vim.on_key()*
     Adds Lua function {fn} with namespace id {ns_id} as a listener to every,
     yes every, input key.
 
@@ -1682,17 +1649,19 @@ vim.on_key({fn}, {ns_id})                                       *vim.on_key()*
       • {fn} will not be cleared by |nvim_buf_clear_namespace()|
 
     Parameters: ~
-      • {fn}     (`fun(key: string, typed: string)?`) Function invoked for
-                 every input key, after mappings have been applied but before
-                 further processing. Arguments {key} and {typed} are raw
-                 keycodes, where {key} is the key after mappings are applied,
-                 and {typed} is the key(s) before mappings are applied.
-                 {typed} may be empty if {key} is produced by non-typed key(s)
-                 or by the same typed key(s) that produced a previous {key}.
-                 When {fn} is `nil` and {ns_id} is specified, the callback
+      • {fn}     (`fun(key: string, typed: string): string??`) Function
+                 invoked for every input key, after mappings have been applied
+                 but before further processing. Arguments {key} and {typed}
+                 are raw keycodes, where {key} is the key after mappings are
+                 applied, and {typed} is the key(s) before mappings are
+                 applied. {typed} may be empty if {key} is produced by
+                 non-typed key(s) or by the same typed key(s) that produced a
+                 previous {key}. If {fn} returns an empty string, {key} is
+                 discarded/ignored. When {fn} is `nil`, the callback
                  associated with namespace {ns_id} is removed.
       • {ns_id}  (`integer?`) Namespace ID. If nil or 0, generates and returns
                  a new |nvim_create_namespace()| id.
+      • {opts}   (`table?`) Optional parameters
 
     Return: ~
         (`integer`) Namespace id associated with {fn}. Or count of all
@@ -1775,6 +1744,44 @@ vim.schedule_wrap({fn})                                  *vim.schedule_wrap()*
       • |lua-loop-callbacks|
       • |vim.schedule()|
       • |vim.in_fast_event()|
+
+                                                         *vim.str_byteindex()*
+vim.str_byteindex({s}, {encoding}, {index}, {strict_indexing})
+    Convert UTF-32, UTF-16 or UTF-8 {index} to byte index. If
+    {strict_indexing} is false then then an out of range index will return
+    byte length instead of throwing an error.
+
+    Invalid UTF-8 and NUL is treated like in |vim.str_utfindex()|. An {index}
+    in the middle of a UTF-16 sequence is rounded upwards to the end of that
+    sequence.
+
+    Parameters: ~
+      • {s}                (`string`)
+      • {encoding}         (`"utf-8"|"utf-16"|"utf-32"`)
+      • {index}            (`integer`)
+      • {strict_indexing}  (`boolean?`) default: true
+
+    Return: ~
+        (`integer`)
+
+                                                          *vim.str_utfindex()*
+vim.str_utfindex({s}, {encoding}, {index}, {strict_indexing})
+    Convert byte index to UTF-32, UTF-16 or UTF-8 indices. If {index} is not
+    supplied, the length of the string is used. All indices are zero-based.
+
+    If {strict_indexing} is false then an out of range index will return
+    string length instead of throwing an error. Invalid UTF-8 bytes, and
+    embedded surrogates are counted as one code point each. An {index} in the
+    middle of a UTF-8 sequence is rounded upwards to the end of that sequence.
+
+    Parameters: ~
+      • {s}                (`string`)
+      • {encoding}         (`"utf-8"|"utf-16"|"utf-32"`)
+      • {index}            (`integer?`)
+      • {strict_indexing}  (`boolean?`) default: true
+
+    Return: ~
+        (`integer`)
 
 vim.system({cmd}, {opts}, {on_exit})                            *vim.system()*
     Runs a system command or throws an error if {cmd} cannot be run.
@@ -2514,8 +2521,8 @@ vim.loader.find({modname}, {opts})                         *vim.loader.find()*
         (`table[]`) A list of objects with the following fields:
         • {modpath} (`string`) Path of the module
         • {modname} (`string`) Name of the module
-        • {stat}? (`uv.uv_fs_t`) The fs_stat of the module path. Won't be
-          returned for `modname="*"`
+        • {stat}? (`uv.fs_stat.result`) The fs_stat of the module path. Won't
+          be returned for `modname="*"`
 
 vim.loader.reset({path})                                  *vim.loader.reset()*
     WARNING: This feature is experimental/unstable.
@@ -2677,7 +2684,7 @@ vim.ui.select({items}, {opts}, {on_choice})                  *vim.ui.select()*
                        item shape. Plugins reimplementing `vim.ui.select` may
                        wish to use this to infer the structure or semantics of
                        `items`, or the context in which select() was called.
-      • {on_choice}  (`fun(item: any?, idx: integer?)`) Called once the user
+      • {on_choice}  (`fun(item: T?, idx: integer?)`) Called once the user
                      made a choice. `idx` is the 1-based index of `item`
                      within `items`. `nil` if the user aborted the dialog.
 

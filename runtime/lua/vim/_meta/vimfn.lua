@@ -809,7 +809,7 @@ function vim.fn.char2nr(string, utf8) end
 --- The character class is one of:
 ---   0  blank
 ---   1  punctuation
----   2  word character
+---   2  word character (depends on 'iskeyword')
 ---   3  emoji
 ---   other  specific Unicode class
 --- The class is used in patterns and word motions.
@@ -5192,7 +5192,7 @@ function vim.fn.log(expr) end
 function vim.fn.log10(expr) end
 
 --- {expr1} must be a |List|, |String|, |Blob| or |Dictionary|.
---- When {expr1} is a |List|| or |Dictionary|, replace each
+--- When {expr1} is a |List| or |Dictionary|, replace each
 --- item in {expr1} with the result of evaluating {expr2}.
 --- For a |Blob| each byte is replaced.
 --- For a |String|, each character, including composing
