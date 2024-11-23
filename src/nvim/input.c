@@ -55,7 +55,7 @@ int ask_yesno(const char *const str, const bool direct)
   int r = ' ';
   while (r != 'y' && r != 'n') {
     // same highlighting as for wait_return()
-    smsg(HL_ATTR(HLF_R), "%s (y/n)?", str);
+    smsg(HLF_R, "%s (y/n)?", str);
     if (direct) {
       r = get_keystroke(NULL);
     } else {
@@ -223,6 +223,7 @@ int get_number(int colon, bool *mouse_used)
 /// the line number.
 int prompt_for_number(bool *mouse_used)
 {
+  msg_ext_set_kind("number_prompt");
   // When using ":silent" assume that <CR> was entered.
   if (mouse_used != NULL) {
     msg_puts(_("Type number and <Enter> or click with the mouse "

@@ -120,8 +120,8 @@ elseif(MINGW)
   # Use POSIX compatible stdio in Mingw
   target_compile_definitions(main_lib INTERFACE __USE_MINGW_ANSI_STDIO)
 
-  # Enable wmain
-  target_link_libraries(nvim_bin PRIVATE -municode)
+  # wrapper for nvim.manifest
+  target_sources(main_lib INTERFACE ${CMAKE_CURRENT_LIST_DIR}/os/nvim.rc)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
   target_compile_options(main_lib INTERFACE
     -Wno-conversion
@@ -308,7 +308,6 @@ set(GENERATOR_C_GRAMMAR ${GENERATOR_DIR}/c_grammar.lua)
 set(GENERATOR_HASHY ${GENERATOR_DIR}/hashy.lua)
 set(GENERATOR_PRELOAD ${GENERATOR_DIR}/preload.lua)
 set(HEADER_GENERATOR ${GENERATOR_DIR}/gen_declarations.lua)
-set(OPTIONS_ENUM_GENERATOR ${GENERATOR_DIR}/gen_options_enum.lua)
 set(OPTIONS_GENERATOR ${GENERATOR_DIR}/gen_options.lua)
 
 # GENERATED_DIR and GENERATED_INCLUDES_DIR
@@ -687,14 +686,9 @@ add_custom_command(OUTPUT ${GENERATED_EVENTS_ENUM} ${GENERATED_EVENTS_NAMES_MAP}
   DEPENDS ${LUA_GEN_DEPS} ${EVENTS_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}/auevents.lua
 )
 
-add_custom_command(OUTPUT ${GENERATED_OPTIONS}
-  COMMAND ${LUA_GEN} ${OPTIONS_GENERATOR} ${GENERATED_OPTIONS}
+add_custom_command(OUTPUT ${GENERATED_OPTIONS} ${GENERATED_OPTIONS_ENUM} ${GENERATED_OPTIONS_MAP}
+  COMMAND ${LUA_GEN} ${OPTIONS_GENERATOR} ${GENERATED_OPTIONS} ${GENERATED_OPTIONS_ENUM} ${GENERATED_OPTIONS_MAP}
   DEPENDS ${LUA_GEN_DEPS} ${OPTIONS_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}/options.lua
-)
-
-add_custom_command(OUTPUT ${GENERATED_OPTIONS_ENUM} ${GENERATED_OPTIONS_MAP}
-  COMMAND ${LUA_GEN} ${OPTIONS_ENUM_GENERATOR} ${GENERATED_OPTIONS_ENUM} ${GENERATED_OPTIONS_MAP}
-  DEPENDS ${LUA_GEN_DEPS} ${OPTIONS_ENUM_GENERATOR} ${CMAKE_CURRENT_LIST_DIR}/options.lua
 )
 
 # NVIM_GENERATED_FOR_SOURCES and NVIM_GENERATED_FOR_HEADERS must be mutually exclusive.
@@ -750,6 +744,7 @@ add_custom_target(nvim_runtime_deps)
 if(WIN32)
   # Copy DLLs and third-party tools to bin/ and install them along with nvim
   add_custom_command(TARGET nvim_runtime_deps
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E ${COPY_DIRECTORY} ${PROJECT_BINARY_DIR}/windows_runtime_deps/
       ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
   install(DIRECTORY ${PROJECT_BINARY_DIR}/windows_runtime_deps/
@@ -791,7 +786,10 @@ file(MAKE_DIRECTORY ${BINARY_LIB_DIR})
 
 # install treesitter parser if bundled
 if(EXISTS ${DEPS_PREFIX}/lib/nvim/parser)
-  add_custom_command(TARGET nvim_runtime_deps COMMAND ${CMAKE_COMMAND} -E ${COPY_DIRECTORY} ${DEPS_PREFIX}/lib/nvim/parser ${BINARY_LIB_DIR}/parser)
+  add_custom_command(
+    TARGET nvim_runtime_deps
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E ${COPY_DIRECTORY} ${DEPS_PREFIX}/lib/nvim/parser ${BINARY_LIB_DIR}/parser)
 endif()
 
 install(DIRECTORY ${BINARY_LIB_DIR}

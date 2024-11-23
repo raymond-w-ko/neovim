@@ -1342,7 +1342,7 @@ static void f_diff_hlID(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       hlID = HLF_CHD;  // Changed line.
     }
   }
-  rettv->vval.v_number = hlID == (hlf_T)0 ? 0 : (hlID + 1);
+  rettv->vval.v_number = hlID;
 }
 
 /// "empty({expr})" function
@@ -3540,6 +3540,7 @@ static void f_inputlist(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     return;
   }
 
+  msg_ext_set_kind("list_cmd");
   msg_start();
   msg_row = Rows - 1;   // for when 'cmdheight' > 1
   lines_left = Rows;    // avoid more prompt
@@ -7848,8 +7849,8 @@ static void f_substitute(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       || flg == NULL) {
     rettv->vval.v_string = NULL;
   } else {
-    rettv->vval.v_string = do_string_sub((char *)str, (char *)pat,
-                                         (char *)sub, expr, (char *)flg);
+    rettv->vval.v_string = do_string_sub((char *)str, strlen(str), (char *)pat,
+                                         (char *)sub, expr, (char *)flg, NULL);
   }
 }
 
