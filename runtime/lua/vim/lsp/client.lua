@@ -78,7 +78,7 @@ local validate = vim.validate
 --- @field settings? table
 ---
 --- Table that maps string of clientside commands to user-defined functions.
---- Commands passed to start_client take precedence over the global command registry. Each key
+--- Commands passed to `start()` take precedence over the global command registry. Each key
 --- must be a unique command name, and the value is a function which is called if any LSP action
 --- (code action, code lenses, ...) triggers the command.
 --- @field commands? table<string,fun(command: lsp.Command, ctx: table)>
@@ -104,7 +104,7 @@ local validate = vim.validate
 --- @field on_error? fun(code: integer, err: string)
 ---
 --- Callback invoked before the LSP "initialize" phase, where `params` contains the parameters
---- being sent to the server and `config` is the config that was passed to |vim.lsp.start_client()|.
+--- being sent to the server and `config` is the config that was passed to |vim.lsp.start()|.
 --- You can use this to modify parameters before they are sent.
 --- @field before_init? fun(params: lsp.InitializeParams, config: vim.lsp.ClientConfig)
 ---
@@ -167,7 +167,7 @@ local validate = vim.validate
 --- @field requests table<integer,{ type: string, bufnr: integer, method: string}>
 ---
 --- copy of the table that was passed by the user
---- to |vim.lsp.start_client()|.
+--- to |vim.lsp.start()|.
 --- @field config vim.lsp.ClientConfig
 ---
 --- Response from the server sent on `initialize` describing the server's
@@ -307,7 +307,7 @@ local function default_get_language_id(_bufnr, filetype)
   return filetype
 end
 
---- Validates a client configuration as given to |vim.lsp.start_client()|.
+--- Validates a client configuration as given to |vim.lsp.start()|.
 --- @param config vim.lsp.ClientConfig
 local function validate_config(config)
   validate('config', config, 'table')
@@ -365,21 +365,6 @@ local function get_name(id, config)
   return tostring(id)
 end
 
---- @param workspace_folders string|lsp.WorkspaceFolder[]?
---- @return lsp.WorkspaceFolder[]?
-local function get_workspace_folders(workspace_folders)
-  if type(workspace_folders) == 'table' then
-    return workspace_folders
-  elseif type(workspace_folders) == 'string' then
-    return {
-      {
-        uri = vim.uri_from_fname(workspace_folders),
-        name = workspace_folders,
-      },
-    }
-  end
-end
-
 --- @generic T
 --- @param x elem_or_list<T>?
 --- @return T[]
@@ -417,7 +402,7 @@ function Client.create(config)
     flags = config.flags or {},
     get_language_id = config.get_language_id or default_get_language_id,
     capabilities = config.capabilities or lsp.protocol.make_client_capabilities(),
-    workspace_folders = get_workspace_folders(config.workspace_folders or config.root_dir),
+    workspace_folders = lsp._get_workspace_folders(config.workspace_folders or config.root_dir),
     root_dir = config.root_dir,
     _before_init_cb = config.before_init,
     _on_init_cbs = ensure_list(config.on_init),
@@ -619,18 +604,6 @@ function Client:_resolve_handler(method)
   return self.handlers[method] or lsp.handlers[method]
 end
 
---- Returns the buffer number for the given {bufnr}.
----
---- @param bufnr integer? Buffer number to resolve. Defaults to current buffer
---- @return integer bufnr
-local function resolve_bufnr(bufnr)
-  validate('bufnr', bufnr, 'number', true)
-  if bufnr == nil or bufnr == 0 then
-    return api.nvim_get_current_buf()
-  end
-  return bufnr
-end
-
 --- Sends a request to the server.
 ---
 --- This is a thin wrapper around {client.rpc.request} with some additional
@@ -655,7 +628,7 @@ function Client:request(method, params, handler, bufnr)
   end
   -- Ensure pending didChange notifications are sent so that the server doesn't operate on a stale state
   changetracking.flush(self, bufnr)
-  bufnr = resolve_bufnr(bufnr)
+  bufnr = vim._resolve_bufnr(bufnr)
   local version = lsp.util.buf_versions[bufnr]
   log.debug(self._log_prefix, 'client.request', self.id, method, params, handler, bufnr)
   local success, request_id = self.rpc.request(method, params, function(err, result)
@@ -906,7 +879,7 @@ end
 --- @param bufnr? integer
 --- @return lsp.Registration?
 function Client:_get_registration(method, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  bufnr = vim._resolve_bufnr(bufnr)
   for _, reg in ipairs(self.registrations[method] or {}) do
     if not reg.registerOptions or not reg.registerOptions.documentSelector then
       return reg
@@ -943,7 +916,7 @@ end
 --- @param handler? lsp.Handler only called if a server command
 function Client:exec_cmd(command, context, handler)
   context = vim.deepcopy(context or {}, true) --[[@as lsp.HandlerContext]]
-  context.bufnr = context.bufnr or api.nvim_get_current_buf()
+  context.bufnr = vim._resolve_bufnr(context.bufnr)
   context.client_id = self.id
   local cmdname = command.command
   local fn = self.commands[cmdname] or lsp.commands[cmdname]
@@ -1174,7 +1147,7 @@ function Client:_add_workspace_folder(dir)
     end
   end
 
-  local wf = assert(get_workspace_folders(dir))
+  local wf = assert(lsp._get_workspace_folders(dir))
 
   self:notify(ms.workspace_didChangeWorkspaceFolders, {
     event = { added = wf, removed = {} },
@@ -1189,7 +1162,7 @@ end
 --- Remove a directory to the workspace folders.
 --- @param dir string?
 function Client:_remove_workspace_folder(dir)
-  local wf = assert(get_workspace_folders(dir))
+  local wf = assert(lsp._get_workspace_folders(dir))
 
   self:notify(ms.workspace_didChangeWorkspaceFolders, {
     event = { added = {}, removed = wf },
