@@ -3631,7 +3631,9 @@ return {
     {
       abbreviation = 'gcr',
       cb = 'did_set_guicursor',
-      defaults = { if_true = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20' },
+      defaults = {
+        if_true = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20,t:block-blinkon500-blinkoff500-TermCursor',
+      },
       deny_duplicates = true,
       desc = [=[
         Configures the cursor style for each mode. Works in the GUI and many
@@ -3660,6 +3662,7 @@ return {
         	ci	Command-line Insert mode
         	cr	Command-line Replace mode
         	sm	showmatch in Insert mode
+        	t	Terminal mode
         	a	all modes
         The argument-list is a dash separated list of these arguments:
         	hor{N}	horizontal bar, {N} percent of the character height
@@ -3676,7 +3679,8 @@ return {
         		cursor is not shown.  Times are in msec.  When one of
         		the numbers is zero, there is no blinking. E.g.: >vim
         			set guicursor=n:blinkon0
-        <			- Default is "blinkon0" for each mode.
+        <
+        		Default is "blinkon0" for each mode.
         	{group-name}
         		Highlight group that decides the color and font of the
         		cursor.
@@ -5456,21 +5460,24 @@ return {
       flags = true,
       deny_duplicates = true,
       desc = [=[
-        Option settings when outputting messages.  It can consist of the
+        Option settings for outputting messages.  It can consist of the
         following items.  Items must be separated by a comma.
 
-        hit-enter	Use |hit-enter| prompt when the message is longer than
+        hit-enter	Use a |hit-enter| prompt when the message is longer than
         		'cmdheight' size.
 
-        wait:{n}	Ignored when "hit-enter" is present.  Instead of using
-        		|hit-enter| prompt, will simply wait for {n}
-        		milliseconds so the user has a chance to read the
-        		message, use 0 to disable sleep (but then the user may
-        		miss an important message).
+        wait:{n}	Instead of using a |hit-enter| prompt, simply wait for
+        		{n} milliseconds so that the user has a chance to read
+        		the message.  The maximum value of {n} is 10000.  Use
+        		0 to disable the wait (but then the user may miss an
+        		important message).
+        		This item is ignored when "hit-enter" is present, but
+        		required when "hit-enter" is not present.
 
         history:{n}	Determines how many entries are remembered in the
         		|:messages| history.  The maximum value is 10000.
         		Setting it to zero clears the message history.
+        		This item must always be present.
       ]=],
       expand_cb = 'expand_set_messagesopt',
       full_name = 'messagesopt',
@@ -5478,7 +5485,7 @@ return {
       scope = { 'global' },
       short_desc = N_('options for outputting messages'),
       type = 'string',
-      varname = 'p_meo',
+      varname = 'p_mopt',
     },
     {
       abbreviation = 'msm',
@@ -6752,6 +6759,7 @@ return {
           indent/	indent scripts |indent-expression|
           keymap/	key mapping files |mbyte-keymap|
           lang/		menu translations |:menutrans|
+          lsp/		LSP client configurations |lsp-config|
           lua/		|Lua| plugins
           menu.vim	GUI menus |menu.vim|
           pack/		packages |:packadd|
@@ -7007,6 +7015,8 @@ return {
         selection.
         When "old" is used and 'virtualedit' allows the cursor to move past
         the end of line the line break still isn't included.
+        When "exclusive" is used, cursor position in visual mode will be
+        adjusted for inclusive motions |inclusive-motion-selection-exclusive|.
         Note that when "exclusive" is used and selecting from the end
         backwards, you cannot include the last character of a line, when
         starting in Normal mode and 'virtualedit' empty.

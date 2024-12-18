@@ -1372,10 +1372,6 @@ static void normal_redraw(NormalState *s)
     }
   }
 
-  if (need_maketitle) {
-    maketitle();
-  }
-
   curbuf->b_last_used = time(NULL);
 
   // Display message after redraw. If an external message is still visible,
@@ -5042,6 +5038,9 @@ static void nv_visual(cmdarg_T *cap)
         assert(cap->count0 >= INT_MIN && cap->count0 <= INT_MAX);
         curwin->w_curswant += resel_VIsual_vcol * cap->count0 - 1;
         curwin->w_cursor.lnum = lnum;
+        if (*p_sel == 'e') {
+          curwin->w_curswant++;
+        }
         coladvance(curwin, curwin->w_curswant);
       } else {
         curwin->w_set_curswant = true;

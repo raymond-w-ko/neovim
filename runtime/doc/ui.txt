@@ -789,6 +789,7 @@ must handle.
 	kind
 	    Name indicating the message kind:
 		"" (empty)	Unknown (consider a |feature-request|)
+		"bufwrite"	|:write| message
 		"confirm"	|confirm()| or |:confirm| dialog
 		"confirm_sub"	|:substitute| confirm dialog |:s_c|
 		"emsg"		Error (|errors|, internal error, |:throw|, …)
@@ -804,6 +805,7 @@ must handle.
 		"quickfix"	Quickfix navigation message
 		"search_cmd"	Entered search command
 		"search_count"	Search count message ("S" flag of 'shortmess')
+		"undo"		|:undo| and |:redo| message
 		"wildlist"	'wildmode' "list" message
 		"wmsg"		Warning ("search hit BOTTOM", |W10|, …)
 	    New kinds may be added in the future; clients should treat unknown

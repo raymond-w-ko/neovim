@@ -1542,6 +1542,81 @@ describe('builtin popupmenu', function()
     end)
 
     if not multigrid then
+      describe('popup and preview window do not overlap', function()
+        before_each(function()
+          screen:try_resize(53, 20)
+        end)
+
+        -- oldtest: Test_popup_and_previewwindow_dump_pedit()
+        it('with :pedit', function()
+          exec([[
+            set previewheight=9
+            silent! pedit
+            call setline(1, map(repeat(["ab"], 10), "v:val .. v:key"))
+            exec "norm! G\<C-E>\<C-E>"
+          ]])
+          feed('o')
+          n.poke_eventloop()
+          feed('<C-X><C-N>')
+          screen:expect([[
+            ab0                                                  |
+            ab1                                                  |
+            ab2                                                  |
+            ab3                                                  |
+            ab4                                                  |
+            ab5                                                  |
+            ab6                                                  |
+            ab7                                                  |
+            ab8                                                  |
+            {s:ab0            }{c: }{3:ew][+]                               }|
+            {n:ab1            }{c: }                                     |
+            {n:ab2            }{c: }                                     |
+            {n:ab3            }{c: }                                     |
+            {n:ab4            }{s: }                                     |
+            {n:ab5            }{s: }                                     |
+            {n:ab6            }{s: }                                     |
+            ab0^                                                  |
+            {1:~                                                    }|
+            {4:[No Name] [+]                                        }|
+            {2:-- Keyword Local completion (^N^P) }{5:match 1 of 10}     |
+          ]])
+        end)
+
+        -- oldtest: Test_popup_and_previewwindow_dump_pbuffer()
+        it('with :pbuffer', function()
+          exec([[
+            set previewheight=9
+            silent! pbuffer
+            call setline(1, map(repeat(["ab"], 10), "v:val .. v:key"))
+            exec "norm! G\<C-E>\<C-E>\<C-E>"
+          ]])
+          feed('o')
+          n.poke_eventloop()
+          feed('<C-X><C-N>')
+          screen:expect([[
+            ab0                                                  |
+            ab1                                                  |
+            ab2                                                  |
+            ab3                                                  |
+            ab4                                                  |
+            ab5                                                  |
+            ab6                                                  |
+            ab7                                                  |
+            ab8                                                  |
+            {s:ab0            }{c: }{3:ew][+]                               }|
+            {n:ab1            }{c: }                                     |
+            {n:ab2            }{c: }                                     |
+            {n:ab3            }{s: }                                     |
+            {n:ab4            }{s: }                                     |
+            {n:ab5            }{s: }                                     |
+            ab0^                                                  |
+            {1:~                                                    }|*2
+            {4:[No Name] [+]                                        }|
+            {2:-- Keyword Local completion (^N^P) }{5:match 1 of 10}     |
+          ]])
+        end)
+      end)
+
       -- oldtest: Test_pum_with_preview_win()
       it('preview window opened during completion', function()
         exec([[
@@ -1684,25 +1759,26 @@ describe('builtin popupmenu', function()
           }
         end
 
-        -- info window position should be adjusted when new leader add
-        feed('<C-P>o')
+        -- delete one character make the pum width smaller than before
+        -- info window position should be adjusted when popupmenu width changed
+        feed('<BS>')
         if multigrid then
-          screen:expect {
+          screen:expect({
             grid = [[
-          ## grid 1
-            [2:----------------------------------------]|*10
-            [3:----------------------------------------]|
-          ## grid 2
-            o^                                       |
-            {1:~                                       }|*9
-          ## grid 3
-            {2:-- }{8:Back at original}                     |
-          ## grid 4
-            {n:1info}|
-            {n:     }|
-          ## grid 5
-            {n:one            }|
-          ]],
+            ## grid 1
+              [2:----------------------------------------]|*10
+              [3:----------------------------------------]|
+            ## grid 2
+              on^                                      |
+              {1:~                                       }|*9
+            ## grid 3
+              {2:-- }{5:match 1 of 3}                         |
+            ## grid 4
+              {n:1info}|
+              {n:     }|
+            ## grid 5
+              {s:one            }|
+            ]],
             float_pos = {
               [5] = { -1, 'NW', 2, 1, 0, false, 100 },
               [4] = { 1001, 'NW', 1, 1, 15, false, 50 },
@@ -1713,7 +1789,7 @@ describe('builtin popupmenu', function()
                 topline = 0,
                 botline = 2,
                 curline = 0,
-                curcol = 1,
+                curcol = 2,
                 linecount = 1,
                 sum_scroll_delta = 0,
               },
@@ -1727,22 +1803,88 @@ describe('builtin popupmenu', function()
                 sum_scroll_delta = 0,
               },
             },
-          }
+            win_viewport_margins = {
+              [2] = {
+                bottom = 0,
+                left = 0,
+                right = 0,
+                top = 0,
+                win = 1000,
+              },
+              [4] = {
+                bottom = 0,
+                left = 0,
+                right = 0,
+                top = 0,
+                win = 1001,
+              },
+            },
+          })
         else
-          screen:expect {
+          screen:expect({
             grid = [[
-            o^                                       |
-            {n:one            1info}{1:                    }|
-            {1:~              }{n:     }{1:                    }|
-            {1:~                                       }|*7
-            {2:-- }{8:Back at original}                     |
-          ]],
-          }
+              on^                                      |
+              {s:one            }{n:1info}{1:                    }|
+              {1:~              }{n:     }{1:                    }|
+              {1:~                                       }|*7
+              {2:-- }{5:match 1 of 3}                         |
+            ]],
+          })
+        end
+
+        -- when back to original the preview float should be closed.
+        feed('<C-P>')
+        if multigrid then
+          screen:expect({
+            grid = [[
+            ## grid 1
+              [2:----------------------------------------]|*10
+              [3:----------------------------------------]|
+            ## grid 2
+              on^                                      |
+              {1:~                                       }|*9
+            ## grid 3
+              {2:-- }{8:Back at original}                     |
+            ## grid 5
+              {n:one            }|
+            ]],
+            float_pos = {
+              [5] = { -1, 'NW', 2, 1, 0, false, 100 },
+            },
+            win_viewport = {
+              [2] = {
+                win = 1000,
+                topline = 0,
+                botline = 2,
+                curline = 0,
+                curcol = 2,
+                linecount = 1,
+                sum_scroll_delta = 0,
+              },
+            },
+            win_viewport_margins = {
+              [2] = {
+                bottom = 0,
+                left = 0,
+                right = 0,
+                top = 0,
+                win = 1000,
+              },
+            },
+          })
+        else
+          screen:expect({
+            grid = [[
+              on^                                      |
+              {n:one            }{1:                         }|
+              {1:~                                       }|*8
+              {2:-- }{8:Back at original}                     |
+            ]],
+          })
         end
 
         -- test nvim__complete_set_info
-        feed('<ESC>cc<C-X><C-O><C-N><C-N>')
-        vim.uv.sleep(10)
+        feed('<ESC>S<C-X><C-O><C-N><C-N>')
         if multigrid then
           screen:expect {
             grid = [[
@@ -1758,13 +1900,13 @@ describe('builtin popupmenu', function()
             {n:one                }|
             {n:two                }|
             {s:looooooooooooooong }|
-          ## grid 6
+          ## grid 7
             {n:3info}|
             {n:     }|
           ]],
             float_pos = {
               [5] = { -1, 'NW', 2, 1, 0, false, 100 },
-              [6] = { 1002, 'NW', 1, 1, 19, false, 50 },
+              [7] = { 1003, 'NW', 1, 1, 19, false, 50 },
             },
             win_viewport = {
               [2] = {
@@ -1776,8 +1918,8 @@ describe('builtin popupmenu', function()
                 linecount = 1,
                 sum_scroll_delta = 0,
               },
-              [6] = {
-                win = 1002,
+              [7] = {
+                win = 1003,
                 topline = 0,
                 botline = 2,
                 curline = 0,
@@ -1819,12 +1961,12 @@ describe('builtin popupmenu', function()
             {s: one                }|
             {n: two                }|
             {n: looooooooooooooong }|
-          ## grid 7
+          ## grid 8
             {n:1info}|
             {n:     }|
           ]],
             float_pos = {
-              [7] = { 1003, 'NW', 1, 1, 14, false, 50 },
+              [8] = { 1004, 'NW', 1, 1, 14, false, 50 },
               [5] = { -1, 'NW', 2, 1, 19, false, 100 },
             },
             win_viewport = {
@@ -1837,8 +1979,8 @@ describe('builtin popupmenu', function()
                 linecount = 1,
                 sum_scroll_delta = 0,
               },
-              [7] = {
-                win = 1003,
+              [8] = {
+                win = 1004,
                 topline = 0,
                 botline = 2,
                 curline = 0,
@@ -5418,6 +5560,71 @@ describe('builtin popupmenu', function()
           {2:--}          |
         ]])
         feed('<C-E><ESC>')
+      end)
+
+      -- oldtest: Test_pum_matchins_highlight()
+      it('with ComplMatchIns highlight', function()
+        exec([[
+          func Omni_test(findstart, base)
+            if a:findstart
+              return col(".")
+            endif
+            return [#{word: "foo"}, #{word: "bar"}, #{word: "你好"}]
+          endfunc
+          set omnifunc=Omni_test
+          hi ComplMatchIns guifg=red
+        ]])
+
+        feed('Sαβγ <C-X><C-O>')
+        screen:expect([[
+          αβγ {8:foo}^                         |
+          {1:~  }{s: foo            }{1:             }|
+          {1:~  }{n: bar            }{1:             }|
+          {1:~  }{n: 你好           }{1:             }|
+          {1:~                               }|*15
+          {2:-- }{5:match 1 of 3}                 |
+        ]])
+        feed('<C-E><Esc>')
+
+        feed('Sαβγ <C-X><C-O><C-N>')
+        screen:expect([[
+          αβγ {8:bar}^                         |
+          {1:~  }{n: foo            }{1:             }|
+          {1:~  }{s: bar            }{1:             }|
+          {1:~  }{n: 你好           }{1:             }|
+          {1:~                               }|*15
+          {2:-- }{5:match 2 of 3}                 |
+        ]])
+        feed('<C-E><Esc>')
+
+        feed('Sαβγ <C-X><C-O><C-N><C-N>')
+        screen:expect([[
+          αβγ {8:你好}^                        |
+          {1:~  }{n: foo            }{1:             }|
+          {1:~  }{n: bar            }{1:             }|
+          {1:~  }{s: 你好           }{1:             }|
+          {1:~                               }|*15
+          {2:-- }{5:match 3 of 3}                 |
+        ]])
+        feed('<C-E><Esc>')
+
+        -- restore after accept
+        feed('Sαβγ <C-X><C-O><C-Y>')
+        screen:expect([[
+          αβγ foo^                         |
+          {1:~                               }|*18
+          {2:-- INSERT --}                    |
+        ]])
+        feed('<Esc>')
+
+        -- restore after cancel completion
+        feed('Sαβγ <C-X><C-O><Space>')
+        screen:expect([[
+          αβγ foo ^                        |
+          {1:~                               }|*18
+          {2:-- INSERT --}                    |
+        ]])
+        feed('<Esc>')
       end)
     end
   end
