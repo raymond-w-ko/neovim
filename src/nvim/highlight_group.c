@@ -1,5 +1,6 @@
 // highlight_group.c: code for managing highlight groups
 
+#include <assert.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,6 +32,7 @@
 #include "nvim/garray_defs.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/grid_defs.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/lua/executor.h"
@@ -173,7 +175,7 @@ static const char *highlight_init_both[] = {
   "default link PmenuKind        Pmenu",
   "default link PmenuKindSel     PmenuSel",
   "default link PmenuSbar        Pmenu",
-  "default link ComplMatchIns    Normal",
+  "default link ComplMatchIns    NONE",
   "default link Substitute       Search",
   "default link StatusLineTerm   StatusLine",
   "default link StatusLineTermNC StatusLineNC",
@@ -1887,8 +1889,7 @@ bool syn_list_header(const bool did_header, const int outlen, const int id, bool
     if (got_int) {
       return true;
     }
-    msg_outtrans(hl_table[id - 1].sg_name, 0, false);
-    name_col = msg_col;
+    msg_col = name_col = msg_outtrans(hl_table[id - 1].sg_name, 0, false);
     endcol = 15;
   } else if ((ui_has(kUIMessages) || msg_silent) && !force_newline) {
     msg_putchar(' ');

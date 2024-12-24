@@ -37,7 +37,6 @@
 #include "nvim/getchar.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
-#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
 #include "nvim/indent.h"
@@ -958,7 +957,7 @@ static void ins_compl_insert_bytes(char *p, int len)
   }
   assert(len >= 0);
   ins_bytes_len(p, (size_t)len);
-  compl_ins_end_col = curwin->w_cursor.col - 1;
+  compl_ins_end_col = curwin->w_cursor.col;
 }
 
 /// Checks if the column is within the currently inserted completion text
@@ -1582,6 +1581,7 @@ static void ins_compl_files(int count, char **files, bool thesaurus, int flags,
     FILE *fp = os_fopen(files[i], "r");  // open dictionary file
     if (flags != DICT_EXACT && !shortmess(SHM_COMPLETIONSCAN)) {
       msg_hist_off = true;  // reset in msg_trunc()
+      msg_ext_set_kind("completion");
       vim_snprintf(IObuff, IOSIZE,
                    _("Scanning dictionary: %s"), files[i]);
       msg_trunc(IObuff, true, HLF_R);
@@ -2147,6 +2147,8 @@ static bool ins_compl_stop(const int c, const int prev_mode, bool retval)
       && pum_visible()) {
     word = xstrdup(compl_shown_match->cp_str);
     retval = true;
+    // May need to remove ComplMatchIns highlight.
+    redrawWinline(curwin, curwin->w_cursor.lnum);
   }
 
   // CTRL-E means completion is Ended, go back to the typed text.
@@ -3058,6 +3060,7 @@ static int process_next_cpt_value(ins_compl_next_state_T *st, int *compl_type_ar
     }
     if (!shortmess(SHM_COMPLETIONSCAN)) {
       msg_hist_off = true;  // reset in msg_trunc()
+      msg_ext_set_kind("completion");
       vim_snprintf(IObuff, IOSIZE, _("Scanning: %s"),
                    st->ins_buf->b_fname == NULL
                    ? buf_spname(st->ins_buf)
@@ -3090,6 +3093,7 @@ static int process_next_cpt_value(ins_compl_next_state_T *st, int *compl_type_ar
     } else if (*st->e_cpt == ']' || *st->e_cpt == 't') {
       compl_type = CTRL_X_TAGS;
       if (!shortmess(SHM_COMPLETIONSCAN)) {
+        msg_ext_set_kind("completion");
         msg_hist_off = true;  // reset in msg_trunc()
         vim_snprintf(IObuff, IOSIZE, "%s", _("Scanning tags."));
         msg_trunc(IObuff, true, HLF_R);
@@ -3648,6 +3652,7 @@ void ins_compl_delete(bool new_leader)
       return;
     }
     backspace_until_column(col);
+    compl_ins_end_col = curwin->w_cursor.col;
   }
 
   // TODO(vim): is this sufficient for redrawing?  Redrawing everything
@@ -4599,6 +4604,7 @@ static void ins_compl_show_statusmsg(void)
     if (edit_submode_extra != NULL) {
       if (!p_smd) {
         msg_hist_off = true;
+        msg_ext_set_kind("completion");
         msg(edit_submode_extra, (edit_submode_highl < HLF_COUNT
                                  ? (int)edit_submode_highl + 1 : 0));
         msg_hist_off = false;
