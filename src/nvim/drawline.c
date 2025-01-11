@@ -1051,11 +1051,11 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
       }
     }
 
-    has_decor = decor_redraw_line(wp, lnum - 1, &decor_state);
-
     if (!end_fill) {
-      decor_providers_invoke_line(wp, lnum - 1, &has_decor);
+      decor_providers_invoke_line(wp, lnum - 1);
     }
+
+    has_decor = decor_redraw_line(wp, lnum - 1, &decor_state);
 
     if (has_decor) {
       extra_check = true;
@@ -1495,7 +1495,7 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
     ptr = line + v;  // "line" may have been updated
   }
 
-  if ((State & MODE_INSERT) && in_curline && ins_compl_active()) {
+  if ((State & MODE_INSERT) && in_curline && ins_compl_win_active(wp)) {
     area_highlighting = true;
   }
 
@@ -1746,7 +1746,7 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
         }
 
         // Check if ComplMatchIns highlight is needed.
-        if ((State & MODE_INSERT) && in_curline && ins_compl_active()) {
+        if ((State & MODE_INSERT) && in_curline && ins_compl_win_active(wp)) {
           int ins_match_attr = ins_compl_col_range_attr((int)(ptr - line));
           if (ins_match_attr > 0) {
             search_attr = hl_combine_attr(search_attr, ins_match_attr);

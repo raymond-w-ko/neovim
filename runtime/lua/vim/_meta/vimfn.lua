@@ -1023,10 +1023,15 @@ function vim.fn.complete_check() end
 ---     See |complete_info_mode| for the values.
 ---    pum_visible  |TRUE| if popup menu is visible.
 ---     See |pumvisible()|.
----    items  List of completion matches.  Each item is a
----     dictionary containing the entries "word",
+---    items  List of all completion candidates.  Each item
+---     is a dictionary containing the entries "word",
 ---     "abbr", "menu", "kind", "info" and "user_data".
 ---     See |complete-items|.
+---    matches  Same as "items", but only returns items that
+---     are matching current query. If both "matches"
+---     and "items" are in "what", the returned list
+---     will still be named "items", but each item
+---     will have an additional "match" field.
 ---    selected  Selected item index.  First index is zero.
 ---     Index is -1 if no item is selected (showing
 ---     typed text only, or the last completion after
@@ -3764,6 +3769,20 @@ function vim.fn.getregtype(regname) end
 --- @param opts? table
 --- @return vim.fn.getscriptinfo.ret[]
 function vim.fn.getscriptinfo(opts) end
+
+--- Returns the current stack trace of Vim scripts.
+--- Stack trace is a |List|, of which each item is a |Dictionary|
+--- with the following items:
+---     funcref  The funcref if the stack is at a function,
+---     otherwise this item is omitted.
+---     event  The string of the event description if the
+---     stack is at an autocmd event, otherwise this
+---     item is omitted.
+---     lnum  The line number in the script on the stack.
+---     filepath  The file path of the script on the stack.
+---
+--- @return table[]
+function vim.fn.getstacktrace() end
 
 --- If {tabnr} is not specified, then information about all the
 --- tab pages is returned as a |List|. Each List item is a
@@ -7518,7 +7537,7 @@ function vim.fn.screenstring(row, col) end
 --- @param stopline? integer
 --- @param timeout? integer
 --- @param skip? string|function
---- @return any
+--- @return integer
 function vim.fn.search(pattern, flags, stopline, timeout, skip) end
 
 --- Get or update the last search count, like what is displayed

@@ -1680,7 +1680,7 @@ describe('builtin popupmenu', function()
       end)
     end
 
-    describe('floating window preview #popup', function()
+    describe('floating window preview popup', function()
       it('pum popup preview', function()
         --row must > 10
         screen:try_resize(40, 11)
@@ -1693,14 +1693,29 @@ describe('builtin popupmenu', function()
           endfunc
           set omnifunc=Omni_test
           set completeopt=menu,popup
-
           funct Set_info()
             let comp_info = complete_info()
             if comp_info['selected'] == 2
               call nvim__complete_set(comp_info['selected'], {"info": "3info"})
             endif
           endfunc
-          autocmd CompleteChanged * call Set_info()
+          funct TsHl()
+            let comp_info = complete_info()
+            if get(comp_info, 'previewbufnr', 0) > 0
+              call v:lua.vim.treesitter.start(comp_info['preview_bufnr'], 'markdown')
+            endif
+            if comp_info['selected'] == 0
+              call nvim__complete_set(comp_info['selected'], {"info": "```lua\nfunction test()\n  print('foo')\nend\n```"})
+            endif
+          endfunc
+          augroup Group
+            au!
+            autocmd CompleteChanged * :call Set_info()
+          augroup END
+          funct TestTs()
+            autocmd! Group
+            autocmd CompleteChanged * call TsHl()
+          endfunc
         ]])
         feed('Gi<C-x><C-o>')
         --floating preview in right
@@ -2003,6 +2018,90 @@ describe('builtin popupmenu', function()
             {2:-- }{5:match 1 of 3}                         |
           ]],
           }
+        end
+        feed('<C-E><Esc>')
+
+        -- works when scroll with treesitter highlight
+        command('call TestTs()')
+        feed('S<C-x><C-o>')
+        if multigrid then
+          screen:expect({
+            grid = [[
+            ## grid 1
+              [2:----------------------------------------]|*10
+              [3:----------------------------------------]|
+            ## grid 2
+              one^                                     |
+              {1:~                                       }|*9
+            ## grid 3
+              {2:-- }{5:match 1 of 3}                         |
+            ## grid 5
+              {s:one                }|
+              {n:two                }|
+              {n:looooooooooooooong }|
+            ## grid 9
+              {n:```lua         }|
+              {n:function test()}|
+              {n:  print('foo') }|
+              {n:end            }|
+              {n:```            }|
+              {n:               }|
+            ]],
+            float_pos = {
+              [5] = { -1, 'NW', 2, 1, 0, false, 100 },
+              [9] = { 1005, 'NW', 1, 1, 19, false, 50 },
+            },
+            win_viewport = {
+              [2] = {
+                win = 1000,
+                topline = 0,
+                botline = 2,
+                curline = 0,
+                curcol = 3,
+                linecount = 1,
+                sum_scroll_delta = 0,
+              },
+              [9] = {
+                win = 1005,
+                topline = 0,
+                botline = 6,
+                curline = 0,
+                curcol = 0,
+                linecount = 5,
+                sum_scroll_delta = 0,
+              },
+            },
+            win_viewport_margins = {
+              [2] = {
+                bottom = 0,
+                left = 0,
+                right = 0,
+                top = 0,
+                win = 1000,
+              },
+              [9] = {
+                bottom = 0,
+                left = 0,
+                right = 0,
+                top = 0,
+                win = 1005,
+              },
+            },
+          })
+        else
+          screen:expect({
+            grid = [[
+              one^                                     |
+              {s:one                }{n:```lua         }{1:      }|
+              {n:two                function test()}{1:      }|
+              {n:looooooooooooooong   print('foo') }{1:      }|
+              {1:~                  }{n:end            }{1:      }|
+              {1:~                  }{n:```            }{1:      }|
+              {1:~                  }{n:               }{1:      }|
+              {1:~                                       }|*3
+              {2:-- }{5:match 1 of 3}                         |
+            ]],
+          })
         end
       end)
     end)
@@ -5567,11 +5666,15 @@ describe('builtin popupmenu', function()
       -- oldtest: Test_pum_matchins_highlight()
       it('with ComplMatchIns highlight', function()
         exec([[
+          let g:change = 0
           func Omni_test(findstart, base)
             if a:findstart
               return col(".")
             endif
-            return [#{word: "foo"}, #{word: "bar"}, #{word: "你好"}]
+            if g:change == 0
+              return [#{word: "foo"}, #{word: "bar"}, #{word: "你好"}]
+            endif
+            return [#{word: "foo", info: "info"}, #{word: "bar"}, #{word: "你好"}]
           endfunc
           set omnifunc=Omni_test
           hi ComplMatchIns guifg=red
@@ -5663,6 +5766,21 @@ describe('builtin popupmenu', function()
           {2:-- INSERT --}                    |
         ]])
         feed('<Esc>')
+
+        feed(':let g:change=1<CR>S<C-X><C-O>')
+        screen:expect([[
+          info                            |
+          {1:~                               }|*2
+          {3:[Scratch] [Preview]             }|
+          {8:foo}^                             |
+          {s:foo            }{1:                 }|
+          {n:bar            }{1:                 }|
+          {n:你好           }{1:                 }|
+          {1:~                               }|*10
+          {4:[No Name] [+]                   }|
+          {2:-- }{5:match 1 of 3}                 |
+        ]])
+        feed('<Esc>')
       end)
 
       -- oldtest: Test_pum_matchins_highlight_combine()
@@ -5733,6 +5851,39 @@ describe('builtin popupmenu', function()
           {10:aaa ^ bbb                        }|
           {1:~                               }|*18
           {2:-- INSERT --}                    |
+        ]])
+        feed('<Esc>')
+
+        -- Does not highlight the compl leader
+        command('set cot+=menuone,noselect')
+        feed('S<C-X><C-O>')
+        local pum_start = [[
+          {10:^                                }|
+          {n:foo            }{1:                 }|
+          {n:bar            }{1:                 }|
+          {n:你好           }{1:                 }|
+          {1:~                               }|*15
+          {2:-- }{8:Back at original}             |
+        ]]
+        screen:expect(pum_start)
+        feed('f<C-N>')
+        screen:expect([[
+          {10:f}{9:oo}{10:^                             }|
+          {s:foo            }{1:                 }|
+          {1:~                               }|*17
+          {2:-- }{5:match 1 of 3}                 |
+        ]])
+        feed('<C-E><ESC>')
+
+        command('set cot+=fuzzy')
+        feed('S<C-X><C-O>')
+        screen:expect(pum_start)
+        feed('f<C-N>')
+        screen:expect([[
+          {10:foo^                             }|
+          {s:foo            }{1:                 }|
+          {1:~                               }|*17
+          {2:-- }{5:match 1 of 3}                 |
         ]])
         feed('<Esc>')
       end)

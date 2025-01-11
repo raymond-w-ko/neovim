@@ -26,7 +26,6 @@ local api = n.api
 local is_ci = t.is_ci
 local is_os = t.is_os
 local new_pipename = n.new_pipename
-local spawn_argv = n.spawn_argv
 local set_session = n.set_session
 local write_file = t.write_file
 local eval = n.eval
@@ -3184,7 +3183,6 @@ describe('TUI', function()
           local req = args.data
           local payload = req:match('^\027P%+q([%x;]+)$')
           if payload and vim.text.hexdecode(payload) == 'Ms' then
-            vim.g.xtgettcap = 'Ms'
             local resp = string.format('\027P1+r%s=%s\027\\', payload, vim.text.hexencode('\027]52;;\027\\'))
             vim.api.nvim_chan_send(vim.bo[args.buf].channel, resp)
             return true
@@ -3202,9 +3200,6 @@ describe('TUI', function()
     }, {
       env = {
         VIMRUNTIME = os.getenv('VIMRUNTIME'),
-
-        -- Only queries when SSH_TTY is set
-        SSH_TTY = '/dev/pts/1',
       },
     })
 
@@ -3212,8 +3207,7 @@ describe('TUI', function()
 
     local child_session = n.connect(child_server)
     retry(nil, 1000, function()
-      eq('Ms', eval("get(g:, 'xtgettcap', '')"))
-      eq({ true, 'OSC 52' }, { child_session:request('nvim_eval', 'g:clipboard.name') })
+      eq({ true, { osc52 = true } }, { child_session:request('nvim_eval', 'g:termfeatures') })
     end)
   end)
 end)
@@ -3325,8 +3319,8 @@ describe('TUI as a client', function()
   end)
 
   it('connects to remote instance (with its own TUI)', function()
-    local server_super = spawn_argv(false) -- equivalent to clear()
-    local client_super = spawn_argv(true)
+    local server_super = n.new_session(false)
+    local client_super = n.new_session(true)
 
     set_session(server_super)
     local server_pipe = new_pipename()
@@ -3400,8 +3394,8 @@ describe('TUI as a client', function()
   end)
 
   it('connects to remote instance (--headless)', function()
-    local server = spawn_argv(false) -- equivalent to clear()
-    local client_super = spawn_argv(true, { env = { NVIM_LOG_FILE = testlog } })
+    local server = n.new_session(false)
+    local client_super = n.new_session(true, { env = { NVIM_LOG_FILE = testlog } })
 
     set_session(server)
     local server_pipe = api.nvim_get_vvar('servername')
@@ -3467,8 +3461,8 @@ describe('TUI as a client', function()
   end)
 
   local function test_remote_tui_quit(status)
-    local server_super = spawn_argv(false) -- equivalent to clear()
-    local client_super = spawn_argv(true)
+    local server_super = n.new_session(false)
+    local client_super = n.new_session(true)
 
     set_session(server_super)
     local server_pipe = new_pipename()

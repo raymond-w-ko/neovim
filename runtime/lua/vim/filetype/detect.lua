@@ -34,6 +34,12 @@ local matchregex = vim.filetype._matchregex
 -- can be detected from the first five lines of the file.
 --- @type vim.filetype.mapfn
 function M.asm(path, bufnr)
+  -- tiasm uses `* commment`
+  local lines = table.concat(getlines(bufnr, 1, 10), '\n')
+  if findany(lines, { '^%*', '\n%*', 'Texas Instruments Incorporated' }) then
+    return 'tiasm'
+  end
+
   local syntax = vim.b[bufnr].asmsyntax
   if not syntax or syntax == '' then
     syntax = M.asm_syntax(path, bufnr)
@@ -217,6 +223,24 @@ function M.cls(_, bufnr)
     return 'rexx'
   end
   return 'st'
+end
+
+--- *.cmd is close to a Batch file, but on OS/2 Rexx files and TI linker command files also use *.cmd.
+--- lnk: `/* comment */`, `// comment`, and `--linker-option=value`
+--- rexx: `/* comment */`, `-- comment`
+--- @type vim.filetype.mapfn
+function M.cmd(_, bufnr)
+  local lines = table.concat(getlines(bufnr, 1, 20))
+  if matchregex(lines, [[MEMORY\|SECTIONS\|\%(^\|\n\)--\S\|\%(^\|\n\)//]]) then
+    return 'lnk'
+  else
+    local line1 = getline(bufnr, 1)
+    if line1:find('^/%*') then
+      return 'rexx'
+    else
+      return 'dosbatch'
+    end
+  end
 end
 
 --- @type vim.filetype.mapfn
@@ -733,7 +757,7 @@ function M.html(_, bufnr)
     if
       matchregex(
         line,
-        [[@\(if\|for\|defer\|switch\)\|\*\(ngIf\|ngFor\|ngSwitch\|ngTemplateOutlet\)\|ng-template\|ng-content\|{{.*}}]]
+        [[@\(if\|for\|defer\|switch\)\|\*\(ngIf\|ngFor\|ngSwitch\|ngTemplateOutlet\)\|ng-template\|ng-content]]
       )
     then
       return 'htmlangular'
@@ -1406,6 +1430,15 @@ function M.sig(_, bufnr)
   end
 end
 
+--- @type vim.filetype.mapfn
+function M.sa(_, bufnr)
+  local lines = table.concat(getlines(bufnr, 1, 4), '\n')
+  if findany(lines, { '^;', '\n;' }) then
+    return 'tiasm'
+  end
+  return 'sather'
+end
+
 -- This function checks the first 25 lines of file extension "sc" to resolve
 -- detection between scala and SuperCollider
 --- @type vim.filetype.mapfn
@@ -1494,6 +1527,7 @@ local function sh(path, contents, name)
       vim.b[b].is_kornshell = nil
       vim.b[b].is_sh = nil
     end
+    return M.shell(path, contents, 'bash'), on_detect
     -- Ubuntu links sh to dash
   elseif matchregex(name, [[\<\(sh\|dash\)\>]]) then
     on_detect = function(b)

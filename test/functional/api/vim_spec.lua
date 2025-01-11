@@ -781,18 +781,6 @@ describe('API', function()
     end)
   end)
 
-  describe('nvim_notify', function()
-    it('can notify a info message', function()
-      api.nvim_notify('hello world', 2, {})
-    end)
-
-    it('can be overridden', function()
-      command('lua vim.notify = function(...) return 42 end')
-      eq(42, api.nvim_exec_lua("return vim.notify('Hello world')", {}))
-      api.nvim_notify('hello world', 4, {})
-    end)
-  end)
-
   describe('nvim_input', function()
     it('Vimscript error: does NOT fail, updates v:errmsg', function()
       local status, _ = pcall(api.nvim_input, ':call bogus_fn()<CR>')
@@ -3680,6 +3668,30 @@ describe('API', function()
       async_meths.nvim_echo({ { 'msg\nmsg' }, { 'msg' } }, false, {})
       eq('', exec_capture('messages'))
     end)
+
+    it('can print error message', function()
+      async_meths.nvim_echo({ { 'Error\nMessage' } }, false, { err = true })
+      screen:expect([[
+                                                |
+        {1:~                                       }|*3
+        {3:                                        }|
+        {9:Error}                                   |
+        {9:Message}                                 |
+        {6:Press ENTER or type command to continue}^ |
+      ]])
+      feed(':messages<CR>')
+      screen:expect([[
+        ^                                        |
+        {1:~                                       }|*6
+                                                |
+      ]])
+      async_meths.nvim_echo({ { 'Error' }, { 'Message', 'Special' } }, false, { err = true })
+      screen:expect([[
+        ^                                        |
+        {1:~                                       }|*6
+        {9:Error}{16:Message}                            |
+      ]])
+    end)
   end)
 
   describe('nvim_open_term', function()
@@ -5385,8 +5397,53 @@ describe('API', function()
         13                                                          |
       ]],
     })
-    -- takes buffer line count from correct buffer with "win" and {0, -1} "range"
-    api.nvim__redraw({ win = 0, range = { 0, -1 } })
+  end)
+
+  it('nvim__redraw range parameter', function()
+    Screen.new(10, 5)
+    fn.setline(1, fn.range(4))
+
+    exec_lua([[
+      _G.lines_list = {}
+      ns = vim.api.nvim_create_namespace('')
+      vim.api.nvim_set_decoration_provider(ns, {
+        on_win = function()
+        end,
+        on_line = function(_, _, _, line)
+          table.insert(_G.lines_list, line)
+        end,
+      })
+      function _G.get_lines()
+        local lines = _G.lines_list
+        _G.lines_list = {}
+        return lines
+      end
+    ]])
+
+    api.nvim__redraw({ flush = true, valid = false })
+    exec_lua('_G.get_lines()')
+
+    local actual_lines = {}
+    local function test(range)
+      api.nvim__redraw({ win = 0, range = range })
+      table.insert(actual_lines, exec_lua('return _G.get_lines()'))
+    end
+
+    test({ 0, -1 })
+    test({ 2, 2 ^ 31 })
+    test({ 2, 2 ^ 32 })
+    test({ 2 ^ 31 - 1, 2 })
+    test({ 2 ^ 32 - 1, 2 })
+
+    local expected_lines = {
+      { 0, 1, 2, 3 },
+      { 2, 3 },
+      { 2, 3 },
+      {},
+      {},
+    }
+    eq(expected_lines, actual_lines)
+
     n.assert_alive()
   end)
 end)

@@ -223,10 +223,10 @@ void ui_refresh(void)
   // Reset 'cmdheight' for all tabpages when ext_messages toggles.
   if (had_message != ui_ext[kUIMessages]) {
     set_option_value(kOptCmdheight, NUMBER_OPTVAL(had_message), 0);
-    command_height();
     FOR_ALL_TABS(tp) {
       tp->tp_ch_used = had_message;
     }
+    msg_scroll_flush();
   }
 
   if (!ui_active()) {
@@ -717,10 +717,10 @@ void ui_call_event(char *name, bool fast, Array args)
   bool handled = false;
   UIEventCallback *event_cb;
 
-  // Prompt messages should be shown immediately so must be safe
+  // Return prompt is still a non-fast event, other prompt messages are
+  // followed by a "cmdline_show" event.
   if (strcmp(name, "msg_show") == 0) {
-    char *kind = args.items[0].data.string.data;
-    fast = !kind || ((strncmp(kind, "confirm", 7) != 0 && strstr(kind, "_prompt") == NULL));
+    fast = !strequal(args.items[0].data.string.data, "return_prompt");
   }
 
   map_foreach(&ui_event_cbs, ui_event_ns_id, event_cb, {

@@ -702,14 +702,14 @@ local wait_result_reason = { [-1] = 'timeout', [-2] = 'interrupted', [-3] = 'err
 ---
 --- @param ... string List to write to the buffer
 local function err_message(...)
-  local message = table.concat(vim.iter({ ... }):flatten():totable())
+  local chunks = { { table.concat({ ... }) } }
   if vim.in_fast_event() then
     vim.schedule(function()
-      api.nvim_err_writeln(message)
+      vim.api.nvim_echo(chunks, true, { err = true })
       api.nvim_command('redraw')
     end)
   else
-    api.nvim_err_writeln(message)
+    vim.api.nvim_echo(chunks, true, { err = true })
     api.nvim_command('redraw')
   end
 end
@@ -805,6 +805,8 @@ function Client:stop(force)
     return
   end
 
+  vim.lsp._watchfiles.cancel(self.id)
+
   if force or not self.initialized or self._graceful_shutdown_failed then
     rpc.terminate()
     return
@@ -819,7 +821,6 @@ function Client:stop(force)
       rpc.terminate()
       self._graceful_shutdown_failed = true
     end
-    vim.lsp._watchfiles.cancel(self.id)
   end)
 end
 

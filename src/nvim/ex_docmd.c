@@ -982,7 +982,7 @@ void handle_did_throw(void)
   if (messages != NULL) {
     do {
       msglist_T *next = messages->next;
-      emsg_multiline(messages->msg, messages->multiline);
+      emsg_multiline(messages->msg, "emsg", HLF_E, messages->multiline);
       xfree(messages->msg);
       xfree(messages->sfile);
       xfree(messages);
@@ -2201,7 +2201,7 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
           errormsg = _("E493: Backwards range given");
           goto doend;
         }
-        if (ask_yesno(_("Backwards range given, OK to swap"), false) != 'y') {
+        if (ask_yesno(_("Backwards range given, OK to swap")) != 'y') {
           goto doend;
         }
       }

@@ -323,6 +323,20 @@ describe('vim.fs', function()
       eq('foo/bar/baz', vim.fs.joinpath('foo', 'bar', 'baz'))
       eq('foo/bar/baz', vim.fs.joinpath('foo', '/bar/', '/baz'))
     end)
+    it('rewrites backslashes on Windows', function()
+      if is_os('win') then
+        eq('foo/bar/baz/zub/', vim.fs.joinpath([[foo]], [[\\bar\\\\baz]], [[zub\]]))
+      else
+        eq([[foo/\\bar\\\\baz/zub\]], vim.fs.joinpath([[foo]], [[\\bar\\\\baz]], [[zub\]]))
+      end
+    end)
+    it('strips redundant slashes', function()
+      if is_os('win') then
+        eq('foo/bar/baz/zub/', vim.fs.joinpath([[foo//]], [[\\bar\\\\baz]], [[zub\]]))
+      else
+        eq('foo/bar/baz/zub/', vim.fs.joinpath([[foo]], [[//bar////baz]], [[zub/]]))
+      end
+    end)
   end)
 
   describe('normalize()', function()
@@ -347,8 +361,8 @@ describe('vim.fs', function()
     end)
 
     -- Opts required for testing posix paths and win paths
-    local posix_opts = is_os('win') and { win = false } or {}
-    local win_opts = is_os('win') and {} or { win = true }
+    local posix_opts = { win = false }
+    local win_opts = { win = true }
 
     it('preserves leading double slashes in POSIX paths', function()
       eq('//foo', vim.fs.normalize('//foo', posix_opts))
@@ -357,6 +371,29 @@ describe('vim.fs', function()
       eq('//', vim.fs.normalize('//', posix_opts))
       eq('/', vim.fs.normalize('///', posix_opts))
       eq('/foo/bar', vim.fs.normalize('/foo//bar////', posix_opts))
+    end)
+
+    it('normalizes drive letter', function()
+      eq('C:/', vim.fs.normalize('C:/', win_opts))
+      eq('C:/', vim.fs.normalize('c:/', win_opts))
+      eq('D:/', vim.fs.normalize('d:/', win_opts))
+      eq('C:', vim.fs.normalize('C:', win_opts))
+      eq('C:', vim.fs.normalize('c:', win_opts))
+      eq('D:', vim.fs.normalize('d:', win_opts))
+      eq('C:/foo/test', vim.fs.normalize('C:/foo/test/', win_opts))
+      eq('C:/foo/test', vim.fs.normalize('c:/foo/test/', win_opts))
+      eq('D:foo/test', vim.fs.normalize('D:foo/test/', win_opts))
+      eq('D:foo/test', vim.fs.normalize('d:foo/test/', win_opts))
+    end)
+
+    it('always treats paths as case-sensitive #31833', function()
+      eq('TEST', vim.fs.normalize('TEST', win_opts))
+      eq('test', vim.fs.normalize('test', win_opts))
+      eq('C:/FOO/test', vim.fs.normalize('C:/FOO/test', win_opts))
+      eq('C:/foo/test', vim.fs.normalize('C:/foo/test', win_opts))
+      eq('//SERVER/SHARE/FOO/BAR', vim.fs.normalize('//SERVER/SHARE/FOO/BAR', win_opts))
+      eq('//server/share/foo/bar', vim.fs.normalize('//server/share/foo/bar', win_opts))
+      eq('C:/FOO/test', vim.fs.normalize('c:/FOO/test', win_opts))
     end)
 
     it('allows backslashes on unix-based os', function()
@@ -453,5 +490,40 @@ describe('vim.fs', function()
         eq('/foo', vim.fs.normalize('/foo/../../foo', posix_opts))
       end)
     end)
+  end)
+
+  describe('abspath()', function()
+    local cwd = is_os('win') and vim.uv.cwd():gsub('\\', '/') or vim.uv.cwd()
+    local home = is_os('win') and vim.uv.os_homedir():gsub('\\', '/') or vim.uv.os_homedir()
+
+    it('works', function()
+      eq(cwd .. '/foo', vim.fs.abspath('foo'))
+      eq(cwd .. '/././foo', vim.fs.abspath('././foo'))
+      eq(cwd .. '/.././../foo', vim.fs.abspath('.././../foo'))
+    end)
+
+    it('works with absolute paths', function()
+      if is_os('win') then
+        eq([[C:/foo]], vim.fs.abspath([[C:\foo]]))
+        eq([[C:/foo/../.]], vim.fs.abspath([[C:\foo\..\.]]))
+        eq('//foo/bar', vim.fs.abspath('\\\\foo\\bar'))
+      else
+        eq('/foo/../.', vim.fs.abspath('/foo/../.'))
+        eq('/foo/bar', vim.fs.abspath('/foo/bar'))
+      end
+    end)
+
+    it('expands ~', function()
+      eq(home .. '/foo', vim.fs.abspath('~/foo'))
+      eq(home .. '/./.././foo', vim.fs.abspath('~/./.././foo'))
+    end)
+
+    if is_os('win') then
+      it('works with drive-specific cwd on Windows', function()
+        local cwd_drive = cwd:match('^%w:')
+
+        eq(cwd .. '/foo', vim.fs.abspath(cwd_drive .. 'foo'))
+      end)
+    end
   end)
 end)
