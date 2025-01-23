@@ -1012,6 +1012,97 @@ describe('float window', function()
     end)
   end)
 
+  it('placed relative to tabline and laststatus', function()
+    local screen = Screen.new(20, 10)
+    screen:add_extra_attr_ids({ [100] = { bold = true, foreground = Screen.colors.Magenta } })
+    command('set showtabline=1 laststatus=1')
+    api.nvim_open_win(0, false, {
+      relative = 'laststatus',
+      border = 'single',
+      anchor = 'SE',
+      width = 5,
+      height = 1,
+      row = 0,
+      col = 1000,
+    })
+    local tabwin = api.nvim_open_win(0, false, {
+      relative = 'tabline',
+      border = 'single',
+      width = 5,
+      height = 1,
+      row = 0,
+      col = 1000,
+    })
+    screen:expect([[
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                   }|*3
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('tabnew | tabnext')
+    screen:expect([[
+      {5: }{100:3}{5:  Name] }{24: No Name]X}|
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                   }|*2
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('vsplit')
+    screen:expect([[
+      {5: }{100:4}{5:  Name] }{24: No Name]X}|
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                 }{2:│}{1:~}|
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {3:[No Name]          }{2:<}|
+                          |
+    ]])
+    command('quit')
+    api.nvim_win_set_config(tabwin, {
+      relative = 'tabline',
+      border = 'single',
+      width = 5,
+      height = 1,
+      row = 1,
+      col = 0,
+    })
+    screen:expect([[
+      {5: }{100:3}{5:  Name] }{24: No Name]X}|
+      ^                    |
+      {2:┌─────┐}{1:             }|
+      {2:│}{4:     }{2:│}{1:             }|
+      {2:└─────┘}{1:             }|
+      {1:~                   }|
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('tabonly')
+    screen:expect([[
+      ^                    |
+      {2:┌─────┐}{1:             }|
+      {2:│}{4:     }{2:│}{1:             }|
+      {2:└─────┘}{1:             }|
+      {1:~                   }|*2
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+  end)
+
   local function with_ext_multigrid(multigrid)
     local screen, attrs
     before_each(function()
@@ -1618,31 +1709,34 @@ describe('float window', function()
       feed('ix<cr>y<cr><esc>gg')
       api.nvim_open_win(0, false, {relative='editor', width=20, height=4, row=4, col=10, style='minimal'})
       if multigrid then
-        screen:expect{grid=[[
-        ## grid 1
-          [2:----------------------------------------]|*6
-          [3:----------------------------------------]|
-        ## grid 2
-          {20:   1}{30:   }{22:^x}{21:                                }|
-          {14:   2}{19:   }{22:y}                                |
-          {14:   3}{19:   }{22: }                                |
-          {0:~                                       }|*3
-        ## grid 3
-                                                  |
-        ## grid 4
-          {15:x                   }|
-          {15:y                   }|
-          {15:                    }|*2
-        ]], float_pos={[4] = {1001, "NW", 1, 4, 10, true}}}
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            {20:   1}{19:   }{22:^x}{21:                                }|
+            {14:   2}{19:   }{22:y}                                |
+            {14:   3}{19:   }{22: }                                |
+            {0:~                                       }|*3
+          ## grid 3
+                                                    |
+          ## grid 4
+            {15:x                   }|
+            {15:y                   }|
+            {15:                    }|*2
+          ]],
+          float_pos = { [4] = { 1001, "NW", 1, 4, 10, true, 50 } },
+        })
       else
-        screen:expect{grid=[[
-          {20:   1}{30:   }{22:^x}{21:                                }|
+        screen:expect([[
+          {20:   1}{19:   }{22:^x}{21:                                }|
           {14:   2}{19:   }{22:y}                                |
           {14:   3}{19:   }{22: }  {15:x                   }          |
           {0:~         }{15:y                   }{0:          }|
           {0:~         }{15:                    }{0:          }|*2
                                                   |
-        ]]}
+        ]])
       end
     end)
 
