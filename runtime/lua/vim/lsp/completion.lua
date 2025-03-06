@@ -1,3 +1,25 @@
+--- @brief
+--- The `vim.lsp.completion` module enables insert-mode completion driven by an LSP server. Call
+--- `enable()` to make it available through Nvim builtin completion (via the |CompleteDone| event).
+--- Specify `autotrigger=true` to activate "auto-completion" when you type any of the server-defined
+--- `triggerCharacters`.
+---
+--- Example: activate LSP-driven auto-completion:
+--- ```lua
+--- vim.lsp.start({
+---   name = 'ts_ls',
+---   cmd = …,
+---   on_attach = function(client, bufnr)
+---     vim.lsp.completion.enable(true, client.id, bufnr, {
+---       autotrigger = true,
+---       convert = function(item)
+---         return { abbr = item.label:gsub('%b()', '') }
+---       end,
+---     })
+---   end,
+--- })
+--- ```
+
 local M = {}
 
 local api = vim.api
@@ -132,7 +154,7 @@ end
 --- @return string
 local function get_completion_word(item, prefix, match)
   if item.insertTextFormat == protocol.InsertTextFormat.Snippet then
-    if item.textEdit then
+    if item.textEdit or (item.insertText and item.insertText ~= '') then
       -- Use label instead of text if text has different starting characters.
       -- label is used as abbr (=displayed), but word is used for filtering
       -- This is required for things like postfix completion.
@@ -154,8 +176,6 @@ local function get_completion_word(item, prefix, match)
       else
         return word
       end
-    elseif item.insertText and item.insertText ~= '' then
-      return parse_snippet(item.insertText)
     else
       return item.label
     end
@@ -493,6 +513,7 @@ local function trigger(bufnr, clients)
       end
     end
     local start_col = (server_start_boundary or word_boundary) + 1
+    Context.cursor = { cursor_row, start_col }
     vim.fn.complete(start_col, matches)
   end)
 
@@ -518,11 +539,14 @@ local function on_insert_char_pre(handle)
   end
 
   local char = api.nvim_get_vvar('char')
-  if not completion_timer and handle.triggers[char] then
+  local matched_clients = handle.triggers[char]
+  if not completion_timer and matched_clients then
     completion_timer = assert(vim.uv.new_timer())
     completion_timer:start(25, 0, function()
       reset_timer()
-      vim.schedule(M.trigger)
+      vim.schedule(function()
+        trigger(api.nvim_get_current_buf(), matched_clients)
+      end)
     end)
   end
 end
@@ -569,8 +593,14 @@ local function on_complete_done()
     end
 
     -- Remove the already inserted word.
-    local start_char = cursor_col - #completed_item.word
-    api.nvim_buf_set_text(bufnr, cursor_row, start_char, cursor_row, cursor_col, { '' })
+    api.nvim_buf_set_text(
+      bufnr,
+      Context.cursor[1] - 1,
+      Context.cursor[2] - 1,
+      cursor_row,
+      cursor_col,
+      { '' }
+    )
   end
 
   local function apply_snippet_and_command()
@@ -600,13 +630,14 @@ local function on_complete_done()
       clear_word()
       if err then
         vim.notify_once(err.message, vim.log.levels.WARN)
-      elseif result and result.additionalTextEdits then
-        lsp.util.apply_text_edits(result.additionalTextEdits, bufnr, position_encoding)
+      elseif result then
+        if result.additionalTextEdits then
+          lsp.util.apply_text_edits(result.additionalTextEdits, bufnr, position_encoding)
+        end
         if result.command then
           completion_item.command = result.command
         end
       end
-
       apply_snippet_and_command()
     end, bufnr)
   else
@@ -740,7 +771,7 @@ function M.enable(enable, client_id, bufnr, opts)
   end
 end
 
---- Trigger LSP completion in the current buffer.
+--- Triggers LSP completion once in the current buffer.
 function M.trigger()
   local bufnr = api.nvim_get_current_buf()
   local clients = (buf_handles[bufnr] or {}).clients or {}

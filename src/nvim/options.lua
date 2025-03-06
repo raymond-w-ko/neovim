@@ -1466,10 +1466,10 @@ local options = {
       flags = true,
       deny_duplicates = true,
       desc = [=[
-        A comma-separated list of |complete-items| that controls the alignment
-        and display order of items in the popup menu during Insert mode
-        completion. The supported values are abbr, kind, and menu. These
-        options allow to customize how the completion items are shown in the
+        A comma-separated list of strings that controls the alignment and
+        display order of items in the popup menu during Insert mode
+        completion.  The supported values are "abbr", "kind", and "menu".
+        These values allow customizing how |complete-items| are shown in the
         popup menu.  Note: must always contain those three values in any
         order.
       ]=],
@@ -1502,36 +1502,6 @@ local options = {
         A comma-separated list of options for Insert mode completion
         |ins-completion|.  The supported values are:
 
-           menu	    Use a popup menu to show the possible completions.  The
-        	    menu is only shown when there is more than one match and
-        	    sufficient colors are available.  |ins-completion-menu|
-
-           menuone  Use the popup menu also when there is only one match.
-        	    Useful when there is additional information about the
-        	    match, e.g., what file it comes from.
-
-           longest  Only insert the longest common text of the matches.  If
-        	    the menu is displayed you can use CTRL-L to add more
-        	    characters.  Whether case is ignored depends on the kind
-        	    of completion.  For buffer text the 'ignorecase' option is
-        	    used.
-
-           preview  Show extra information about the currently selected
-        	    completion in the preview window.  Only works in
-        	    combination with "menu" or "menuone".
-
-           popup    Show extra information about the currently selected
-        	    completion in a popup window.  Only works in combination
-        	    with "menu" or "menuone".  Overrides "preview".
-
-           noinsert Do not insert any text for a match until the user selects
-        	    a match from the menu. Only works in combination with
-        	    "menu" or "menuone". No effect if "longest" is present.
-
-           noselect Same as "noinsert", except that no menu item is
-        	    pre-selected. If both "noinsert" and "noselect" are
-        	    present, "noselect" has precedence.
-
            fuzzy    Enable |fuzzy-matching| for completion candidates. This
         	    allows for more flexible and intuitive matching, where
         	    characters can be skipped and matches can be found even
@@ -1540,15 +1510,45 @@ local options = {
         	    list of alternatives, but not how the candidates are
         	    collected (using different completion types).
 
+           longest  Only insert the longest common text of the matches.  If
+        	    the menu is displayed you can use CTRL-L to add more
+        	    characters.  Whether case is ignored depends on the kind
+        	    of completion.  For buffer text the 'ignorecase' option is
+        	    used.
+
+           menu	    Use a popup menu to show the possible completions.  The
+        	    menu is only shown when there is more than one match and
+        	    sufficient colors are available.  |ins-completion-menu|
+
+           menuone  Use the popup menu also when there is only one match.
+        	    Useful when there is additional information about the
+        	    match, e.g., what file it comes from.
+
+           noinsert Do not insert any text for a match until the user selects
+        	    a match from the menu.  Only works in combination with
+        	    "menu" or "menuone". No effect if "longest" is present.
+
+           noselect Same as "noinsert", except that no menu item is
+        	    pre-selected.  If both "noinsert" and "noselect" are
+        	    present, "noselect" has precedence.
+
            nosort   Disable sorting of completion candidates based on fuzzy
-        	    scores when "fuzzy" is enabled. Candidates will appear
+        	    scores when "fuzzy" is enabled.  Candidates will appear
         	    in their original order.
+
+           popup    Show extra information about the currently selected
+        	    completion in a popup window.  Only works in combination
+        	    with "menu" or "menuone".  Overrides "preview".
 
            preinsert
         	    Preinsert the portion of the first candidate word that is
         	    not part of the current completion leader and using the
-        	    |hl-ComplMatchIns| highlight group. Does not work when
-        	    "fuzzy" is also included.
+        	    |hl-ComplMatchIns| highlight group.  In order for it to
+        	    work, "fuzzy" must not be set and "menuone" must be set.
+
+           preview  Show extra information about the currently selected
+        	    completion in the preview window.  Only works in
+        	    combination with "menu" or "menuone".
       ]=],
       full_name = 'completeopt',
       list = 'onecomma',
@@ -2152,7 +2152,7 @@ local options = {
     {
       abbreviation = 'dip',
       cb = 'did_set_diffopt',
-      defaults = 'internal,filler,closeoff',
+      defaults = 'internal,filler,closeoff,linematch:40',
       -- Keep this in sync with diffopt_changed().
       values = {
         'filler',
@@ -2170,19 +2170,28 @@ local options = {
         'followwrap',
         'internal',
         'indent-heuristic',
-        'linematch:',
         { 'algorithm:', { 'myers', 'minimal', 'patience', 'histogram' } },
+        'linematch:',
       },
       deny_duplicates = true,
       desc = [=[
         Option settings for diff mode.  It can consist of the following items.
         All are optional.  Items must be separated by a comma.
 
-        	filler		Show filler lines, to keep the text
-        			synchronized with a window that has inserted
-        			lines at the same position.  Mostly useful
-        			when windows are side-by-side and 'scrollbind'
-        			is set.
+        	algorithm:{text} Use the specified diff algorithm with the
+        			internal diff engine. Currently supported
+        			algorithms are:
+        			myers      the default algorithm
+        			minimal    spend extra time to generate the
+        				   smallest possible diff
+        			patience   patience diff algorithm
+        			histogram  histogram diff algorithm
+
+        	closeoff	When a window is closed where 'diff' is set
+        			and there is only one window remaining in the
+        			same tab page with 'diff' set, execute
+        			`:diffoff` in that window.  This undoes a
+        			`:diffsplit` command.
 
         	context:{n}	Use a context of {n} lines between a change
         			and a fold that contains unchanged lines.
@@ -2192,6 +2201,23 @@ local options = {
         			for a deleted line. Set it to a very large
         			value (999999) to disable folding completely.
         			See |fold-diff|.
+
+        	filler		Show filler lines, to keep the text
+        			synchronized with a window that has inserted
+        			lines at the same position.  Mostly useful
+        			when windows are side-by-side and 'scrollbind'
+        			is set.
+
+        	foldcolumn:{n}	Set the 'foldcolumn' option to {n} when
+        			starting diff mode.  Without this 2 is used.
+
+        	followwrap	Follow the 'wrap' option and leave as it is.
+
+        	horizontal	Start diff mode with horizontal splits (unless
+        			explicitly specified otherwise).
+
+        	hiddenoff	Do not use diff mode for a buffer when it
+        			becomes hidden.
 
         	iblank		Ignore changes where lines are all blank.  Adds
         			the "-B" flag to the "diff" command if
@@ -2205,6 +2231,17 @@ local options = {
         	icase		Ignore changes in case of text.  "a" and "A"
         			are considered the same.  Adds the "-i" flag
         			to the "diff" command if 'diffexpr' is empty.
+
+        	indent-heuristic
+        			Use the indent heuristic for the internal
+        			diff library.
+
+        	internal	Use the internal diff library.  This is
+        			ignored when 'diffexpr' is set.  *E960*
+        			When running out of memory when writing a
+        			buffer this item will be ignored for diffs
+        			involving that buffer.  Set the 'verbose'
+        			option to see when this happens.
 
         	iwhite		Ignore changes in amount of white space.  Adds
         			the "-b" flag to the "diff" command if
@@ -2225,55 +2262,18 @@ local options = {
         			of the "diff" command for what this does
         			exactly.
 
-        	horizontal	Start diff mode with horizontal splits (unless
-        			explicitly specified otherwise).
+        	linematch:{n}   Align and mark changes between the most
+        			similar lines between the buffers. When the
+        			total number of lines in the diff hunk exceeds
+        			{n}, the lines will not be aligned because for
+        			very large diff hunks there will be a
+        			noticeable lag. A reasonable setting is
+        			"linematch:60", as this will enable alignment
+        			for a 2 buffer diff hunk of 30 lines each,
+        			or a 3 buffer diff hunk of 20 lines each.
 
         	vertical	Start diff mode with vertical splits (unless
         			explicitly specified otherwise).
-
-        	closeoff	When a window is closed where 'diff' is set
-        			and there is only one window remaining in the
-        			same tab page with 'diff' set, execute
-        			`:diffoff` in that window.  This undoes a
-        			`:diffsplit` command.
-
-        	hiddenoff	Do not use diff mode for a buffer when it
-        			becomes hidden.
-
-        	foldcolumn:{n}	Set the 'foldcolumn' option to {n} when
-        			starting diff mode.  Without this 2 is used.
-
-        	followwrap	Follow the 'wrap' option and leave as it is.
-
-        	internal	Use the internal diff library.  This is
-        			ignored when 'diffexpr' is set.  *E960*
-        			When running out of memory when writing a
-        			buffer this item will be ignored for diffs
-        			involving that buffer.  Set the 'verbose'
-        			option to see when this happens.
-
-        	indent-heuristic
-        			Use the indent heuristic for the internal
-        			diff library.
-
-        	linematch:{n}   Enable a second stage diff on each generated
-        			hunk in order to align lines. When the total
-        			number of lines in a hunk exceeds {n}, the
-        			second stage diff will not be performed as
-        			very large hunks can cause noticeable lag. A
-        			recommended setting is "linematch:60", as this
-        			will enable alignment for a 2 buffer diff with
-        			hunks of up to 30 lines each, or a 3 buffer
-        			diff with hunks of up to 20 lines each.
-
-        	algorithm:{text} Use the specified diff algorithm with the
-        			internal diff engine. Currently supported
-        			algorithms are:
-        			myers      the default algorithm
-        			minimal    spend extra time to generate the
-        				   smallest possible diff
-        			patience   patience diff algorithm
-        			histogram  histogram diff algorithm
 
         Examples: >vim
         	set diffopt=internal,filler,context:4
@@ -2626,6 +2626,23 @@ local options = {
       short_desc = N_('autocommand events that are ignored'),
       type = 'string',
       varname = 'p_ei',
+    },
+    {
+      abbreviation = 'eiw',
+      cb = 'did_set_eventignore',
+      defaults = '',
+      deny_duplicates = true,
+      desc = [=[
+        Similar to 'eventignore' but applies to a particular window and its
+        buffers, for which window and buffer related autocommands can be
+        ignored indefinitely without affecting the global 'eventignore'.
+      ]=],
+      expand_cb = 'expand_set_eventignore',
+      full_name = 'eventignorewin',
+      list = 'onecomma',
+      scope = { 'win' },
+      short_desc = N_('autocommand events that are ignored in a window'),
+      type = 'string',
     },
     {
       abbreviation = 'et',
@@ -5785,8 +5802,8 @@ local options = {
       defaults = false,
       desc = [=[
         When on, mouse move events are delivered to the input queue and are
-        available for mapping. The default, off, avoids the mouse movement
-        overhead except when needed.
+        available for mapping |<MouseMove>|. The default, off, avoids the mouse
+        movement overhead except when needed.
         Warning: Setting this option can make pending mappings to be aborted
         when the mouse is moved.
       ]=],
@@ -5794,6 +5811,7 @@ local options = {
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('deliver mouse move events to input queue'),
+      tags = { 'mouse-hover' },
       type = 'boolean',
       varname = 'p_mousemev',
     },
@@ -10002,7 +10020,7 @@ local options = {
       cb = 'did_set_wildmode',
       defaults = 'full',
       -- Keep this in sync with check_opt_wim().
-      values = { 'full', 'longest', 'list', 'lastused' },
+      values = { 'full', 'longest', 'list', 'lastused', 'noselect' },
       flags = true,
       deny_duplicates = false,
       desc = [=[
@@ -10024,7 +10042,10 @@ local options = {
         "lastused"	When completing buffer names and more than one buffer
         		matches, sort buffers by time last used (other than
         		the current buffer).
-        When there is only a single match, it is fully completed in all cases.
+        "noselect"	Do not pre-select first menu item and start 'wildmenu'
+        		if it is enabled.
+        When there is only a single match, it is fully completed in all cases
+        except when "noselect" is present.
 
         Examples of useful colon-separated values:
         "longest:full"	Like "longest", but also start 'wildmenu' if it is
@@ -10047,7 +10068,11 @@ local options = {
         	set wildmode=list,full
         <	List all matches without completing, then each full match >vim
         	set wildmode=longest,list
-        <	Complete longest common string, then list alternatives.
+        <	Complete longest common string, then list alternatives >vim
+        	set wildmode=noselect:full
+        <	Display 'wildmenu' without completing, then each full match >vim
+        	set wildmode=noselect:lastused,full
+        <	Same as above, but sort buffers by time last used.
         More info here: |cmdline-completion|.
       ]=],
       full_name = 'wildmode',

@@ -430,12 +430,10 @@ static int *pum_compute_text_attrs(char *text, hlf_T hlf, int user_hlattr)
   size_t leader_len = strlen(leader);
 
   garray_T *ga = NULL;
-  bool matched_start = false;
+  int matched_len = -1;
 
   if (in_fuzzy) {
     ga = fuzzy_match_str_with_pos(text, leader);
-  } else {
-    matched_start = mb_strnicmp(text, leader, leader_len) == 0;
   }
 
   const char *ptr = text;
@@ -456,10 +454,16 @@ static int *pum_compute_text_attrs(char *text, hlf_T hlf, int user_hlattr)
           break;
         }
       }
-    } else if (matched_start && ptr < text + leader_len) {
-      new_attr = win_hl_attr(curwin, is_select ? HLF_PMSI : HLF_PMNI);
-      new_attr = hl_combine_attr(win_hl_attr(curwin, HLF_PMNI), new_attr);
-      new_attr = hl_combine_attr(win_hl_attr(curwin, (int)hlf), new_attr);
+    } else {
+      if (matched_len < 0 && mb_strnicmp(ptr, leader, leader_len) == 0) {
+        matched_len = (int)leader_len;
+      }
+      if (matched_len > 0) {
+        new_attr = win_hl_attr(curwin, is_select ? HLF_PMSI : HLF_PMNI);
+        new_attr = hl_combine_attr(win_hl_attr(curwin, HLF_PMNI), new_attr);
+        new_attr = hl_combine_attr(win_hl_attr(curwin, (int)hlf), new_attr);
+        matched_len--;
+      }
     }
 
     new_attr = hl_combine_attr(win_hl_attr(curwin, HLF_PNI), new_attr);
@@ -871,6 +875,7 @@ win_T *pum_set_info(int selected, char *info)
     if (!wp) {
       return NULL;
     }
+    wp->w_p_wfb = true;
   }
   linenr_T lnum = 0;
   int max_info_width = 0;
@@ -915,7 +920,8 @@ static bool pum_set_selected(int n, int repeat)
   if (use_float && (pum_selected < 0 || pum_array[pum_selected].pum_info == NULL)) {
     win_T *wp = win_float_find_preview();
     if (wp) {
-      win_close(wp, true, true);
+      wp->w_config.hide = true;
+      win_config_float(wp, wp->w_config);
     }
   }
 

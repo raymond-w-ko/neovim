@@ -1208,8 +1208,8 @@ func Test_complete_cmdline()
   call assert_equal('abcxyz(', getline(3))
   com! -buffer TestCommand1 echo 'TestCommand1'
   com! -buffer TestCommand2 echo 'TestCommand2'
-  write TestCommand1Test
-  write TestCommand2Test
+  write! TestCommand1Test
+  write! TestCommand2Test
   " Test repeating <CTRL-X> <CTRL-V> and switching to another CTRL-X mode
   exe "normal oT\<C-X>\<C-V>\<C-X>\<C-V>\<C-X>\<C-F>\<Esc>"
   call assert_equal('TestCommand2Test', getline(4))
@@ -2767,6 +2767,8 @@ func Test_complete_fuzzy_match()
   func OnPumChange()
     let g:item = get(v:event, 'completed_item', {})
     let g:word = get(g:item, 'word', v:null)
+    let g:abbr = get(g:item, 'abbr', v:null)
+    let g:selected = get(complete_info(['selected']), 'selected')
   endfunction
 
   augroup AAAAA_Group
@@ -2835,7 +2837,7 @@ func Test_complete_fuzzy_match()
   call setline(1, ['Text', 'ToText', ''])
   call cursor(2, 1)
   call feedkeys("STe\<C-X>\<C-N>x\<CR>\<Esc>0", 'tx!')
-  call assert_equal('Tex', getline('.'))
+  call assert_equal('Tex', getline(line('.') - 1))
 
   " test case for nosort option
   set cot=menuone,menu,noinsert,fuzzy,nosort
@@ -2857,6 +2859,28 @@ func Test_complete_fuzzy_match()
   call feedkeys("S\<C-x>\<C-o>fooB\<C-Y>", 'tx')
   call assert_equal('fooBaz', getline('.'))
 
+  set cot=menuone,fuzzy,nosort
+  func CompAnother()
+    call complete(col('.'), [#{word: "do" }, #{word: "echo"}, #{word: "for (${1:expr1}, ${2:expr2}, ${3:expr3}) {\n\t$0\n}", abbr: "for" }, #{word: "foo"}])
+    return ''
+  endfunc
+  call feedkeys("i\<C-R>=CompAnother()\<CR>\<C-N>\<C-N>", 'tx')
+  call assert_equal("for", g:abbr)
+  call assert_equal(2, g:selected)
+
+  set cot+=noinsert
+  call feedkeys("i\<C-R>=CompAnother()\<CR>f", 'tx')
+  call assert_equal("for", g:abbr)
+  call assert_equal(2, g:selected)
+
+  set cot=menu,menuone,noselect,fuzzy
+  call feedkeys("i\<C-R>=CompAnother()\<CR>\<C-N>\<C-N>\<C-N>\<C-N>", 'tx')
+  call assert_equal("foo", g:word)
+  call feedkeys("i\<C-R>=CompAnother()\<CR>\<C-P>", 'tx')
+  call assert_equal("foo", g:word)
+  call feedkeys("i\<C-R>=CompAnother()\<CR>\<C-P>\<C-P>", 'tx')
+  call assert_equal("for", g:abbr)
+
   " clean up
   set omnifunc=
   bw!
@@ -2866,8 +2890,11 @@ func Test_complete_fuzzy_match()
   delfunc OnPumChange
   delfunc Omni_test
   delfunc Comp
+  delfunc CompAnother
   unlet g:item
   unlet g:word
+  unlet g:selected
+  unlet g:abbr
 endfunc
 
 " Check that tie breaking is stable for completeopt+=fuzzy (which should
@@ -3042,6 +3069,14 @@ function Test_completeopt_preinsert()
   call assert_equal("fo ", getline('.'))
   call assert_equal(3, col('.'))
 
+  call feedkeys("She\<C-X>\<C-N>\<C-U>", 'tx')
+  call assert_equal("", getline('.'))
+  call assert_equal(1, col('.'))
+
+  call feedkeys("She\<C-X>\<C-N>\<C-W>", 'tx')
+  call assert_equal("", getline('.'))
+  call assert_equal(1, col('.'))
+
   " whole line
   call feedkeys("Shello hero\<CR>\<C-X>\<C-L>", 'tx')
   call assert_equal("hello hero", getline('.'))
@@ -3050,6 +3085,10 @@ function Test_completeopt_preinsert()
   call feedkeys("Shello hero\<CR>he\<C-X>\<C-L>", 'tx')
   call assert_equal("hello hero", getline('.'))
   call assert_equal(2, col('.'))
+
+  call feedkeys("Shello hero\<CR>h\<C-X>\<C-N>er", 'tx')
+  call assert_equal("hero", getline('.'))
+  call assert_equal(3, col('.'))
 
   " can not work with fuzzy
   set cot+=fuzzy
@@ -3071,8 +3110,63 @@ function Test_completeopt_preinsert()
   call assert_equal("fobar", getline('.'))
   call assert_equal(5, col('.'))
 
+  " When the pum is not visible, the preinsert has no effect
+  set cot=preinsert
+  call feedkeys("Sfoo1 foo2\<CR>f\<C-X>\<C-N>bar", 'tx')
+  call assert_equal("foo1bar", getline('.'))
+  call assert_equal(7, col('.'))
+
+  set cot=preinsert,menuone
+  call feedkeys("Sfoo1 foo2\<CR>f\<C-X>\<C-N>", 'tx')
+  call assert_equal("foo1", getline('.'))
+  call assert_equal(1, col('.'))
+
   bw!
   set cot&
+  set omnifunc&
+  delfunc Omni_test
+endfunc
+
+" Check that mark positions are correct after triggering multiline completion.
+func Test_complete_multiline_marks()
+  func Omni_test(findstart, base)
+    if a:findstart
+      return col(".")
+    endif
+    return [
+          \ #{word: "func ()\n\t\nend"},
+          \ #{word: "foobar"},
+          \ #{word: "你好\n\t\n我好"}
+          \ ]
+  endfunc
+  set omnifunc=Omni_test
+
+  new
+  let lines = mapnew(range(10), 'string(v:val)')
+  call setline(1, lines)
+  call setpos("'a", [0, 3, 1, 0])
+
+  call feedkeys("A \<C-X>\<C-O>\<C-E>\<BS>", 'tx')
+  call assert_equal(lines, getline(1, '$'))
+  call assert_equal([0, 3, 1, 0], getpos("'a"))
+
+  call feedkeys("A \<C-X>\<C-O>\<C-N>\<C-E>\<BS>", 'tx')
+  call assert_equal(lines, getline(1, '$'))
+  call assert_equal([0, 3, 1, 0], getpos("'a"))
+
+  call feedkeys("A \<C-X>\<C-O>\<C-N>\<C-N>\<C-E>\<BS>", 'tx')
+  call assert_equal(lines, getline(1, '$'))
+  call assert_equal([0, 3, 1, 0], getpos("'a"))
+
+  call feedkeys("A \<C-X>\<C-O>\<C-N>\<C-N>\<C-N>\<C-E>\<BS>", 'tx')
+  call assert_equal(lines, getline(1, '$'))
+  call assert_equal([0, 3, 1, 0], getpos("'a"))
+
+  call feedkeys("A \<C-X>\<C-O>\<C-Y>", 'tx')
+  call assert_equal(['0 func ()', "\t", 'end'] + lines[1:], getline(1, '$'))
+  call assert_equal([0, 5, 1, 0], getpos("'a"))
+
+  bw!
   set omnifunc&
   delfunc Omni_test
 endfunc

@@ -242,7 +242,12 @@ int nextwild(expand_T *xp, int type, int options, bool escape)
   char *p2;
 
   if (xp->xp_numfiles == -1) {
-    set_expand_context(xp);
+    if (ccline->input_fn && ccline->xp_context == EXPAND_COMMANDS) {
+      // Expand commands typed in input() function
+      set_cmd_context(xp, ccline->cmdbuff, ccline->cmdlen, ccline->cmdpos, false);
+    } else {
+      set_expand_context(xp);
+    }
     if (xp->xp_context == EXPAND_LUA) {
       nlua_expand_pat(xp);
     }
@@ -283,7 +288,7 @@ int nextwild(expand_T *xp, int type, int options, bool escape)
       p1 = addstar(xp->xp_pattern, xp->xp_pattern_len, xp->xp_context);
     }
     // Translate string into pattern and expand it.
-    const int use_options = (options
+    const int use_options = ((options & ~WILD_KEEP_SOLE_ITEM)
                              | WILD_HOME_REPLACE
                              | WILD_ADD_SLASH
                              | WILD_SILENT
@@ -334,7 +339,7 @@ int nextwild(expand_T *xp, int type, int options, bool escape)
 
   if (xp->xp_numfiles <= 0 && p2 == NULL) {
     beep_flush();
-  } else if (xp->xp_numfiles == 1) {
+  } else if (xp->xp_numfiles == 1 && !(options & WILD_KEEP_SOLE_ITEM)) {
     // free expanded pattern
     ExpandOne(xp, NULL, NULL, 0, WILD_FREE);
   }
@@ -645,6 +650,7 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
 /// in "xp->xp_selected"
 static char *get_next_or_prev_match(int mode, expand_T *xp)
 {
+  // When no matches found, return NULL
   if (xp->xp_numfiles <= 0) {
     return NULL;
   }
@@ -652,45 +658,43 @@ static char *get_next_or_prev_match(int mode, expand_T *xp)
   int findex = xp->xp_selected;
 
   if (mode == WILD_PREV) {
+    // Select the last entry if at original text
     if (findex == -1) {
       findex = xp->xp_numfiles;
     }
+    // Otherwise select the previous entry
     findex--;
   } else if (mode == WILD_NEXT) {
+    // Select the next entry
     findex++;
-  } else if (mode == WILD_PAGEUP) {
-    if (findex == 0) {
-      // at the first entry, don't select any entries
-      findex = -1;
-    } else if (findex == -1) {
-      // no entry is selected. select the last entry
-      findex = xp->xp_numfiles - 1;
-    } else {
-      // go up by the pum height
-      int ht = pum_get_height();
-      if (ht > 3) {
-        ht -= 2;
-      }
-      findex -= ht;
-      findex = MAX(findex, 0);  // few entries left, select the first entry
+  } else if (mode == WILD_PAGEUP || mode == WILD_PAGEDOWN) {
+    // Get the height of popup menu (used for both PAGEUP and PAGEDOWN)
+    int ht = pum_get_height();
+    if (ht > 3) {
+      ht -= 2;
     }
-  } else if (mode == WILD_PAGEDOWN) {
-    if (findex == xp->xp_numfiles - 1) {
-      // at the last entry, don't select any entries
-      findex = -1;
-    } else if (findex == -1) {
-      // no entry is selected. select the first entry
-      findex = 0;
-    } else {
-      // go down by the pum height
-      int ht = pum_get_height();
-      if (ht > 3) {
-        ht -= 2;
-      }
-      findex += ht;
-      if (findex >= xp->xp_numfiles) {
-        // few entries left, select the last entry
+
+    if (mode == WILD_PAGEUP) {
+      if (findex == 0) {
+        // at the first entry, don't select any entries
+        findex = -1;
+      } else if (findex < 0) {
+        // no entry is selected. select the last entry
         findex = xp->xp_numfiles - 1;
+      } else {
+        // go up by the pum height
+        findex = MAX(findex - ht, 0);
+      }
+    } else {  // mode == WILD_PAGEDOWN
+      if (findex == xp->xp_numfiles - 1) {
+        // at the last entry, don't select any entries
+        findex = -1;
+      } else if (findex < 0) {
+        // no entry is selected. select the first entry
+        findex = 0;
+      } else {
+        // go down by the pum height
+        findex = MIN(findex + ht, xp->xp_numfiles - 1);
       }
     }
   } else {  // mode == WILD_PUM_WANT
@@ -698,21 +702,27 @@ static char *get_next_or_prev_match(int mode, expand_T *xp)
     findex = pum_want.item;
   }
 
-  // When wrapping around, return the original string, set findex to -1.
-  if (findex < 0) {
-    findex = xp->xp_orig == NULL ? xp->xp_numfiles - 1 : -1;
+  // Handle wrapping around
+  if (findex < 0 || findex >= xp->xp_numfiles) {
+    // If original text exists, return to it when wrapping around
+    if (xp->xp_orig != NULL) {
+      findex = -1;
+    } else {
+      // Wrap around to opposite end
+      findex = (findex < 0) ? xp->xp_numfiles - 1 : 0;
+    }
   }
-  if (findex >= xp->xp_numfiles) {
-    findex = xp->xp_orig == NULL ? 0 : -1;
-  }
+
+  // Display matches on screen
   if (compl_match_array) {
     compl_selected = findex;
     cmdline_pum_display(false);
   } else if (p_wmnu) {
     redraw_wildmenu(xp, xp->xp_numfiles, xp->xp_files, findex, cmd_showtail);
   }
-  xp->xp_selected = findex;
 
+  xp->xp_selected = findex;
+  // Return the original text or the selected match
   return xstrdup(findex == -1 ? xp->xp_orig : xp->xp_files[findex]);
 }
 

@@ -189,6 +189,7 @@ void nvim_ui_attach(uint64_t channel_id, Integer width, Integer height, Dict opt
   ui->wildmenu_active = false;
 
   pmap_put(uint64_t)(&connected_uis, channel_id, ui);
+  current_ui = channel_id;
   ui_attach_impl(ui, channel_id);
 
   may_trigger_vim_suspend_resume(false);
@@ -214,6 +215,7 @@ void nvim_ui_set_focus(uint64_t channel_id, Boolean gained, Error *error)
   }
 
   if (gained) {
+    current_ui = channel_id;
     may_trigger_vim_suspend_resume(false);
   }
 
@@ -505,7 +507,11 @@ void nvim_ui_term_event(uint64_t channel_id, String event, Object value, Error *
 
     const String termresponse = value.data.string;
     set_vim_var_string(VV_TERMRESPONSE, termresponse.data, (ptrdiff_t)termresponse.size);
-    apply_autocmds_group(EVENT_TERMRESPONSE, NULL, NULL, false, AUGROUP_ALL, NULL, NULL, &value);
+
+    MAXSIZE_TEMP_DICT(data, 1);
+    PUT_C(data, "sequence", value);
+    apply_autocmds_group(EVENT_TERMRESPONSE, NULL, NULL, false, AUGROUP_ALL, NULL, NULL,
+                         &DICT_OBJ(data));
   }
 }
 

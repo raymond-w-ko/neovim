@@ -498,20 +498,6 @@ char *vim_strchr(const char *const string, const int c)
   }
 }
 
-// Sized version of strchr that can handle embedded NULs.
-// Adjusts n to the new size.
-char *strnchr(const char *p, size_t *n, int c)
-{
-  while (*n > 0) {
-    if (*p == c) {
-      return (char *)p;
-    }
-    p++;
-    (*n)--;
-  }
-  return NULL;
-}
-
 // Sort an array of strings.
 
 static int sort_compare(const void *s1, const void *s2)
@@ -1682,8 +1668,6 @@ int vim_vsnprintf_typval(char *str, size_t str_m, const char *fmt, va_list ap_st
       }
 
       switch (fmt_spec) {
-      case 'b':
-      case 'B':
       case 'd':
       case 'u':
       case 'o':
@@ -1807,6 +1791,13 @@ int vim_vsnprintf_typval(char *str, size_t str_m, const char *fmt, va_list ap_st
           if (ptr_arg) {
             arg_sign = 1;
           }
+        } else if (fmt_spec == 'b' || fmt_spec == 'B') {
+          uarg = (tvs
+                  ? (unsigned long long)tv_nr(tvs, &arg_idx)  // NOLINT(runtime/int)
+                  : (skip_to_arg(ap_types, ap_start, &ap, &arg_idx,
+                                 &arg_cur, fmt),
+                     va_arg(ap, unsigned long long)));  // NOLINT(runtime/int)
+          arg_sign = (uarg != 0);
         } else if (fmt_spec == 'd') {
           // signed
           switch (length_modifier) {

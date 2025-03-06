@@ -66,12 +66,15 @@ API
 
 BUILD
 
-On Windows, only building with the UCRT runtime is supported.
+• On Windows, only building with the UCRT runtime is supported.
+• Translations are turned off by default. Enable by building Nvim with the
+  CMake flag `ENABLE_TRANSLATIONS=ON`.
 
 DEFAULTS
 
 • 'number', 'relativenumber', 'signcolumn', and 'foldcolumn' are disabled in
   |terminal| buffers. See |terminal-config| for an example of changing these defaults.
+• 'diffopt' default includes "linematch:40".
 
 DIAGNOSTICS
 
@@ -108,6 +111,9 @@ EVENTS
     • `history` argument indicating if the message was added to the history.
     • new message kinds: "bufwrite", "completion", "list_cmd", "lua_print",
       "search_cmd", "shell_out/err/ret", "undo", "verbose", wildlist".
+• |TermRequest| and |TermResponse| |event-data| is now a table. The "sequence"
+  field contains the received sequence. |TermRequest| also contains a "cursor"
+  field indicating the cursor's position when the sequence was received.
 
 HIGHLIGHTS
 
@@ -132,6 +138,7 @@ LSP
 • |vim.lsp.util.make_position_params()|, |vim.lsp.util.make_range_params()|
   and |vim.lsp.util.make_given_range_params()| now require the `position_encoding`
   parameter.
+• |vim.lsp.util.symbols_to_items()| now requires the `position_encoding` parameter.
 
 LUA
 
@@ -173,6 +180,7 @@ TREESITTER
   the tree before returning. Scripts must call |LanguageTree:parse()| explicitly. >lua
     local p = vim.treesitter.get_parser(0, 'c')
     p:parse()
+• |vim.treesitter.get_parser()| expects its buffer to be loaded.
 <
 
 TUI
@@ -199,10 +207,14 @@ API
 • |nvim_echo()| `err` field to print error messages and `chunks` accepts
   highlight group IDs.
 • |nvim_open_win()| `relative` field can be set to "laststatus" and "tabline".
-• |nvim_buf_set_extmark()| `hl_group` field can be an array of layered groups
+• Additions to |nvim_buf_set_extmark()|:
+  • `conceal_lines` field to conceal an entire line.
+  • `hl_group` field can be an array of layered groups.
+  • `virt_text_pos` field accepts value `eol_right_align` to allow for right
+    aligned text that truncates before covering up buffer text.
+  • `virt_lines_overflow` field accepts value `scroll` to enable horizontal
+    scrolling for virtual lines with 'nowrap'.
 • |vim.hl.range()| now has a optional `timeout` field which allows for a timed highlight
-• |nvim_buf_set_extmark()| virt_text_pos accepts `eol_right_align` to
-  allow for right aligned text that truncates before covering up buffer text.
 
 DEFAULTS
 
@@ -220,6 +232,8 @@ DEFAULTS
     on a URL.
   • Mouse |popup-menu| includes a "Go to definition" item when LSP is active
     in the buffer.
+  • Mouse |popup-menu| includes "Show Diagnostics", "Show All Diagnostics" and
+    "Configure Diagnostics" items when there are diagnostics in the buffer.
   • |]d-default| and |[d-default| accept a count.
   • |[D-default| and |]D-default| jump to the first and last diagnostic in the
     current buffer, respectively.
@@ -243,6 +257,8 @@ DIAGNOSTICS
   |vim.diagnostic.jump()|.
 • A "virtual_lines" diagnostic handler was added to render diagnostics using
   virtual lines below the respective code.
+• The "virtual_text" diagnostic handler accepts a `current_line` option to
+  only show virtual text at the cursor's line.
 
 EDITOR
 
@@ -255,6 +271,9 @@ EDITOR
   to a literal "~" directory.
 • |hl-ComplMatchIns| shows matched text of the currently inserted completion.
 • |hl-PmenuMatch| and |hl-PmenuMatchSel| show matched text in completion popup.
+• |gO| now works in `help`, `checkhealth`, and `markdown` buffers.
+• Jump between sections in `help` and `checkhealth` buffers with `[[` and
+  `]]`.
 
 EVENTS
 
@@ -272,7 +291,8 @@ LSP
 • `:checkhealth vim.lsp` displays the server version (if available).
 • Completion side effects (including snippet expansion, execution of commands
   and application of additional text edits) is now built-in.
-• |vim.lsp.util.locations_to_items()| sets `end_col` and `end_lnum` fields.
+• |vim.lsp.util.locations_to_items()| and |vim.lsp.util.symbols_to_items()| now
+  sets `end_col` and `end_lnum` fields.
 • |vim.lsp.buf.format()| now supports passing a list of ranges
   via the `range` parameter (this requires support for the
   `textDocument/rangesFormatting` request).
@@ -295,6 +315,7 @@ LUA
 • Command-line completions for: `vim.g`, `vim.t`, `vim.w`, `vim.b`, `vim.v`,
   `vim.o`, `vim.wo`, `vim.bo`, `vim.opt`, `vim.opt_local`, `vim.opt_global`,
   and `vim.fn`.
+• Documentation for |lua-bit|.
 • |vim.fs.rm()| can delete files and directories.
 • |vim.validate()| now has a new signature which uses less tables,
   is more performant and easier to read.
@@ -305,13 +326,16 @@ LUA
 • |vim.fs.relpath()| gets relative path compared to base path.
 • |vim.fs.dir()| and |vim.fs.find()| now follow symbolic links by default,
   the behavior can be turn off using the new `follow` option.
+• |vim.text.indent()| indents/dedents text.
 
 OPTIONS
 
 • 'completeopt' flag "fuzzy" enables |fuzzy-matching| during |ins-completion|.
 • 'completeopt' flag "preinsert" highlights text to be inserted.
+• 'wildmode' flag "noselect" shows 'wildmenu' without selecting an entry.
 • 'messagesopt' configures |:messages| and |hit-enter| prompt.
 • 'tabclose' controls which tab page to focus when closing a tab page.
+• 'eventignorewin' to persistently ignore events in a window.
 
 PERFORMANCE
 
@@ -327,6 +351,11 @@ PERFORMANCE
 • Treesitter highlighting is now asynchronous. To force synchronous parsing,
   use `vim.g._ts_force_sync_parsing = true`.
 • Treesitter folding is now calculated asynchronously.
+• |LanguageTree:parse()| now only runs the injection query on the provided
+  range (as long as the language does not have a combined injection),
+  significantly improving |treesitter-highlight| performance.
+• Treesitter injection query iteration is now asynchronous, making edits in
+  large buffers with combined injections much quicker.
 
 PLUGINS
 
@@ -334,6 +363,10 @@ PLUGINS
   • spelling_language property is now supported.
 • 'inccommand' incremental preview can run on 'nomodifiable' buffers and
   restores their 'modifiable' state
+• Commenting
+  • 'commentstring' values can now be specified in a Treesitter capture's
+    `bo.commentstring` metadata field, providing finer grained support for
+    languages like `JSX`.
 
 STARTUP
 
@@ -364,6 +397,10 @@ TERMINAL
 • The |terminal| has experimental support for the Kitty keyboard protocol
   (sometimes called "CSI u" key encoding). Only the "Disambiguate escape
   codes" mode is currently supported.
+• The |terminal| emits a |TermRequest| autocommand event when the child process
+  emits an APC control sequence.
+• |TermRequest| has a "cursor" field in its |event-data| indicating the
+  cursor position when the sequence was received.
 
 TREESITTER
 
@@ -379,6 +416,13 @@ TREESITTER
   activated by passing the `on_parse` callback parameter.
 • |vim.treesitter.query.set()| can now inherit and/or extend runtime file
   queries in addition to overriding.
+• |LanguageTree:is_valid()| now accepts a range parameter to narrow the scope
+  of the validity check.
+• |:InspectTree| now shows which nodes are missing.
+• Bundled markdown highlight queries use `conceal_lines` metadata to conceal
+  code block fence lines vertically.
+• |vim.treesitter.language.inspect()| shows additional information, including
+  parser version for ABI 15 parsers.
 
 TUI
 
@@ -392,6 +436,8 @@ TUI
 
 UI
 
+• |:detach| the current UI, let the Nvim server continue running as a background
+  process. Works with the builtin TUI, and all GUIs.
 • |vim.ui.open()| (by default bound to |gx|) accepts an `opt.cmd` parameter
   which controls the tool used to open the given path or URL. If you want to
   globally set this, you can override vim.ui.open using the same approach
@@ -409,6 +455,11 @@ UI
 • |ui-messages| content chunks now also contain the highlight group ID.
 • |:checkhealth| can display in a floating window, controlled by the
   |g:health| variable.
+
+VIMSCRIPT
+
+• |getchar()| and |getcharstr()| have optional {opts} |Dict| argument to control:
+  cursor behavior, return type, and whether to simplify the returned key.
 
 ==============================================================================
 CHANGED FEATURES                                                 *news-changed*

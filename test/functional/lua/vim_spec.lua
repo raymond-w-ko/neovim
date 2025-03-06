@@ -970,6 +970,7 @@ describe('lua stdlib', function()
     )
     eq(NIL, exec_lua("return vim.tbl_get({}, 'missing_key')"))
     eq(NIL, exec_lua('return vim.tbl_get({})'))
+    eq(NIL, exec_lua("return vim.tbl_get({}, nil, 'key')"))
     eq(1, exec_lua("return select('#', vim.tbl_get({}))"))
     eq(1, exec_lua("return select('#', vim.tbl_get({ nested = {} }, 'nested', 'missing_key'))"))
   end)
@@ -3955,7 +3956,7 @@ stack traceback:
 
     it('failure modes', function()
       matches(
-        'nvim_exec2%(%): Vim:E492: Not an editor command: fooooo',
+        'nvim_exec2%(%), line 1: Vim:E492: Not an editor command: fooooo',
         pcall_err(exec_lua, [[vim.api.nvim_win_call(0, function() vim.cmd 'fooooo' end)]])
       )
       eq(

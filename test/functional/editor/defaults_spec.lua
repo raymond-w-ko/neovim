@@ -10,7 +10,7 @@ local Screen = require('test.functional.ui.screen')
 
 describe('default', function()
   describe('autocommands', function()
-    it('nvim_terminal.TermClose closes terminal with default shell on success', function()
+    it('nvim.terminal.TermClose closes terminal with default shell on success', function()
       n.clear()
       n.api.nvim_set_option_value('shell', n.testprg('shell-test'), {})
       n.command('set shellcmdflag=EXIT shellredir= shellpipe= shellquote= shellxquote=')
@@ -119,7 +119,9 @@ describe('default', function()
           [[testing <CR> /?\!3]],
           [[testing <CR> /?\!4]],
         })
-        n.feed('gg0vf!o*')
+        n.feed('gg0vf!')
+        n.poke_eventloop()
+        n.feed('*')
         screen:expect([[
           {3:testing <CR> /?\!}1                                          |
           {4:^testing <CR> /?\!}2                                          |
@@ -127,7 +129,7 @@ describe('default', function()
           {3:testing <CR> /?\!}4                                          |
           {1:~                                                           }|*2
           {2:[No Name] [+]                             2,1            All}|
-          /\Vtesting <CR> \/?\\!                    [2/4]             |
+          /\Vtesting <CR> /?\\!                     [2/4]             |
         ]])
         n.feed('n')
         screen:expect([[
@@ -137,9 +139,11 @@ describe('default', function()
           {3:testing <CR> /?\!}4                                          |
           {1:~                                                           }|*2
           {2:[No Name] [+]                             3,1            All}|
-          /\Vtesting <CR> \/?\\!                    [3/4]             |
+          /\Vtesting <CR> /?\\!                     [3/4]             |
         ]])
-        n.feed('G0vf!o#')
+        n.feed('G0vf!')
+        n.poke_eventloop()
+        n.feed('#')
         screen:expect([[
           {3:testing <CR> /?\!}1                                          |
           {3:testing <CR> /?\!}2                                          |
@@ -163,7 +167,7 @@ describe('default', function()
     end)
 
     describe('unimpaired-style mappings', function()
-      it('show the command ouptut when successful', function()
+      it('show the command output when successful', function()
         n.clear({ args_rm = { '--cmd' } })
         local screen = Screen.new(40, 8)
         n.fn.setqflist({

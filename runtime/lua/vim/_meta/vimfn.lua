@@ -899,12 +899,13 @@ function vim.fn.charidx(string, idx, countcc, utf16) end
 --- @return string
 function vim.fn.chdir(dir) end
 
---- Get the amount of indent for line {lnum} according the C
---- indenting rules, as with 'cindent'.
+--- Get the amount of indent for line {lnum} according the
+--- |C-indenting| rules, as with 'cindent'.
 --- The indent is counted in spaces, the value of 'tabstop' is
 --- relevant.  {lnum} is used just like in |getline()|.
 --- When {lnum} is invalid -1 is returned.
---- See |C-indenting|.
+---
+--- To get or set indent of lines in a string, see |vim.text.indent()|.
 ---
 --- @param lnum integer
 --- @return integer
@@ -1928,7 +1929,8 @@ function vim.fn.expandcmd(string, options) end
 --- When {expr3} is omitted then "force" is assumed.
 ---
 --- {expr1} is changed when {expr2} is not empty.  If necessary
---- make a copy of {expr1} first.
+--- make a copy of {expr1} first or use |extendnew()| to return a
+--- new List/Dictionary.
 --- {expr2} remains unchanged.
 --- When {expr1} is locked and {expr2} is not empty the operation
 --- fails.
@@ -2748,12 +2750,14 @@ function vim.fn.getcellwidths() end
 function vim.fn.getchangelist(buf) end
 
 --- Get a single character from the user or input stream.
---- If {expr} is omitted, wait until a character is available.
+--- If {expr} is omitted or is -1, wait until a character is
+---   available.
 --- If {expr} is 0, only get a character when one is available.
 ---   Return zero otherwise.
 --- If {expr} is 1, only check if a character is available, it is
 ---   not consumed.  Return zero if no character available.
---- If you prefer always getting a string use |getcharstr()|.
+--- If you prefer always getting a string use |getcharstr()|, or
+--- specify |FALSE| as "number" in {opts}.
 ---
 --- Without {expr} and when {expr} is 0 a whole character or
 --- special key is returned.  If it is a single character, the
@@ -2763,7 +2767,8 @@ function vim.fn.getchangelist(buf) end
 --- starting with 0x80 (decimal: 128).  This is the same value as
 --- the String "\<Key>", e.g., "\<Left>".  The returned value is
 --- also a String when a modifier (shift, control, alt) was used
---- that is not included in the character.
+--- that is not included in the character.  |keytrans()| can also
+--- be used to convert a returned String into a readable form.
 ---
 --- When {expr} is 0 and Esc is typed, there will be a short delay
 --- while Vim waits to see if this is the start of an escape
@@ -2774,6 +2779,32 @@ function vim.fn.getchangelist(buf) end
 --- Use nr2char() to convert it to a String.
 ---
 --- Use getcharmod() to obtain any additional modifiers.
+---
+--- The optional argument {opts} is a Dict and supports the
+--- following items:
+---
+---   cursor    A String specifying cursor behavior
+---       when waiting for a character.
+---       "hide": hide the cursor.
+---       "keep": keep current cursor unchanged.
+---       "msg": move cursor to message area.
+---       (default: automagically decide
+---       between "keep" and "msg")
+---
+---   number    If |TRUE|, return a Number when getting
+---       a single character.
+---       If |FALSE|, the return value is always
+---       converted to a String, and an empty
+---       String (instead of 0) is returned when
+---       no character is available.
+---       (default: |TRUE|)
+---
+---   simplify  If |TRUE|, include modifiers in the
+---       character if possible.  E.g., return
+---       the same value for CTRL-I and <Tab>.
+---       If |FALSE|, don't include modifiers in
+---       the character.
+---       (default: |TRUE|)
 ---
 --- When the user clicks a mouse button, the mouse event will be
 --- returned.  The position can then be found in |v:mouse_col|,
@@ -2811,9 +2842,10 @@ function vim.fn.getchangelist(buf) end
 ---   endfunction
 --- <
 ---
---- @param expr? 0|1
---- @return integer
-function vim.fn.getchar(expr) end
+--- @param expr? -1|0|1
+--- @param opts? table
+--- @return integer|string
+function vim.fn.getchar(expr, opts) end
 
 --- The result is a Number which is the state of the modifiers for
 --- the last obtained character with getchar() or in another way.
@@ -2872,20 +2904,13 @@ function vim.fn.getcharpos(expr) end
 --- @return table
 function vim.fn.getcharsearch() end
 
---- Get a single character from the user or input stream as a
---- string.
---- If {expr} is omitted, wait until a character is available.
---- If {expr} is 0 or false, only get a character when one is
----   available.  Return an empty string otherwise.
---- If {expr} is 1 or true, only check if a character is
----   available, it is not consumed.  Return an empty string
----   if no character is available.
---- Otherwise this works like |getchar()|, except that a number
---- result is converted to a string.
+--- The same as |getchar()|, except that this always returns a
+--- String, and "number" isn't allowed in {opts}.
 ---
---- @param expr? 0|1
+--- @param expr? -1|0|1
+--- @param opts? table
 --- @return string
-function vim.fn.getcharstr(expr) end
+function vim.fn.getcharstr(expr, opts) end
 
 --- Return completion pattern of the current command-line.
 --- Only works when the command line is being edited, thus
@@ -4125,6 +4150,7 @@ function vim.fn.globpath(path, expr, nosuf, list, allinks) end
 ---   fname_case  Case in file names matters (for Darwin and MS-Windows
 ---       this is not present).
 ---   gui_running  Nvim has a GUI.
+---   hurd    GNU/Hurd system.
 ---   iconv    Can use |iconv()| for conversion.
 ---   linux    Linux system.
 ---   mac    MacOS system.
@@ -4404,6 +4430,8 @@ function vim.fn.id(expr) end
 --- of 'tabstop' is relevant.  {lnum} is used just like in
 --- |getline()|.
 --- When {lnum} is invalid -1 is returned.
+---
+--- To get or set indent of lines in a string, see |vim.text.indent()|.
 ---
 --- @param lnum integer|string
 --- @return integer
@@ -5310,9 +5338,8 @@ function vim.fn.map(expr1, expr2) end
 --- When {abbr} is there and it is |TRUE| use abbreviations
 --- instead of mappings.
 ---
---- When {dict} is there and it is |TRUE| return a dictionary
---- containing all the information of the mapping with the
---- following items:      *mapping-dict*
+--- When {dict} is |TRUE|, return a dictionary describing the
+--- mapping, with these items:    *mapping-dict*
 ---   "lhs"       The {lhs} of the mapping as it would be typed
 ---   "lhsraw"   The {lhs} of the mapping as raw bytes
 ---   "lhsrawalt" The {lhs} of the mapping as raw bytes, alternate
@@ -5364,7 +5391,7 @@ function vim.fn.maparg(name, mode, abbr, dict) end
 --- @param mode string
 --- @param abbr boolean
 --- @param dict true
---- @return string|table<string,any>
+--- @return table<string,any>
 function vim.fn.maparg(name, mode, abbr, dict) end
 
 --- Check if there is a mapping that matches with {name} in mode
@@ -6796,6 +6823,7 @@ function vim.fn.prompt_getprompt(buf) end
 ---      endif
 ---    endfunc
 ---    call prompt_setcallback(bufnr(), function('s:TextEntered'))
+--- <
 ---
 --- @param buf integer|string
 --- @param expr string|function
@@ -9303,7 +9331,9 @@ function vim.fn.state(what) end
 function vim.fn.stdioopen(opts) end
 
 --- Returns |standard-path| locations of various default files and
---- directories.
+--- directories. The locations are driven by |base-directories|
+--- which you can configure via |$NVIM_APPNAME| or the `$XDG_…`
+--- environment variables.
 ---
 --- {what}       Type    Description ~
 --- cache        String  Cache directory: arbitrary temporary
@@ -9325,6 +9355,14 @@ function vim.fn.stdioopen(opts) end
 ---
 --- @param what 'cache'|'config'|'config_dirs'|'data'|'data_dirs'|'log'|'run'|'state'
 --- @return string|string[]
+function vim.fn.stdpath(what) end
+
+--- @param what 'cache'|'config'|'data'|'log'|'run'|'state'
+--- @return string
+function vim.fn.stdpath(what) end
+
+--- @param what 'config_dirs'|'data_dirs'
+--- @return string[]
 function vim.fn.stdpath(what) end
 
 --- Convert String {string} to a Float.  This mostly works the

@@ -183,8 +183,10 @@ struct terminal {
 
   bool color_set[16];
 
-  char *selection_buffer;  /// libvterm selection buffer
-  StringBuilder selection;  /// Growable array containing full selection data
+  char *selection_buffer;  ///< libvterm selection buffer
+  StringBuilder selection;  ///< Growable array containing full selection data
+
+  StringBuilder termrequest_buffer;  ///< Growable array containing unfinished request sequence
 
   size_t refcount;                  // reference count
 };
@@ -211,16 +213,36 @@ static Set(ptr_t) invalidated_terminals = SET_INIT;
 static void emit_termrequest(void **argv)
 {
   Terminal *term = argv[0];
-  char *payload = argv[1];
-  size_t payload_length = (size_t)argv[2];
+  char *sequence = argv[1];
+  size_t sequence_length = (size_t)argv[2];
   StringBuilder *pending_send = argv[3];
+  int row = (int)(intptr_t)argv[4];
+  int col = (int)(intptr_t)argv[5];
+
+  if (term->sb_pending > 0) {
+    // Don't emit the event while there is pending scrollback because we need
+    // the buffer contents to be fully updated. If this is the case, re-schedule
+    // the event.
+    multiqueue_put(main_loop.events, emit_termrequest, term, sequence, (void *)sequence_length,
+                   pending_send, (void *)(intptr_t)row, (void *)(intptr_t)col);
+    return;
+  }
+
+  set_vim_var_string(VV_TERMREQUEST, sequence, (ptrdiff_t)sequence_length);
+
+  MAXSIZE_TEMP_ARRAY(cursor, 2);
+  ADD_C(cursor, INTEGER_OBJ(row));
+  ADD_C(cursor, INTEGER_OBJ(col));
+
+  MAXSIZE_TEMP_DICT(data, 2);
+  String termrequest = { .data = sequence, .size = sequence_length };
+  PUT_C(data, "sequence", STRING_OBJ(termrequest));
+  PUT_C(data, "cursor", ARRAY_OBJ(cursor));
 
   buf_T *buf = handle_get_buffer(term->buf_handle);
-  String termrequest = { .data = payload, .size = payload_length };
-  Object data = STRING_OBJ(termrequest);
-  set_vim_var_string(VV_TERMREQUEST, payload, (ptrdiff_t)payload_length);
-  apply_autocmds_group(EVENT_TERMREQUEST, NULL, NULL, false, AUGROUP_ALL, buf, NULL, &data);
-  xfree(payload);
+  apply_autocmds_group(EVENT_TERMREQUEST, NULL, NULL, false, AUGROUP_ALL, buf, NULL,
+                       &DICT_OBJ(data));
+  xfree(sequence);
 
   StringBuilder *term_pending_send = term->pending.send;
   term->pending.send = NULL;
@@ -234,12 +256,15 @@ static void emit_termrequest(void **argv)
   xfree(pending_send);
 }
 
-static void schedule_termrequest(Terminal *term, char *payload, size_t payload_length)
+static void schedule_termrequest(Terminal *term, char *sequence, size_t sequence_length)
 {
   term->pending.send = xmalloc(sizeof(StringBuilder));
   kv_init(*term->pending.send);
-  multiqueue_put(main_loop.events, emit_termrequest, term, payload, (void *)payload_length,
-                 term->pending.send);
+
+  int line = row_to_linenr(term, term->cursor.row);
+  multiqueue_put(main_loop.events, emit_termrequest, term, sequence, (void *)sequence_length,
+                 term->pending.send, (void *)(intptr_t)line,
+                 (void *)(intptr_t)term->cursor.col);
 }
 
 static int parse_osc8(VTermStringFragment frag, int *attr)
@@ -307,15 +332,22 @@ static int on_osc(int command, VTermStringFragment frag, void *user)
     return 1;
   }
 
-  StringBuilder request = KV_INITIAL_VALUE;
-  kv_printf(request, "\x1b]%d;", command);
-  kv_concat_len(request, frag.str, frag.len);
-  schedule_termrequest(term, request.items, request.size);
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1b]%d;", command);
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *sequence = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, sequence, term->termrequest_buffer.size);
+  }
   return 1;
 }
 
 static int on_dcs(const char *command, size_t commandlen, VTermStringFragment frag, void *user)
 {
+  Terminal *term = user;
+
   if (command == NULL || frag.str == NULL) {
     return 0;
   }
@@ -323,10 +355,38 @@ static int on_dcs(const char *command, size_t commandlen, VTermStringFragment fr
     return 1;
   }
 
-  StringBuilder request = KV_INITIAL_VALUE;
-  kv_printf(request, "\x1bP%*s", (int)commandlen, command);
-  kv_concat_len(request, frag.str, frag.len);
-  schedule_termrequest(user, request.items, request.size);
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1bP%*s", (int)commandlen, command);
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *sequence = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, sequence, term->termrequest_buffer.size);
+  }
+  return 1;
+}
+
+static int on_apc(VTermStringFragment frag, void *user)
+{
+  Terminal *term = user;
+  if (frag.str == NULL || frag.len == 0) {
+    return 0;
+  }
+
+  if (!has_event(EVENT_TERMREQUEST)) {
+    return 1;
+  }
+
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1b_");
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *sequence = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, sequence, term->termrequest_buffer.size);
+  }
   return 1;
 }
 
@@ -335,7 +395,7 @@ static VTermStateFallbacks vterm_fallbacks = {
   .csi = NULL,
   .osc = on_osc,
   .dcs = on_dcs,
-  .apc = NULL,
+  .apc = on_apc,
   .pm = NULL,
   .sos = NULL,
 };
@@ -625,6 +685,10 @@ bool terminal_enter(void)
   State = MODE_TERMINAL;
   mapped_ctrl_c |= MODE_TERMINAL;  // Always map CTRL-C to avoid interrupt.
   RedrawingDisabled = false;
+  if (!s->term->cursor.visible) {
+    // Hide cursor if it should be hidden. Do so right after setting State, before events.
+    ui_busy_start();
+  }
 
   // Disable these options in terminal-mode. They are nonsense because cursor is
   // placed at end of buffer to "follow" output. #11072
@@ -659,10 +723,6 @@ bool terminal_enter(void)
   showmode();
   curwin->w_redr_status = true;  // For mode() in statusline. #8323
   redraw_custom_title_later();
-  if (!s->term->cursor.visible) {
-    // Hide cursor if it should be hidden
-    ui_busy_start();
-  }
   ui_cursor_shape();
   apply_autocmds(EVENT_TERMENTER, NULL, NULL, false, curbuf);
   may_trigger_modechanged();
@@ -679,6 +739,11 @@ bool terminal_enter(void)
   }
   State = save_state;
   RedrawingDisabled = s->save_rd;
+  if (!s->term->cursor.visible) {
+    // If cursor was hidden, show it again. Do so right after restoring State, before events.
+    ui_busy_stop();
+  }
+
   apply_autocmds(EVENT_TERMLEAVE, NULL, NULL, false, curbuf);
 
   // Restore the terminal cursor to what is set in 'guicursor'
@@ -708,10 +773,6 @@ bool terminal_enter(void)
     showmode();
   } else {
     unshowmode(true);
-  }
-  if (!s->term->cursor.visible) {
-    // If cursor was hidden, show it again
-    ui_busy_stop();
   }
   ui_cursor_shape();
   if (s->close) {
@@ -924,6 +985,7 @@ void terminal_destroy(Terminal **termpp)
     xfree(term->title);
     xfree(term->selection_buffer);
     kv_destroy(term->selection);
+    kv_destroy(term->termrequest_buffer);
     vterm_free(term->vt);
     xfree(term);
     *termpp = NULL;  // coverity[dead-store]
