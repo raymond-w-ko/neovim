@@ -198,6 +198,7 @@ local extension = {
   abap = 'abap',
   abc = 'abc',
   abl = 'abel',
+  abnf = 'abnf',
   wrm = 'acedb',
   ads = 'ada',
   ada = 'ada',
@@ -1206,6 +1207,7 @@ local extension = {
   tl = 'teal',
   templ = 'templ',
   tmpl = 'template',
+  tera = 'tera',
   ti = 'terminfo',
   dtx = 'tex',
   ltx = 'tex',
@@ -2413,7 +2415,13 @@ local pattern = {
     ['/boot/grub/menu%.lst$'] = 'grub',
     -- gtkrc* and .gtkrc*
     ['^%.?gtkrc'] = starsetf('gtkrc'),
-    ['^${VIMRUNTIME}/doc/.*%.txt$'] = 'help',
+    ['/doc/.*%.txt$'] = function(_, bufnr)
+      local line = M._getline(bufnr, -1)
+      local ml = line:find('^vim:') or line:find('%svim:')
+      if ml and M._matchregex(line:sub(ml), [[\<\(ft\|filetype\)=help\>]]) then
+        return 'help'
+      end
+    end,
     ['^hg%-editor%-.*%.txt$'] = 'hgcommit',
     ['%.html%.m4$'] = 'htmlm4',
     ['^JAM.*%.'] = starsetf('jam'),

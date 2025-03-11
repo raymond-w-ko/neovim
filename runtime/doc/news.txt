@@ -244,6 +244,8 @@ DEFAULTS
     • |[a|, |]a|, |[A|, |]A| navigate through the |argument-list|
     • |[b|, |]b|, |[B|, |]B| navigate through the |buffer-list|
     • |[<Space>|, |]<Space>| add an empty line above and below the cursor
+  • |[[| and |]]| in Normal mode jump between shell prompts for shells which emit
+    OSC 133 sequences ("shell integration" or "semantic prompts").
 
 • Snippet:
   • `<Tab>` in Insert and Select mode maps to `vim.snippet.jump({ direction = 1 })`
@@ -309,6 +311,10 @@ LSP
 • |vim.lsp.config()| has been added to define default configurations for
   servers. In addition, configurations can be specified in `lsp/<name>.lua`.
 • |vim.lsp.enable()| has been added to enable servers.
+• |vim.lsp.buf.code_action()| resolves the `command` property during the
+  `codeAction/resolve` request.
+• The `textDocument/completion` request now includes the completion context in
+  its parameters.
 
 LUA
 
@@ -423,6 +429,10 @@ TREESITTER
   code block fence lines vertically.
 • |vim.treesitter.language.inspect()| shows additional information, including
   parser version for ABI 15 parsers.
+• |TSQuery:disable_pattern()| and |TSQuery:disable_capture()| to turn off
+  a specific pattern or capture in a query.
+• |vim.treesitter.get_captures_at_pos()| returns the `pattern_id` of the
+  pattern used to match each capture.
 
 TUI
 
