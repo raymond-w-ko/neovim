@@ -759,6 +759,7 @@ describe('decorations providers', function()
   end)
 
   it('errors gracefully', function()
+    screen:try_resize(65, screen._height)
     insert(mulholland)
 
     setup_provider [[
@@ -767,16 +768,16 @@ describe('decorations providers', function()
     end
     ]]
 
-    screen:expect{grid=[[
-      {2:Error in decoration provider ns1.start:} |
-      {2:Error executing lua: [string "<nvim>"]:4}|
-      {2:: Foo}                                   |
-      {2:stack traceback:}                        |
-      {2:        [C]: in function 'error'}        |
-      {2:        [string "<nvim>"]:4: in function}|
-      {2: <[string "<nvim>"]:3>}                  |
-      {18:Press ENTER or type command to continue}^ |
-    ]]}
+    screen:expect([[
+      // just to see if there was an accident                          |
+      {8:                                                                 }|
+      {2:Error in decoration provider "start" (ns=ns1):}                   |
+      {2:Error executing lua: [string "<nvim>"]:4: Foo}                    |
+      {2:stack traceback:}                                                 |
+      {2:        [C]: in function 'error'}                                 |
+      {2:        [string "<nvim>"]:4: in function <[string "<nvim>"]:3>}   |
+      {18:Press ENTER or type command to continue}^                          |
+    ]])
   end)
 
   it('can add new providers during redraw #26652', function()
@@ -6366,26 +6367,45 @@ l5
       ]]
     })
   end)
+
+  it('signcolumn correctly tracked with signs beyond eob and pair end before start', function()
+    api.nvim_set_option_value('signcolumn', 'auto:2', {})
+    api.nvim_set_option_value('filetype', 'lua', {})
+    api.nvim_buf_set_lines(0, 0, -1, false, {'foo', 'bar'})
+    api.nvim_buf_set_extmark(0, ns, 2, 0, {sign_text='S1'})
+    api.nvim_set_hl(0, 'SignColumn', { link = 'Error' })
+    screen:expect([[
+      ^foo                                               |
+      bar                                               |
+      {1:~                                                 }|*7
+                                                        |
+    ]])
+    api.nvim_buf_set_extmark(0, ns, 0, 0, {sign_text='S2', end_row = 1})
+    api.nvim_buf_set_lines(0, 0, -1, false, {'-- foo', '-- bar'})
+    api.nvim_buf_clear_namespace(0, ns, 0, -1)
+    screen:expect([[
+      ^-- foo                                            |
+      -- bar                                            |
+      {1:~                                                 }|*7
+                                                        |
+    ]])
+    assert_alive()
+  end)
 end)
 
 describe('decorations: virt_text', function()
-  local screen ---@type test.functional.ui.screen
+  local ns, screen ---@type integer, test.functional.ui.screen
 
   before_each(function()
     clear()
     screen = Screen.new(50, 10)
+    ns = api.nvim_create_namespace('test')
   end)
 
   it('avoids regression in #17638', function()
-    exec_lua[[
-      vim.wo.number = true
-      vim.wo.relativenumber = true
-    ]]
-
+    command 'set number relativenumber'
     command 'normal 4ohello'
     command 'normal aVIRTUAL'
-
-    local ns = api.nvim_create_namespace('test')
 
     api.nvim_buf_set_extmark(0, ns, 2, 0, {
       virt_text = {{"hello", "String"}},
@@ -6427,7 +6447,6 @@ describe('decorations: virt_text', function()
                                                         |
     ]]}
 
-    local ns = api.nvim_create_namespace('ns')
     for row = 1, 5 do
       api.nvim_buf_set_extmark(0, ns, row, 0, { id = 1, virt_text = {{'world', 'Normal'}} })
     end
@@ -6439,6 +6458,30 @@ describe('decorations: virt_text', function()
       {1:~                                                 }|*3
                                                         |
     ]]}
+  end)
+
+  it('redraws correctly when removing mark whose end ends up in front of start', function()
+    command('normal 5ohello')
+    api.nvim_buf_set_extmark(0, ns, 2, 0, { end_col = 1, virt_text = {{'world', 'Normal'}} })
+    screen:expect([[
+                                                        |
+      hello                                             |
+      hello world                                       |
+      hello                                             |*2
+      hell^o                                             |
+      {1:~                                                 }|*3
+                                                        |
+    ]])
+    feed('3Gdd')
+    api.nvim_buf_clear_namespace(0, ns, 0, -1)
+    screen:expect([[
+                                                        |
+      hello                                             |
+      ^hello                                             |
+      hello                                             |*2
+      {1:~                                                 }|*4
+                                                        |
+    ]])
   end)
 end)
 
