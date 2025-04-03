@@ -299,7 +299,7 @@ void tui_set_key_encoding(TUIData *tui)
     // Progressive enhancement flags:
     //   0b01   (1) Disambiguate escape codes
     //   0b10   (2) Report event types
-    out(tui, S_LEN("\x1b[>1u"));
+    out(tui, S_LEN("\x1b[>3u"));
     break;
   case kKeyEncodingXterm:
     out(tui, S_LEN("\x1b[>4;2m"));
@@ -1578,7 +1578,8 @@ void tui_suspend(TUIData *tui)
   tui_terminal_stop(tui);
   stream_set_blocking(tui->input.in_fd, true);   // normalize stream (#2598)
 
-  kill(0, SIGTSTP);
+  // Avoid os/signal.c SIGTSTP handler. ex_stop calls auto_writeall. #33258
+  kill(0, SIGSTOP);
 
   tui_terminal_start(tui);
   tui_terminal_after_startup(tui);

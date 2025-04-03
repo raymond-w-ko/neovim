@@ -15,6 +15,26 @@ local eq = t.eq
 local assert_alive = n.assert_alive
 local pcall_err = t.pcall_err
 
+--- @return integer
+local function setup_provider(code)
+  return exec_lua ([[
+    local api = vim.api
+    _G.ns1 = api.nvim_create_namespace "ns1"
+  ]] .. (code or [[
+    beamtrace = {}
+    local function on_do(kind, ...)
+      table.insert(beamtrace, {kind, ...})
+    end
+  ]]) .. [[
+    api.nvim_set_decoration_provider(_G.ns1, {
+      on_start = on_do; on_buf = on_do;
+      on_win = on_do; on_line = on_do;
+      on_end = on_do; _on_spell_nav = on_do;
+    })
+    return _G.ns1
+  ]])
+end
+
 describe('decorations providers', function()
   local screen ---@type test.functional.ui.screen
   before_each(function()
@@ -51,26 +71,6 @@ describe('decorations providers', function()
     switch_buffer(&save_buf, buf);
     posp = getmark(mark, false);
     restore_buffer(&save_buf); ]]
-
-  --- @return integer
-  local function setup_provider(code)
-    return exec_lua ([[
-      local api = vim.api
-      _G.ns1 = api.nvim_create_namespace "ns1"
-    ]] .. (code or [[
-      beamtrace = {}
-      local function on_do(kind, ...)
-        table.insert(beamtrace, {kind, ...})
-      end
-    ]]) .. [[
-      api.nvim_set_decoration_provider(_G.ns1, {
-        on_start = on_do; on_buf = on_do;
-        on_win = on_do; on_line = on_do;
-        on_end = on_do; _on_spell_nav = on_do;
-      })
-      return _G.ns1
-    ]])
-  end
 
   local function check_trace(expected)
     local actual = exec_lua [[ local b = beamtrace beamtrace = {} return b ]]
@@ -758,28 +758,6 @@ describe('decorations providers', function()
     ]])
   end)
 
-  it('errors gracefully', function()
-    screen:try_resize(65, screen._height)
-    insert(mulholland)
-
-    setup_provider [[
-    function on_do(...)
-      error "Foo"
-    end
-    ]]
-
-    screen:expect([[
-      // just to see if there was an accident                          |
-      {8:                                                                 }|
-      {2:Error in decoration provider "start" (ns=ns1):}                   |
-      {2:Error executing lua: [string "<nvim>"]:4: Foo}                    |
-      {2:stack traceback:}                                                 |
-      {2:        [C]: in function 'error'}                                 |
-      {2:        [string "<nvim>"]:4: in function <[string "<nvim>"]:3>}   |
-      {18:Press ENTER or type command to continue}^                          |
-    ]])
-  end)
-
   it('can add new providers during redraw #26652', function()
     setup_provider [[
     local ns = api.nvim_create_namespace('test_no_add')
@@ -832,6 +810,59 @@ describe('decorations providers', function()
       {1:~                                       }|*5
                                               |
     ]])
+  end)
+
+  it('inline virt_text does not result in wrong cursor column #33153', function()
+    insert("line1 with a lot of text\nline2 with a lot of text")
+    setup_provider([[
+      _G.do_win = false
+      vim.keymap.set('n', 'f', function()
+        _G.do_win = true
+        vim.cmd('redraw!')
+      end)
+      vim.o.concealcursor = 'n'
+      function on_do(event)
+        if event == 'win' and _G.do_win then
+          vim.api.nvim_buf_set_extmark(0, ns1, 1, 0, {
+            virt_text = { { 'virt_text ' } },
+            virt_text_pos = 'inline'
+          })
+        end
+      end
+    ]])
+    feed('f')
+    screen:expect([[
+      line1 with a lot of text                |
+      virt_text line2 with a lot of tex^t      |
+      {1:~                                       }|*5
+                                              |
+    ]])
+  end)
+end)
+
+describe('decoration_providers', function()
+  it('errors and logs gracefully', function()
+    local testlog = 'Xtest_decorations_log'
+    clear({ env = { NVIM_LOG_FILE = testlog } })
+    local screen = Screen.new(65, 7)
+    setup_provider([[
+      function on_do(...)
+        error "Foo"
+      end
+    ]])
+    screen:expect([[
+      {3:                                                                 }|
+      {9:Error in decoration provider "start" (ns=ns1):}                   |
+      {9:Error executing lua: [string "<nvim>"]:4: Foo}                    |
+      {9:stack traceback:}                                                 |
+      {9:        [C]: in function 'error'}                                 |
+      {9:        [string "<nvim>"]:4: in function <[string "<nvim>"]:3>}   |
+      {6:Press ENTER or type command to continue}^                          |
+    ]])
+    t.assert_log('Error in decoration provider "start" %(ns=ns1%):', testlog, 100)
+    t.assert_log('Error executing lua: %[string "<nvim>"%]:4: Foo', testlog, 100)
+    n.check_close()
+    os.remove(testlog)
   end)
 end)
 
@@ -2952,6 +2983,35 @@ describe('extmark decorations', function()
       {1:~                                                 }|*3
                                                         |
     ]])
+    -- No scrolling for concealed topline #33033
+    api.nvim_buf_clear_namespace(0, ns, 0, -1)
+    api.nvim_buf_set_extmark(0, ns, 1, 0, { virt_lines_above = true, virt_lines = { { { "virt_above 2" } } } })
+    api.nvim_buf_set_extmark(0, ns, 0, 0, { conceal_lines = "" })
+    feed('ggjj')
+    screen:expect([[
+      {2:    }virt_above 2                                  |
+      {2:  2 }    local text, hl_id_cell, count = unpack(ite|
+      {2:    }m)                                            |
+      {2:  3 }^    if hl_id_cell ~= nil then                 |
+      {2:  4 }        hl_id = hl_id_cell                    |
+      {2:  5 }conceal text                                  |
+      {2:  6 }    for _ = 1, (count or 1) do                |
+      {2:  7 }        local cell = line[colpos]             |
+      {2:  8 }        cell.text = text                      |
+      {2:  9 }        cell.hl_id = hl_id                    |
+      {2: 10 }        colpos = colpos+1                     |
+      {2: 11 }    end                                       |
+      {2: 12 }end                                           |
+      {1:~                                                 }|
+                                                        |
+    ]])
+    -- No asymmetric topline for <C-E><C-Y> #33182
+    feed('4<C-E>')
+    exec('set concealcursor=n')
+    api.nvim_buf_set_extmark(0, ns, 4, 0, { conceal_lines = "" })
+    eq(5, n.fn.line('w0'))
+    feed('<C-E><C-Y>')
+    eq(5, n.fn.line('w0'))
   end)
 end)
 
@@ -6834,4 +6894,3 @@ describe('decorations: window scoped', function()
     eq({ wins = {} }, api.nvim__ns_get(ns))
   end)
 end)
-
