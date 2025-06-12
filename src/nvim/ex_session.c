@@ -323,7 +323,8 @@ static int ses_put_fname(FILE *fd, char *name, unsigned *flagp)
 /// @param add_edit  add ":edit" command to view
 /// @param flagp  vop_flags or ssop_flags
 /// @param current_arg_idx  current argument index of the window, use -1 if unknown
-static int put_view(FILE *fd, win_T *wp, int add_edit, unsigned *flagp, int current_arg_idx)
+static int put_view(FILE *fd, win_T *wp, tabpage_T *tp, bool add_edit, unsigned *flagp,
+                    int current_arg_idx)
 {
   int f;
   bool did_next = false;
@@ -339,6 +340,7 @@ static int put_view(FILE *fd, win_T *wp, int add_edit, unsigned *flagp, int curr
     if (ses_arglist(fd, "arglocal", &wp->w_alist->al_ga,
                     flagp == &vop_flags
                     || !(*flagp & kOptSsopFlagCurdir)
+                    || tp->tp_localdir != NULL
                     || wp->w_localdir != NULL, flagp) == FAIL) {
       return FAIL;
     }
@@ -468,7 +470,7 @@ static int put_view(FILE *fd, win_T *wp, int add_edit, unsigned *flagp, int curr
   if (do_cursor) {
     // Restore the cursor line in the file and relatively in the
     // window.  Don't use "G", it changes the jumplist.
-    if (wp->w_height_inner <= 0) {
+    if (wp->w_view_height <= 0) {
       if (fprintf(fd, "let s:l = %" PRIdLINENR "\n", wp->w_cursor.lnum) < 0) {
         return FAIL;
       }
@@ -477,8 +479,8 @@ static int put_view(FILE *fd, win_T *wp, int add_edit, unsigned *flagp, int curr
                        " * winheight(0) + %d) / %d)\n",
                        wp->w_cursor.lnum,
                        wp->w_cursor.lnum - wp->w_topline,
-                       (wp->w_height_inner / 2),
-                       wp->w_height_inner) < 0) {
+                       (wp->w_view_height / 2),
+                       wp->w_view_height) < 0) {
       return FAIL;
     }
     if (fprintf(fd,
@@ -638,17 +640,13 @@ static int makeopens(FILE *fd, char *dirnow)
     return FAIL;
   }
 
-  // save 'shortmess' if not storing options
+  // Save 'shortmess' if not storing options.
   if ((ssop_flags & kOptSsopFlagOptions) == 0) {
     PUTLINE_FAIL("let s:shortmess_save = &shortmess");
   }
 
-  // set 'shortmess' for the following.  Add the 'A' flag if it was there
-  PUTLINE_FAIL("if &shortmess =~ 'A'");
-  PUTLINE_FAIL("  set shortmess=aoOA");
-  PUTLINE_FAIL("else");
-  PUTLINE_FAIL("  set shortmess=aoO");
-  PUTLINE_FAIL("endif");
+  // Set 'shortmess' for the following.
+  PUTLINE_FAIL("set shortmess+=aoO");
 
   // Now save the current files, current buffer first.
   // Put all buffers into the buffer list.
@@ -835,7 +833,7 @@ static int makeopens(FILE *fd, char *dirnow)
       if (!ses_do_win(wp)) {
         continue;
       }
-      if (put_view(fd, wp, wp != edited_win, &ssop_flags, cur_arg_idx)
+      if (put_view(fd, wp, tp, wp != edited_win, &ssop_flags, cur_arg_idx)
           == FAIL) {
         return FAIL;
       }
@@ -1053,7 +1051,7 @@ void ex_mkrc(exarg_T *eap)
         }
         xfree(dirnow);
       } else {
-        failed |= (put_view(fd, curwin, !using_vdir, flagp, -1) == FAIL);
+        failed |= (put_view(fd, curwin, curtab, !using_vdir, flagp, -1) == FAIL);
       }
       if (fprintf(fd,
                   "%s",

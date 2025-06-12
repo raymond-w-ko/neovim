@@ -247,8 +247,7 @@ static void parse_msgpack(Channel *channel)
   Unpacker *p = channel->rpc.unpacker;
   while (unpacker_advance(p)) {
     if (p->type == kMessageTypeRedrawEvent) {
-      // When exiting, ui_client_stop() has already been called, so don't handle UI events.
-      if (ui_client_channel_id && !exiting) {
+      if (ui_client_attached) {
         if (p->has_grid_line_event) {
           ui_client_event_raw_line(&p->grid_line_event);
           p->has_grid_line_event = false;
@@ -499,18 +498,28 @@ static void rpc_close_event(void **argv)
   if (is_ui_client || channel->streamtype == kChannelStreamStdio) {
     if (!is_ui_client) {
       // Avoid hanging when there are no other UIs and a prompt is triggered on exit.
-      remote_ui_disconnect(channel->id);
+      remote_ui_disconnect(channel->id, NULL, false);
+    } else {
+      ui_client_may_restart_server();
+      if (ui_client_channel_id != channel->id) {
+        // A new server has been started. Don't exit.
+        return;
+      }
     }
-
     if (!channel->detach) {
-      exit_on_closed_chan(channel->exit_status == -1 ? 0 : channel->exit_status);
+      if (channel->streamtype == kChannelStreamProc && ui_client_error_exit < 0) {
+        // Wait for the embedded server to exit instead of exiting immediately,
+        // as it's necessary to get the server's exit code in on_proc_exit().
+      } else {
+        exit_on_closed_chan(0);
+      }
     }
   }
 }
 
 void rpc_free(Channel *channel)
 {
-  remote_ui_disconnect(channel->id);
+  remote_ui_disconnect(channel->id, NULL, false);
   unpacker_teardown(channel->rpc.unpacker);
   xfree(channel->rpc.unpacker);
 

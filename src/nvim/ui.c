@@ -223,9 +223,11 @@ void ui_refresh(void)
 
   // Reset 'cmdheight' for all tabpages when ext_messages toggles.
   if (had_message != ui_ext[kUIMessages]) {
-    set_option_value(kOptCmdheight, NUMBER_OPTVAL(had_message), 0);
-    FOR_ALL_TABS(tp) {
-      tp->tp_ch_used = had_message;
+    if (ui_refresh_cmdheight) {
+      set_option_value(kOptCmdheight, NUMBER_OPTVAL(had_message), 0);
+      FOR_ALL_TABS(tp) {
+        tp->tp_ch_used = had_message;
+      }
     }
     msg_scroll_flush();
   }
@@ -537,7 +539,21 @@ void ui_flush(void)
   if (!ui_active()) {
     return;
   }
+
+  static bool was_busy = false;
+
   cmdline_ui_flush();
+
+  if (State != MODE_CMDLINE && curwin->w_floating && curwin->w_config.hide) {
+    if (!was_busy) {
+      ui_call_busy_start();
+      was_busy = true;
+    }
+  } else if (was_busy) {
+    ui_call_busy_stop();
+    was_busy = false;
+  }
+
   win_ui_flush(false);
   msg_ext_ui_flush();
   msg_scroll_flush();
@@ -545,6 +561,12 @@ void ui_flush(void)
   if (pending_cursor_update) {
     ui_call_grid_cursor_goto(cursor_grid_handle, cursor_row, cursor_col);
     pending_cursor_update = false;
+    // The cursor move might change the composition order,
+    // so flush again to update the windows that changed
+    // TODO(bfredl): refactor the flow of information so that win_ui_flush()
+    // only is called once. (as order state is exposed, it should be owned
+    // by nvim core, not the compositor)
+    win_ui_flush(false);
   }
   if (pending_mode_info_update) {
     Arena arena = ARENA_EMPTY;
@@ -591,8 +613,8 @@ void ui_check_mouse(void)
     checkfor = MOUSE_INSERT;
   } else if (State & MODE_CMDLINE) {
     checkfor = MOUSE_COMMAND;
-  } else if (State == MODE_CONFIRM || State == MODE_EXTERNCMD) {
-    checkfor = ' ';  // don't use mouse for ":confirm" or ":!cmd"
+  } else if (State == MODE_EXTERNCMD) {
+    checkfor = ' ';  // don't use mouse for ":!cmd"
   }
 
   // mouse should be active if at least one of the following is true:

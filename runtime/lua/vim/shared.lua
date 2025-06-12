@@ -95,7 +95,7 @@ end
 ---
 --- @see |string.gmatch()|
 --- @see |vim.split()|
---- @see |lua-patterns|
+--- @see |lua-pattern|s
 --- @see https://www.lua.org/pil/20.2.html
 --- @see http://lua-users.org/wiki/StringLibraryTutorial
 ---
@@ -105,7 +105,7 @@ end
 --- @return fun():string? : Iterator over the split components
 function vim.gsplit(s, sep, opts)
   local plain --- @type boolean?
-  local trimempty = false
+  local trimempty = false --- @type boolean?
   if type(opts) == 'boolean' then
     plain = opts -- For backwards compatibility.
   else
@@ -366,7 +366,7 @@ local function can_merge(v)
 end
 
 --- Recursive worker for tbl_extend
---- @param behavior 'error'|'keep'|'force'
+--- @param behavior 'error'|'keep'|'force'|fun(key:any, prev_value:any?, value:any): any
 --- @param deep_extend boolean
 --- @param ... table<any,any>
 local function tbl_extend_rec(behavior, deep_extend, ...)
@@ -381,6 +381,8 @@ local function tbl_extend_rec(behavior, deep_extend, ...)
       for k, v in pairs(tbl) do
         if deep_extend and can_merge(v) and can_merge(ret[k]) then
           ret[k] = tbl_extend_rec(behavior, true, ret[k], v)
+        elseif type(behavior) == 'function' then
+          ret[k] = behavior(k, ret[k], v)
         elseif behavior ~= 'force' and ret[k] ~= nil then
           if behavior == 'error' then
             error('key found in more than one map: ' .. k)
@@ -395,11 +397,16 @@ local function tbl_extend_rec(behavior, deep_extend, ...)
   return ret
 end
 
---- @param behavior 'error'|'keep'|'force'
+--- @param behavior 'error'|'keep'|'force'|fun(key:any, prev_value:any?, value:any): any
 --- @param deep_extend boolean
 --- @param ... table<any,any>
 local function tbl_extend(behavior, deep_extend, ...)
-  if behavior ~= 'error' and behavior ~= 'keep' and behavior ~= 'force' then
+  if
+    behavior ~= 'error'
+    and behavior ~= 'keep'
+    and behavior ~= 'force'
+    and type(behavior) ~= 'function'
+  then
     error('invalid "behavior": ' .. tostring(behavior))
   end
 
@@ -420,10 +427,12 @@ end
 ---
 ---@see |extend()|
 ---
----@param behavior 'error'|'keep'|'force' Decides what to do if a key is found in more than one map:
+---@param behavior 'error'|'keep'|'force'|fun(key:any, prev_value:any?, value:any): any Decides what to do if a key is found in more than one map:
 ---      - "error": raise an error
 ---      - "keep":  use value from the leftmost map
 ---      - "force": use value from the rightmost map
+---      - If a function, it receives the current key, the previous value in the currently merged table (if present), the current value and should
+---        return the value for the given key in the merged table.
 ---@param ... table Two or more tables
 ---@return table : Merged table
 function vim.tbl_extend(behavior, ...)
@@ -441,10 +450,12 @@ end
 ---
 ---@generic T1: table
 ---@generic T2: table
----@param behavior 'error'|'keep'|'force' Decides what to do if a key is found in more than one map:
+---@param behavior 'error'|'keep'|'force'|fun(key:any, prev_value:any?, value:any): any Decides what to do if a key is found in more than one map:
 ---      - "error": raise an error
 ---      - "keep":  use value from the leftmost map
 ---      - "force": use value from the rightmost map
+---      - If a function, it receives the current key, the previous value in the currently merged table (if present), the current value and should
+---        return the value for the given key in the merged table.
 ---@param ... T2 Two or more tables
 ---@return T1|T2 (table) Merged table
 function vim.tbl_deep_extend(behavior, ...)
@@ -605,7 +616,7 @@ function vim.spairs(t)
   --- @cast t table<any,any>
 
   -- collect the keys
-  local keys = {}
+  local keys = {} --- @type string[]
   for k in pairs(t) do
     table.insert(keys, k)
   end
@@ -784,16 +795,18 @@ end
 
 --- Trim whitespace (Lua pattern "%s") from both sides of a string.
 ---
----@see |lua-patterns|
+---@see |lua-pattern|s
 ---@see https://www.lua.org/pil/20.2.html
 ---@param s string String to trim
 ---@return string String with whitespace removed from its beginning and end
 function vim.trim(s)
   vim.validate('s', s, 'string')
-  return s:match('^%s*(.*%S)') or ''
+  -- `s:match('^%s*(.*%S)')` is slow for long whitespace strings,
+  -- so we are forced to split it into two parts to prevent this
+  return s:gsub('^%s+', ''):match('^.*%S') or ''
 end
 
---- Escapes magic chars in |lua-patterns|.
+--- Escapes magic chars in |lua-pattern|s.
 ---
 ---@see https://github.com/rxi/lume
 ---@param s string String to escape
@@ -854,7 +867,7 @@ do
   --- @param param_name string
   --- @param val any
   --- @param validator vim.validate.Validator
-  --- @param message? string
+  --- @param message? string "Expected" message
   --- @param allow_alias? boolean Allow short type names: 'n', 's', 't', 'b', 'f', 'c'
   --- @return string?
   local function is_valid(param_name, val, validator, message, allow_alias)
@@ -866,18 +879,18 @@ do
       end
 
       if not is_type(val, expected) then
-        return string.format('%s: expected %s, got %s', param_name, expected, type(val))
+        return ('%s: expected %s, got %s'):format(param_name, message or expected, type(val))
       end
     elseif vim.is_callable(validator) then
       -- Check user-provided validation function
       local valid, opt_msg = validator(val)
       if not valid then
-        local err_msg =
-          string.format('%s: expected %s, got %s', param_name, message or '?', tostring(val))
-
-        if opt_msg then
-          err_msg = string.format('%s. Info: %s', err_msg, opt_msg)
-        end
+        local err_msg = ('%s: expected %s, got %s'):format(
+          param_name,
+          message or '?',
+          tostring(val)
+        )
+        err_msg = opt_msg and ('%s. Info: %s'):format(err_msg, opt_msg) or err_msg
 
         return err_msg
       end
@@ -1014,7 +1027,7 @@ do
   ---
   --- @param name string Argument name
   --- @param value any Argument value
-  --- @param validator vim.validate.Validator
+  --- @param validator vim.validate.Validator :
   ---   - (`string|string[]`): Any value that can be returned from |lua-type()| in addition to
   ---     `'callable'`: `'boolean'`, `'callable'`, `'function'`, `'nil'`, `'number'`, `'string'`, `'table'`,
   ---     `'thread'`, `'userdata'`.
@@ -1181,7 +1194,6 @@ do
   end
 end
 
---- @private
 --- @generic T
 --- @param root string
 --- @param mod T
@@ -1201,7 +1213,6 @@ function vim._defer_require(root, mod)
   })
 end
 
---- @private
 --- Creates a module alias/shim that lazy-loads a target module.
 ---
 --- Unlike `vim.defaulttable()` this also:
@@ -1410,7 +1421,7 @@ function vim._resolve_bufnr(bufnr)
 end
 
 --- @generic T
---- @param x elem_or_list<T>?
+--- @param x T|T[]
 --- @return T[]
 function vim._ensure_list(x)
   if type(x) == 'table' then
@@ -1418,5 +1429,8 @@ function vim._ensure_list(x)
   end
   return { x }
 end
+
+-- Use max 32-bit signed int value to avoid overflow on 32-bit systems. #31633
+vim._maxint = 2 ^ 32 - 1
 
 return vim

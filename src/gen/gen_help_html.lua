@@ -72,6 +72,7 @@ local new_layout = {
   ['gui.txt'] = true,
   ['intro.txt'] = true,
   ['lua.txt'] = true,
+  ['lua-guide.txt'] = true,
   ['luaref.txt'] = true,
   ['news.txt'] = true,
   ['news-0.9.txt'] = true,
@@ -93,7 +94,7 @@ local redirects = {
 
 -- TODO: These known invalid |links| require an update to the relevant docs.
 local exclude_invalid = {
-  ["'string'"] = 'eval.txt',
+  ["'string'"] = 'vimeval.txt',
   Query = 'treesitter.txt',
   matchit = 'vim_diff.txt',
   ['set!'] = 'treesitter.txt',

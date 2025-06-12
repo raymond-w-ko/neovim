@@ -226,8 +226,7 @@ the editor.
 	sent from Nvim, like for |ui-cmdline|.
 
 ["chdir", path] ~
-	The |current-directory| of the embedded Nvim process changed to
-	`path`.
+	The |current-directory| changed to `path`.
 
 ["mode_change", mode, mode_idx] ~
 	Editor mode changed.  The `mode` parameter is a string representing
@@ -248,6 +247,14 @@ the editor.
 ["busy_stop"] ~
 	Indicates to the UI that it must stop rendering the cursor. This event
 	is misnamed and does not actually have anything to do with busyness.
+
+["restart", progpath, argv] ~
+	|:restart| command has been used and the Nvim server is about to exit.
+	The UI should wait for the server to exit, and then start a new server
+	using `progpath` as the full path to the Nvim executable |v:progpath| and
+	`argv` as its arguments |v:argv|, and reattach to the new server.
+	Note: |--embed| and |--headless| are excluded from `argv`, and the client
+	should decide itself whether to add either flag.
 
 ["suspend"] ~
 	|:suspend| command or |CTRL-Z| mapping is used. A terminal client (or
@@ -609,12 +616,31 @@ tabs.
 	size). If the window was previously hidden, it should now be shown
 	again.
 
-["win_float_pos", grid, win, anchor, anchor_grid, anchor_row, anchor_col, mouse_enabled, zindex] ~
-	Display or reconfigure floating window `win`. The window should be
-	displayed above another grid `anchor_grid` at the specified position
-	`anchor_row` and `anchor_col`. For the meaning of `anchor` and more details
-	of positioning, see |nvim_open_win()|. `mouse_enabled` is true if the
-	window can receive mouse events.
+["win_float_pos", grid, win, anchor, anchor_grid, anchor_row, anchor_col, mouse_enabled, zindex, compindex, screen_row, screen_col] ~
+	Display or reconfigure floating window `win`.
+
+	There are two alternative ways of positioning the window
+	  -  Manually - The window should be displayed above another grid
+	     `anchor_grid` at the specified position `anchor_row` and
+	     `anchor_col`. For the meaning of `anchor` and more details of
+	     positioning, see |nvim_open_win()|. NOTE: you have to manually
+	     ensure that the window fits the screen, possibly by further
+	     reposition it. Ignore `screen_row` and `screen_col` in this case.
+	  - Let nvim take care of the positioning - You can ignore `anchor`
+	    and display the window at `screen_row` and `screen_col`.
+
+	`mouse_enabled` is true if the window can receive mouse events.
+
+	`zindex` is the configured zindex, while `compindex` is the exact
+	rendering order of the windows determined by nvim. To render exactly
+	like the TUI, first render all the non-floating windows, then render
+	in the `compindex` order, overwriting any floating window cells.
+	Finally, blend the floating window cells against the non-floating
+	background. To add more blending, you can group the windows by zindex,
+	and blend between the layers. But note that windows inside the same
+	zindex should still overwrite previous cells inside the same layer
+	without blending. This ensures that plugins that render multiple
+	windows, to add borders for example, work as expected.
 
 ["win_external_pos", grid, win] ~
 	Display or reconfigure external window `win`. The window should be
@@ -627,7 +653,7 @@ tabs.
 ["win_close", grid] ~
 	Close the window.
 
-["msg_set_pos", grid, row, scrolled, sep_char] ~
+["msg_set_pos", grid, row, scrolled, sep_char, zindex, compindex] ~
 	Display messages on `grid`.  The grid will be displayed at `row` on
 	the default grid (grid=1), covering the full column width. `scrolled`
 	indicates whether the message area has been scrolled to cover other
@@ -637,6 +663,10 @@ tabs.
 
 	When |ui-messages| is active, no message grid is used, and this event
 	will not be sent.
+
+	`zindex` and `compindex` have the same meaning as for `win_float_pos`.
+	The `zindex` always has a fixed value of 200 and included for
+	completeness.
 
 ["win_viewport", grid, win, topline, botline, curline, curcol, line_count, scroll_delta] ~
 	Indicates the range of buffer text displayed in the window, as well
@@ -752,9 +782,10 @@ For command-line 'wildmenu' UI events, activate |ui-popupmenu|.
 
 	Should be hidden at next cmdline_show.
 
-["cmdline_hide", abort] ~
-	Hide the cmdline. `abort` is true if the cmdline is hidden after an
-	aborting condition (|c_Esc| or |c_CTRL-C|).
+["cmdline_hide", level, abort] ~
+	Hide the cmdline. `level` is the nesting level of the cmdline being hidden.
+	`abort` is true if the cmdline is hidden after an aborting condition
+	(|c_Esc| or |c_CTRL-C|).
 
 ["cmdline_block_show", lines] ~
 	Show a block of context to the current command line. For example if
@@ -787,7 +818,7 @@ will be set to zero, but can be changed and used for the replacing cmdline or
 message window. Cmdline state is emitted as |ui-cmdline| events, which the UI
 must handle.
 
-["msg_show", kind, content, replace_last, history] ~
+["msg_show", kind, content, replace_last, history, append] ~
 	Display a message to the user.
 
 	kind
@@ -809,6 +840,7 @@ must handle.
 		"quickfix"	Quickfix navigation message
 		"search_cmd"	Entered search command
 		"search_count"	Search count message ("S" flag of 'shortmess')
+		"shell_cmd"	|:!cmd| executed command
 		"shell_err"	|:!cmd| shell stderr output
 		"shell_out"	|:!cmd| shell stdout output
 		"shell_ret"	|:!cmd| shell return code
@@ -836,6 +868,10 @@ must handle.
 	history
 	    True if the message was added to the |:messages| history.
 
+	append
+	    True if the message should be appeneded to the previous message,
+	    rather than started on a new line. Is set for |:echon|.
+
 ["msg_clear"] ~
 	Clear all messages currently displayed by "msg_show". (Messages sent
 	by other "msg_" events below will not be affected).
@@ -861,5 +897,4 @@ must handle.
 ["msg_history_clear"] ~
 	Clear the |:messages| history.
 
-==============================================================================
  vim:tw=78:ts=8:noet:ft=help:norl:

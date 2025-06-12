@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "klib/kvec.h"
+#include "nvim/api/private/converter.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/private/validate.h"
@@ -17,6 +18,7 @@
 #include "nvim/channel.h"
 #include "nvim/channel_defs.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval.h"
 #include "nvim/event/defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
@@ -71,11 +73,25 @@ static void remote_ui_destroy(RemoteUI *ui)
   xfree(ui);
 }
 
-void remote_ui_disconnect(uint64_t channel_id)
+/// Removes the client on the given channel from the list of UIs.
+///
+/// @param err  if non-NULL and there is no UI on the channel, set an error
+/// @param send_error_exit  send an "error_exit" event with 0 status first
+void remote_ui_disconnect(uint64_t channel_id, Error *err, bool send_error_exit)
 {
   RemoteUI *ui = pmap_get(uint64_t)(&connected_uis, channel_id);
   if (!ui) {
+    if (err != NULL) {
+      api_set_error(err, kErrorTypeException,
+                    "UI not attached to channel: %" PRId64, channel_id);
+    }
     return;
+  }
+  if (send_error_exit) {
+    MAXSIZE_TEMP_ARRAY(args, 1);
+    ADD_C(args, INTEGER_OBJ(0));
+    push_call(ui, "error_exit", args);
+    ui_flush_buf(ui);
   }
   pmap_del(uint64_t)(&connected_uis, channel_id, NULL);
   ui_detach_impl(ui, channel_id);
@@ -231,12 +247,48 @@ void nvim_ui_set_focus(uint64_t channel_id, Boolean gained, Error *error)
 void nvim_ui_detach(uint64_t channel_id, Error *err)
   FUNC_API_SINCE(1) FUNC_API_REMOTE_ONLY
 {
-  if (!map_has(uint64_t, &connected_uis, channel_id)) {
+  remote_ui_disconnect(channel_id, err, false);
+}
+
+/// Sends a "restart" UI event to the UI on the given channel.
+///
+/// @return  false if there is no UI on the channel, otherwise true
+bool remote_ui_restart(uint64_t channel_id, Error *err)
+{
+  RemoteUI *ui = pmap_get(uint64_t)(&connected_uis, channel_id);
+  if (!ui) {
     api_set_error(err, kErrorTypeException,
                   "UI not attached to channel: %" PRId64, channel_id);
-    return;
+    return false;
   }
-  remote_ui_disconnect(channel_id);
+
+  MAXSIZE_TEMP_ARRAY(args, 2);
+
+  ADD_C(args, CSTR_AS_OBJ(get_vim_var_str(VV_PROGPATH)));
+
+  Arena arena = ARENA_EMPTY;
+  const list_T *l = get_vim_var_list(VV_ARGV);
+  int argc = tv_list_len(l);
+  assert(argc > 0);
+  Array argv = arena_array(&arena, (size_t)argc + 1);
+  bool had_minmin = false;
+  TV_LIST_ITER_CONST(l, li, {
+    const char *arg = tv_get_string(TV_LIST_ITEM_TV(li));
+    if (argv.size > 0 && !had_minmin && strequal(arg, "--")) {
+      had_minmin = true;
+    }
+    // Exclude --embed/--headless from `argv`, as the client may start the server in a
+    // different way than how the server was originally started.
+    if (argv.size == 0 || had_minmin
+        || (!strequal(arg, "--embed") && !strequal(arg, "--headless"))) {
+      ADD_C(argv, CSTR_AS_OBJ(arg));
+    }
+  });
+  ADD_C(args, ARRAY_OBJ(argv));
+
+  push_call(ui, "restart", args);
+  arena_mem_free(arena_finish(&arena));
+  return true;
 }
 
 // TODO(bfredl): use me to detach a specific ui from the server
@@ -488,7 +540,7 @@ void nvim_ui_pum_set_bounds(uint64_t channel_id, Float width, Float height, Floa
 ///
 /// The following terminal events are supported:
 ///
-///   - "termresponse": The terminal sent an OSC or DCS response sequence to
+///   - "termresponse": The terminal sent an OSC, DCS, or APC response sequence to
 ///                     Nvim. The payload is the received response. Sets
 ///                     |v:termresponse| and fires |TermResponse|.
 ///

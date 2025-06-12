@@ -15,6 +15,7 @@ local globalstate = {
 ---@field version? integer
 ---@field client_hints? table<integer, table<integer, lsp.InlayHint[]>> client_id -> (lnum -> hints)
 ---@field applied table<integer, integer> Last version of hints applied to this line
+
 ---@type table<integer, vim.lsp.inlay_hint.bufstate>
 local bufstates = vim.defaulttable(function(_)
   return setmetatable({ applied = {} }, {
@@ -231,7 +232,6 @@ end
 --- Refresh inlay hints, only if we have attached clients that support it
 ---@param bufnr (integer) Buffer handle, or 0 for current
 ---@param opts? vim.lsp.util._refresh.Opts Additional options to pass to util._refresh
----@private
 local function _refresh(bufnr, opts)
   opts = opts or {}
   opts['bufnr'] = bufnr

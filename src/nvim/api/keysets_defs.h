@@ -135,6 +135,7 @@ typedef struct {
   Boolean noautocmd;
   Boolean fixed;
   Boolean hide;
+  Integer _cmdline_offset;
 } Dict(win_config);
 
 typedef struct {
@@ -229,6 +230,7 @@ typedef struct {
   Integer end_row;
   Integer start_vcol;
   Integer end_vcol;
+  Integer max_height;
 } Dict(win_text_height);
 
 typedef struct {
@@ -330,8 +332,10 @@ typedef struct {
 } Dict(cmd_opts);
 
 typedef struct {
+  OptionalKeys is_set__echo_opts_;
   Boolean err;
   Boolean verbose;
+  String kind;
 } Dict(echo_opts);
 
 typedef struct {

@@ -1013,7 +1013,7 @@ local function m4(contents)
       return 'm4'
     end
   end
-  if vim.env.TERM == 'amiga' and findany(contents[1]:lower(), { '^;', '^%.bra' }) then
+  if vim.env.TERM == 'amiga' and findany(assert(contents[1]):lower(), { '^;', '^%.bra' }) then
     -- AmigaDos scripts
     return 'amiga'
   end
@@ -1021,16 +1021,46 @@ end
 
 --- Check if it is a Microsoft Makefile
 --- @type vim.filetype.mapfn
-function M.make(_, bufnr)
-  vim.b.make_microsoft = nil
+function M.make(path, bufnr)
+  vim.b.make_flavor = nil
+
+  -- 1. filename
+  local file_name = fn.fnamemodify(path, ':t')
+  if file_name == 'BSDmakefile' then
+    vim.b.make_flavor = 'bsd'
+    return 'make'
+  elseif file_name == 'GNUmakefile' then
+    vim.b.make_flavor = 'gnu'
+    return 'make'
+  end
+
+  -- 2. user's setting
+  if vim.g.make_flavor ~= nil then
+    vim.b.make_flavor = vim.g.make_flavor
+    return 'make'
+  elseif vim.g.make_microsoft ~= nil then
+    vim._truncated_echo_once(
+      "make_microsoft is deprecated; try g:make_flavor = 'microsoft' instead"
+    )
+    vim.b.make_flavor = 'microsoft'
+    return 'make'
+  end
+
+  -- 3. try to detect a flavor from file content
   for _, line in ipairs(getlines(bufnr, 1, 1000)) do
     if matchregex(line, [[\c^\s*!\s*\(ifn\=\(def\)\=\|include\|message\|error\)\>]]) then
-      vim.b.make_microsoft = 1
+      vim.b.make_flavor = 'microsoft'
       break
     elseif
-      matchregex(line, [[^ *ifn\=\(eq\|def\)\>]])
-      or findany(line, { '^ *[-s]?%s', '^ *%w+%s*[!?:+]=' })
+      matchregex(line, [[^\.\%(export\|error\|for\|if\%(n\=\%(def\|make\)\)\=\|info\|warning\)\>]])
     then
+      vim.b.make_flavor = 'bsd'
+      break
+    elseif
+      matchregex(line, [[^ *\%(ifn\=\%(eq\|def\)\|define\|override\)\>]])
+      or line:find('%$[({][a-z-]+%s+%S+') -- a function call, e.g. $(shell pwd)
+    then
+      vim.b.make_flavor = 'gnu'
       break
     end
   end
@@ -1140,12 +1170,17 @@ function M.news(_, bufnr)
   end
 end
 
---- This function checks if one of the first five lines start with a dot. In
---- that case it is probably an nroff file.
+--- This function checks if one of the first five lines start with a typical
+--- nroff pattern in man files.  In that case it is probably an nroff file.
 --- @type vim.filetype.mapfn
 function M.nroff(_, bufnr)
   for _, line in ipairs(getlines(bufnr, 1, 5)) do
-    if line:find('^%.') then
+    if
+      matchregex(
+        line,
+        [[^\%([.']\s*\%(TH\|D[dt]\|S[Hh]\|d[es]1\?\|so\)\s\+\S\|[.'']\s*ig\>\|\%([.'']\s*\)\?\\"\)]]
+      )
+    then
       return 'nroff'
     end
   end
@@ -1394,10 +1429,10 @@ function M.rules(path)
     return 'javascript'
   else
     local ok, config_lines = pcall(fn.readfile, '/etc/udev/udev.conf')
-    --- @cast config_lines +string[]
     if not ok then
       return 'hog'
     end
+    --- @cast config_lines -string
     local dir = fn.fnamemodify(path, ':h')
     for _, line in ipairs(config_lines) do
       local match = line:match(udev_rules_pattern)
@@ -1501,34 +1536,37 @@ local function sh(path, contents, name)
   end
 
   -- Get the name from the first line if not specified
-  name = name or contents[1]
-  if matchregex(name, [[\<csh\>]]) then
+  name = name or contents[1] or ''
+  if name:find('^csh$') or matchregex(name, [[^#!.\{-2,}\<csh\>]]) then
     -- Some .sh scripts contain #!/bin/csh.
     return M.shell(path, contents, 'csh')
+  elseif name:find('^tcsh$') or matchregex(name, [[^#!.\{-2,}\<tcsh\>]]) then
     -- Some .sh scripts contain #!/bin/tcsh.
-  elseif matchregex(name, [[\<tcsh\>]]) then
     return M.shell(path, contents, 'tcsh')
+  elseif name:find('^zsh$') or matchregex(name, [[^#!.\{-2,}\<zsh\>]]) then
     -- Some .sh scripts contain #!/bin/zsh.
-  elseif matchregex(name, [[\<zsh\>]]) then
     return M.shell(path, contents, 'zsh')
   end
 
   local on_detect --- @type fun(b: integer)?
 
-  if matchregex(name, [[\<ksh\>]]) then
+  if name:find('^ksh$') or matchregex(name, [[^#!.\{-2,}\<ksh\>]]) then
     on_detect = function(b)
       vim.b[b].is_kornshell = 1
       vim.b[b].is_bash = nil
       vim.b[b].is_sh = nil
     end
-  elseif vim.g.bash_is_sh or matchregex(name, [[\<\(bash\|bash2\)\>]]) then
+  elseif
+    vim.g.bash_is_sh
+    or name:find('^bash2?$')
+    or matchregex(name, [[^#!.\{-2,}\<bash2\=\>]])
+  then
     on_detect = function(b)
       vim.b[b].is_bash = 1
       vim.b[b].is_kornshell = nil
       vim.b[b].is_sh = nil
     end
-    -- Ubuntu links sh to dash
-  elseif matchregex(name, [[\<\(sh\|dash\)\>]]) then
+  elseif findany(name, { '^sh$', '^dash$' }) or matchregex(name, [[^#!.\{-2,}\<\%(da\)\=sh\>]]) then -- Ubuntu links "sh" to "dash"
     on_detect = function(b)
       vim.b[b].is_sh = 1
       vim.b[b].is_kornshell = nil
@@ -1640,7 +1678,7 @@ end
 --- @type vim.filetype.mapfn
 function M.tex(path, bufnr)
   local matched, _, format = getline(bufnr, 1):find('^%%&%s*(%a+)')
-  if matched then
+  if matched and format then
     --- @type string
     format = format:lower():gsub('pdf', '', 1)
   elseif path:lower():find('tex/context/.*/.*%.tex') then
@@ -1909,7 +1947,6 @@ local patterns_hashbang = {
   ['^vim\\>'] = { 'vim', { vim_regex = true } },
 }
 
----@private
 --- File starts with "#!".
 --- @param contents string[]
 --- @param path string
@@ -1917,16 +1954,15 @@ local patterns_hashbang = {
 --- @return string?
 --- @return fun(b: integer)?
 local function match_from_hashbang(contents, path, dispatch_extension)
-  local first_line = contents[1]
+  local first_line = assert(contents[1])
   -- Check for a line like "#!/usr/bin/env {options} bash".  Turn it into
   -- "#!/usr/bin/bash" to make matching easier.
   -- Recognize only a few {options} that are commonly used.
   if matchregex(first_line, [[^#!\s*\S*\<env\s]]) then
-    first_line = first_line:gsub('%S+=%S+', '')
-    first_line = first_line
-      :gsub('%-%-ignore%-environment', '', 1)
-      :gsub('%-%-split%-string', '', 1)
-      :gsub('%-[iS]', '', 1)
+    first_line = fn.substitute(first_line, [[\s\zs--split-string\(\s\|=\)]], '', '')
+    first_line = fn.substitute(first_line, [[\s\zs[A-Za-z0-9_]\+=\S*\ze\s]], '', 'g')
+    first_line =
+      fn.substitute(first_line, [[\s\zs\%(-[iS]\+\|--ignore-environment\)\ze\s]], '', 'g')
     first_line = fn.substitute(first_line, [[\<env\s\+]], '', '')
   end
 
@@ -1976,6 +2012,13 @@ local function match_from_hashbang(contents, path, dispatch_extension)
   return dispatch_extension(name)
 end
 
+--- @class vim.filetype.detect.PatternOpts
+--- @field vim_regex? true? use Vim regexes instead of Lua patterns.
+--- @field start_lnum? integer? Start line number for matching, defaults to 1.
+--- @field end_lnum? integer? End line number for matching, defaults to -1 (last line).
+--- @field ignore_case? true ignore case when matching.
+
+-- TODO(lewis6991): split this table into two tables, one for patterns and one for functions.
 local patterns_text = {
   ['^#compdef\\>'] = { 'zsh', { vim_regex = true } },
   ['^#autoload\\>'] = { 'zsh', { vim_regex = true } },
@@ -2102,14 +2145,13 @@ local patterns_text = {
   ['^#n$'] = 'sed',
 }
 
----@private
 --- File does not start with "#!".
 --- @param contents string[]
 --- @param path string
 --- @return string?
 --- @return fun(b: integer)?
 local function match_from_text(contents, path)
-  if contents[1]:find('^:$') then
+  if assert(contents[1]):find('^:$') then
     -- Bourne-like shell scripts: sh ksh bash bash2
     return sh(path, contents)
   elseif
@@ -2125,7 +2167,7 @@ local function match_from_text(contents, path)
   for k, v in pairs(patterns_text) do
     if type(v) == 'string' then
       -- Check the first line only
-      if contents[1]:find(k) then
+      if assert(contents[1]):find(k) then
         return v
       end
     elseif type(v) == 'function' then
@@ -2137,22 +2179,25 @@ local function match_from_text(contents, path)
     else
       --- @cast k string
       local opts = type(v) == 'table' and v[2] or {}
+      --- @cast opts vim.filetype.detect.PatternOpts
       if opts.start_lnum and opts.end_lnum then
         assert(
           not opts.ignore_case,
           'ignore_case=true is ignored when start_lnum is also present, needs refactor'
         )
         for i = opts.start_lnum, opts.end_lnum do
-          if not contents[i] then
+          local line = contents[i]
+          if not line then
             break
-          elseif contents[i]:find(k) then
+          elseif line:find(k) then
             return v[1]
           end
         end
       else
         local line_nr = opts.start_lnum == -1 and #contents or opts.start_lnum or 1
-        if contents[line_nr] then
-          local line = opts.ignore_case and contents[line_nr]:lower() or contents[line_nr]
+        local contents_line_nr = contents[line_nr]
+        if contents_line_nr then
+          local line = opts.ignore_case and contents_line_nr:lower() or contents_line_nr
           if opts.vim_regex and matchregex(line, k) or line:find(k) then
             return v[1]
           end
@@ -2169,7 +2214,7 @@ end
 --- @return string?
 --- @return fun(b: integer)?
 function M.match_contents(contents, path, dispatch_extension)
-  local first_line = contents[1]
+  local first_line = assert(contents[1])
   if first_line:find('^#!') then
     return match_from_hashbang(contents, path, dispatch_extension)
   else

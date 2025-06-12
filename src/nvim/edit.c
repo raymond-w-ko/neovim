@@ -381,6 +381,12 @@ static int insert_check(VimState *state)
     did_cursorhold = false;
   }
 
+  // Check if we need to cancel completion mode because the window
+  // or tab page was changed
+  if (ins_compl_active() && !ins_compl_win_active(curwin)) {
+    ins_compl_cancel();
+  }
+
   // If the cursor was moved we didn't just insert a space
   if (arrow_used) {
     s->inserted_space = false;
@@ -473,7 +479,7 @@ static int insert_check(VimState *state)
                                                 curbuf->b_p_ts,
                                                 curbuf->b_p_vts_array,
                                                 false)
-        && curwin->w_wrow == curwin->w_height_inner - 1 - get_scrolloff_value(curwin)
+        && curwin->w_wrow == curwin->w_view_height - 1 - get_scrolloff_value(curwin)
         && (curwin->w_cursor.lnum != curwin->w_topline
             || curwin->w_topfill > 0)) {
       if (curwin->w_topfill > 0) {
@@ -790,6 +796,10 @@ static int insert_handle_key(InsertState *s)
     break;
 
   case Ctrl_R:        // insert the contents of a register
+    if (ctrl_x_mode_register() && !ins_compl_active()) {
+      insert_do_complete(s);
+      break;
+    }
     ins_reg();
     auto_format(false, true);
     s->inserted_space = false;
@@ -1472,7 +1482,7 @@ void edit_putchar(int c, bool highlight)
   pc_status = PC_STATUS_UNSET;
   grid_line_start(&curwin->w_grid, pc_row);
   if (curwin->w_p_rl) {
-    pc_col = curwin->w_grid.cols - 1 - curwin->w_wcol;
+    pc_col = curwin->w_view_width - 1 - curwin->w_wcol;
 
     if (grid_line_getchar(pc_col, NULL) == NUL) {
       grid_line_put_schar(pc_col - 1, schar_from_ascii(' '), attr);
@@ -1597,7 +1607,7 @@ void display_dollar(colnr_T col_arg)
   char *p = get_cursor_line_ptr();
   curwin->w_cursor.col -= utf_head_off(p, p + col);
   curs_columns(curwin, false);              // Recompute w_wrow and w_wcol
-  if (curwin->w_wcol < curwin->w_grid.cols) {
+  if (curwin->w_wcol < curwin->w_view_width) {
     edit_putchar('$', false);
     dollar_vcol = curwin->w_virtcol;
   }
@@ -1632,7 +1642,7 @@ void change_indent(int type, int amount, int round, bool call_changed_bytes)
 
   // MODE_VREPLACE state needs to know what the line was like before changing
   if (State & VREPLACE_FLAG) {
-    orig_line = xstrdup(get_cursor_line_ptr());   // Deal with NULL below
+    orig_line = xstrnsave(get_cursor_line_ptr(), (size_t)get_cursor_line_len());
     orig_col = curwin->w_cursor.col;
   }
 
@@ -1782,7 +1792,7 @@ void change_indent(int type, int amount, int round, bool call_changed_bytes)
   // then put it back again the way we wanted it.
   if (State & VREPLACE_FLAG) {
     // Save new line
-    char *new_line = xstrdup(get_cursor_line_ptr());
+    char *new_line = xstrnsave(get_cursor_line_ptr(), (size_t)get_cursor_line_len());
 
     // We only put back the new line up to the cursor
     new_line[curwin->w_cursor.col] = NUL;
@@ -2123,7 +2133,8 @@ void insertchar(int c, int flags, int second_indent)
       i -= middle_len;
 
       // Check some expected things before we go on
-      if (i >= 0 && (uint8_t)lead_end[end_len - 1] == end_comment_pending) {
+      if (i >= 0 && end_len > 0
+          && (uint8_t)lead_end[end_len - 1] == end_comment_pending) {
         // Backspace over all the stuff we want to replace
         backspace_until_column(i);
 
@@ -3244,7 +3255,7 @@ static void ins_reg(void)
 
       do_put(regname, NULL, BACKWARD, 1,
              (literally == Ctrl_P ? PUT_FIXINDENT : 0) | PUT_CURSEND);
-    } else if (insert_reg(regname, literally) == FAIL) {
+    } else if (insert_reg(regname, NULL, literally) == FAIL) {
       vim_beep(kOptBoFlagRegister);
       need_redraw = true;  // remove the '"'
     } else if (stop_insert_mode) {
@@ -3452,7 +3463,7 @@ static bool ins_esc(int *count, int cmdchar, bool nomove)
     showmode();
   } else if (p_smd && (got_int || !skip_showmode())
              && !(p_ch == 0 && !ui_has(kUIMessages))) {
-    msg("", 0);
+    unshowmode(false);
   }
   // Exit Insert mode
   return true;

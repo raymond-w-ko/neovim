@@ -124,7 +124,7 @@ describe('completion', function()
         foo                                                         |
         ^                                                            |
         {1:~                                                           }|*5
-        {5:-- ^X mode (^]^D^E^F^I^K^L^N^O^Ps^U^V^Y)}                    |
+        {5:-- ^X mode (^]^D^E^F^I^K^L^N^O^P^Rs^U^V^Y)}                  |
       ]])
       feed('<C-n>')
       screen:expect([[
@@ -1350,5 +1350,27 @@ describe('completion', function()
       feed('S<C-X><C-O>')
       eq('completeopt option does not include popup', api.nvim_get_var('err_msg'))
     end)
+  end)
+
+  it([[does not include buffer from non-focusable window for 'complete' "w"]], function()
+    local buf = api.nvim_create_buf(false, true)
+    local cfg = { focusable = false, relative = 'win', bufpos = { 1, 0 }, width = 1, height = 1 }
+    local win = api.nvim_open_win(buf, false, cfg)
+    api.nvim_buf_set_lines(buf, 0, -1, false, { 'foo' })
+    feed('i<C-N>')
+    screen:expect([[
+      ^                                                            |
+      {4:f}{1:                                                           }|
+      {1:~                                                           }|*5
+      {5:-- Keyword completion (^N^P) }{9:Pattern not found}              |
+    ]])
+    api.nvim_win_set_config(win, { focusable = true })
+    feed('<Esc>i<C-N>')
+    screen:expect([[
+      foo^                                                         |
+      {4:f}{1:                                                           }|
+      {1:~                                                           }|*5
+      {5:-- Keyword completion (^N^P) The only match}                 |
+    ]])
   end)
 end)

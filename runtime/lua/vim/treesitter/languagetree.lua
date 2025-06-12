@@ -49,7 +49,10 @@ local hrtime = vim.uv.hrtime
 local default_parse_timeout_ns = 3 * 1000000
 
 ---@type Range2
-local entire_document_range = { 0, math.huge }
+local entire_document_range = {
+  0,
+  math.huge --[[@as integer]],
+}
 
 ---@alias TSCallbackName
 ---| 'changedtree'
@@ -874,6 +877,39 @@ local function get_node_ranges(node, source, metadata, include_children)
   return ranges
 end
 
+---Finds the intersection between two regions, assuming they are sorted in ascending order by
+---starting point.
+---@param region1 Range6[]
+---@param region2 Range6[]?
+---@return Range6[]
+local function clip_regions(region1, region2)
+  if not region2 then
+    return region1
+  end
+
+  local result = {}
+  local i, j = 1, 1
+
+  while i <= #region1 and j <= #region2 do
+    local r1 = region1[i]
+    local r2 = region2[j]
+
+    local intersection = Range.intersection(r1, r2)
+    if intersection then
+      table.insert(result, intersection)
+    end
+
+    -- Advance the range that ends earlier
+    if Range.cmp_pos.le(r1[4], r1[5], r2[4], r2[5]) then
+      i = i + 1
+    else
+      j = j + 1
+    end
+  end
+
+  return result
+end
+
 ---@nodoc
 ---@class vim.treesitter.languagetree.InjectionElem
 ---@field combined boolean
@@ -886,8 +922,9 @@ end
 ---@param lang string
 ---@param combined boolean
 ---@param ranges Range6[]
+---@param parent_ranges Range6[]?
 ---@param result table<string,Range6[][]>
-local function add_injection(t, pattern, lang, combined, ranges, result)
+local function add_injection(t, pattern, lang, combined, ranges, parent_ranges, result)
   if #ranges == 0 then
     -- Make sure not to add an empty range set as this is interpreted to mean the whole buffer.
     return
@@ -898,7 +935,7 @@ local function add_injection(t, pattern, lang, combined, ranges, result)
   end
 
   if not combined then
-    table.insert(result[lang], ranges)
+    table.insert(result[lang], clip_regions(ranges, parent_ranges))
     return
   end
 
@@ -914,7 +951,7 @@ local function add_injection(t, pattern, lang, combined, ranges, result)
     table.insert(result[lang], regions)
   end
 
-  for _, range in ipairs(ranges) do
+  for _, range in ipairs(clip_regions(ranges, parent_ranges)) do
     table.insert(t[lang][pattern], range)
   end
 end
@@ -976,7 +1013,9 @@ function LanguageTree:_get_injection(match, metadata)
         local ft = vim.filetype.match({ filename = text })
         lang = ft and resolve_lang(ft)
       elseif name == 'injection.content' then
-        ranges = get_node_ranges(node, self._source, metadata[id], include_children)
+        for _, range in ipairs(get_node_ranges(node, self._source, metadata[id], include_children)) do
+          ranges[#ranges + 1] = range
+        end
       end
     end
   end
@@ -1007,10 +1046,11 @@ function LanguageTree:_get_injections(range, thread_state)
 
   local full_scan = range == true or self._injection_query.has_combined_injections
 
-  for _, tree in pairs(self._trees) do
+  for tree_index, tree in pairs(self._trees) do
     ---@type vim.treesitter.languagetree.Injection
     local injections = {}
     local root_node = tree:root()
+    local parent_ranges = self._regions and self._regions[tree_index] or nil
     local start_line, end_line ---@type integer, integer
     if full_scan then
       start_line, _, end_line = root_node:range()
@@ -1023,7 +1063,7 @@ function LanguageTree:_get_injections(range, thread_state)
     do
       local lang, combined, ranges = self:_get_injection(match, metadata)
       if lang then
-        add_injection(injections, pattern, lang, combined, ranges, result)
+        add_injection(injections, pattern, lang, combined, ranges, parent_ranges, result)
       else
         self:_log('match from injection query failed for pattern', pattern)
       end
@@ -1129,7 +1169,6 @@ function LanguageTree:_edit(
   end
 end
 
----@nodoc
 ---@param bufnr integer
 ---@param changed_tick integer
 ---@param start_row integer
@@ -1201,12 +1240,10 @@ function LanguageTree:_on_bytes(
   )
 end
 
----@nodoc
 function LanguageTree:_on_reload()
   self:invalidate(true)
 end
 
----@nodoc
 function LanguageTree:_on_detach(...)
   self:invalidate(true)
   self:_do_callback('detach', ...)
@@ -1255,12 +1292,13 @@ end
 local function tree_contains(tree, range)
   local tree_ranges = tree:included_ranges(false)
 
-  return Range.contains({
-    tree_ranges[1][1],
-    tree_ranges[1][2],
-    tree_ranges[#tree_ranges][3],
-    tree_ranges[#tree_ranges][4],
-  }, range)
+  for _, tree_range in ipairs(tree_ranges) do
+    if Range.contains(tree_range, range) then
+      return true
+    end
+  end
+
+  return false
 end
 
 --- Determines whether {range} is contained in the |LanguageTree|.

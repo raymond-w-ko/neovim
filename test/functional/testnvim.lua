@@ -17,13 +17,16 @@ local sleep = uv.sleep
 --- Functions executing in the current nvim session/process being tested.
 local M = {}
 
-local runtime_set = 'set runtimepath^=./build/lib/nvim/'
+local lib_path = t.is_zig_build() and './zig-out/lib' or './build/lib/nvim/'
+M.runtime_set = 'set runtimepath^=' .. lib_path
+
 M.nvim_prog = (os.getenv('NVIM_PRG') or t.paths.test_build_dir .. '/bin/nvim')
 -- Default settings for the test session.
 M.nvim_set = (
   'set shortmess+=IS background=light noswapfile noautoindent startofline'
   .. ' laststatus=1 undodir=. directory=. viewdir=. backupdir=.'
   .. ' belloff= wildoptions-=pum joinspaces noshowcmd noruler nomore redrawdebug=invalid'
+  .. [[ statusline=%<%f\ %{%nvim_eval_statusline('%h%w%m%r',\ {'maxwidth':\ 30}).width\ >\ 0\ ?\ '%h%w%m%r\ '\ :\ ''%}%=%{%\ &showcmdloc\ ==\ 'statusline'\ ?\ '%-10.S\ '\ :\ ''\ %}%{%\ exists('b:keymap_name')\ ?\ '<'..b:keymap_name..'>\ '\ :\ ''\ %}%{%\ &ruler\ ?\ (\ &rulerformat\ ==\ ''\ ?\ '%-14.(%l,%c%V%)\ %P'\ :\ &rulerformat\ )\ :\ ''\ %}]]
 )
 M.nvim_argv = {
   M.nvim_prog,
@@ -33,7 +36,7 @@ M.nvim_argv = {
   'NONE',
   -- XXX: find treesitter parsers.
   '--cmd',
-  runtime_set,
+  M.runtime_set,
   '--cmd',
   M.nvim_set,
   -- Remove default user commands and mappings.
@@ -424,7 +427,7 @@ local function remove_args(args, args_rm)
       last = ''
     elseif vim.tbl_contains(args_rm, arg) then
       last = arg
-    elseif arg == runtime_set and vim.tbl_contains(args_rm, 'runtimepath') then
+    elseif arg == M.runtime_set and vim.tbl_contains(args_rm, 'runtimepath') then
       table.remove(new_args) -- Remove the preceding "--cmd".
       last = ''
     else
@@ -642,7 +645,7 @@ function M.source(code)
 end
 
 function M.has_powershell()
-  return M.eval('executable("' .. (is_os('win') and 'powershell' or 'pwsh') .. '")') == 1
+  return M.eval('executable("pwsh")') == 1
 end
 
 --- Sets Nvim shell to powershell.
@@ -655,7 +658,7 @@ function M.set_shell_powershell(fake)
   if not fake then
     assert(found)
   end
-  local shell = found and (is_os('win') and 'powershell' or 'pwsh') or M.testprg('pwsh-test')
+  local shell = found and 'pwsh' or M.testprg('pwsh-test')
   local cmd = 'Remove-Item -Force '
     .. table.concat(
       is_os('win') and { 'alias:cat', 'alias:echo', 'alias:sleep', 'alias:sort', 'alias:tee' }
@@ -671,7 +674,7 @@ function M.set_shell_powershell(fake)
     let &shellcmdflag .= '$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';'
     let &shellcmdflag .= ']] .. cmd .. [['
     let &shellredir = '2>&1 | %%{ "$_" } | Out-File %s; exit $LastExitCode'
-    let &shellpipe  = '2>&1 | %%{ "$_" } | tee %s; exit $LastExitCode'
+    let &shellpipe  = '> %s 2>&1'
   ]])
   return found
 end

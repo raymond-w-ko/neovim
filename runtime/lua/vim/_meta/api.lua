@@ -324,12 +324,18 @@ function vim.api.nvim_buf_del_user_command(buffer, name) end
 --- @param name string Variable name
 function vim.api.nvim_buf_del_var(buffer, name) end
 
---- Deletes the buffer. See `:bwipeout`
+--- Deletes a buffer and its metadata (like `:bwipeout`).
+---
+--- To get `:bdelete` behavior, reset 'buflisted' and pass `unload=true`:
+--- ```lua
+--- vim.bo.buflisted = false
+--- vim.api.nvim_buf_delete(0, { unload = true })
+--- ```
 ---
 --- @param buffer integer Buffer id, or 0 for current buffer
 --- @param opts vim.api.keyset.buf_delete Optional parameters. Keys:
---- - force:  Force deletion and ignore unsaved changes.
---- - unload: Unloaded only, do not delete. See `:bunload`
+--- - force:  Force deletion, ignore unsaved changes.
+--- - unload: Unloaded only (`:bunload`), do not delete.
 function vim.api.nvim_buf_delete(buffer, opts) end
 
 --- Gets a changed tick of a buffer
@@ -369,8 +375,11 @@ function vim.api.nvim_buf_get_extmark_by_id(buffer, ns_id, id, opts) end
 --- vim.api.nvim_buf_get_extmarks(0, my_ns, {0,0}, {-1,-1}, {})
 --- ```
 ---
---- If `end` is less than `start`, traversal works backwards. (Useful
---- with `limit`, to get the first marks prior to a given position.)
+--- If `end` is less than `start`, marks are returned in reverse order.
+--- (Useful with `limit`, to get the first marks prior to a given position.)
+---
+--- Note: For a reverse range, `limit` does not actually affect the traversed
+--- range, just how many marks are returned
 ---
 --- Note: when using extmark ranges (marks with a end_row/end_col position)
 --- the `overlap` option might be useful. Otherwise only the start position
@@ -449,7 +458,7 @@ function vim.api.nvim_buf_get_lines(buffer, start, end_, strict_indexing) end
 --- @see vim.api.nvim_buf_del_mark
 --- @param buffer integer Buffer id, or 0 for current buffer
 --- @param name string Mark name
---- @return integer[] # (row, col) tuple, (0, 0) if the mark is not set, or is an
+--- @return [integer, integer] # (row, col) tuple, (0, 0) if the mark is not set, or is an
 --- uppercase/file mark set in another buffer.
 function vim.api.nvim_buf_get_mark(buffer, name) end
 
@@ -1092,6 +1101,7 @@ function vim.api.nvim_del_var(name) end
 --- @param history boolean if true, add to `message-history`.
 --- @param opts vim.api.keyset.echo_opts Optional parameters.
 --- - err: Treat the message like `:echoerr`. Sets `hl_group` to `hl-ErrorMsg` by default.
+--- - kind: Set the `ui-messages` kind with which this message will be emitted.
 --- - verbose: Message is controlled by the 'verbose' option. Nvim invoked with `-V3log`
 ---   will write the message to the "log" file instead of standard output.
 function vim.api.nvim_echo(chunks, history, opts) end
@@ -1125,7 +1135,7 @@ function vim.api.nvim_eval(expr) end
 --- - use_tabline: (boolean) Evaluate tabline instead of statusline. When true, {winid}
 ---                          is ignored. Mutually exclusive with {use_winbar}.
 --- - use_statuscol_lnum: (number) Evaluate statuscolumn for this line number instead of statusline.
---- @return table<string,any> # Dict containing statusline information, with these keys:
+--- @return vim.api.keyset.eval_statusline_ret # Dict containing statusline information, with these keys:
 --- - str: (string) Characters that will be displayed on the statusline.
 --- - width: (number) Display width of the statusline.
 --- - highlights: Array containing highlight information of the statusline. Only included when
@@ -1644,7 +1654,7 @@ function vim.api.nvim_notify(msg, log_level, opts) end
 --- By default (and currently the only option) the terminal will not be
 --- connected to an external process. Instead, input sent on the channel
 --- will be echoed directly by the terminal. This is useful to display
---- ANSI terminal sequences returned as part of a rpc message, or similar.
+--- ANSI terminal sequences returned as part of an RPC message, or similar.
 ---
 --- Note: to directly initiate the terminal using the right size, display the
 --- buffer in a configured window before calling this. For instance, for a
@@ -1659,14 +1669,12 @@ function vim.api.nvim_notify(msg, log_level, opts) end
 ---
 --- ```lua
 --- vim.api.nvim_create_user_command('TermHl', function()
----   local b = vim.api.nvim_create_buf(false, true)
----   local chan = vim.api.nvim_open_term(b, {})
----   vim.api.nvim_chan_send(chan, table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'))
----   vim.api.nvim_win_set_buf(0, b)
+---   vim.api.nvim_open_term(0, {})
 --- end, { desc = 'Highlights ANSI termcodes in curbuf' })
 --- ```
 ---
---- @param buffer integer the buffer to use (expected to be empty)
+--- @param buffer integer Buffer to use. Buffer contents (if any) will be written
+--- to the PTY.
 --- @param opts vim.api.keyset.open_term Optional parameters.
 --- - on_input: Lua callback for input sent, i e keypresses in terminal
 ---   mode. Note: keypresses are sent raw as they would be to the pty
@@ -1762,8 +1770,7 @@ function vim.api.nvim_open_term(buffer, opts) end
 ---     - `row=0` and `col=0` if `anchor` is "SW" or "SE"
 ---       (thus like a tooltip near the buffer text).
 --- - row: Row position in units of "screen cell height", may be fractional.
---- - col: Column position in units of "screen cell width", may be
----          fractional.
+--- - col: Column position in units of screen cell width, may be fractional.
 --- - focusable: Enable focus by user actions (wincmds, mouse events).
 ---     Defaults to true. Non-focusable windows can be entered by
 ---     `nvim_set_current_win()`, or, when the `mouse` field is set to true,
@@ -1839,9 +1846,12 @@ function vim.api.nvim_open_term(buffer, opts) end
 ---   the call.
 --- - fixed: If true when anchor is NW or SW, the float window
 ---          would be kept fixed even if the window would be truncated.
---- - hide: If true the floating window will be hidden.
+--- - hide: If true the floating window will be hidden and the cursor will be invisible when
+---         focused on it.
 --- - vertical: Split vertically `:vertical`.
 --- - split: Split direction: "left", "right", "above", "below".
+--- - _cmdline_offset: (EXPERIMENTAL) When provided, anchor the `cmdline-completion`
+---   popupmenu to this window, with an offset in screen cell width.
 --- @return integer # |window-ID|, or 0 on error
 function vim.api.nvim_open_win(buffer, enter, config) end
 
@@ -2373,7 +2383,7 @@ function vim.api.nvim_win_get_config(window) end
 ---
 --- @see `:help getcurpos()`
 --- @param window integer `window-ID`, or 0 for current window
---- @return integer[] # (row, col) tuple
+--- @return [integer, integer] # (row, col) tuple
 function vim.api.nvim_win_get_cursor(window) end
 
 --- Gets the window height
@@ -2397,7 +2407,7 @@ function vim.api.nvim_win_get_option(window, name) end
 --- Gets the window position in display cells. First position is zero.
 ---
 --- @param window integer `window-ID`, or 0 for current window
---- @return integer[] # (row, col) tuple with the window position
+--- @return [integer, integer] # (row, col) tuple with the window position
 function vim.api.nvim_win_get_position(window) end
 
 --- Gets the window tabpage
@@ -2458,7 +2468,7 @@ function vim.api.nvim_win_set_config(window, config) end
 --- This scrolls the window even if it is not the current one.
 ---
 --- @param window integer `window-ID`, or 0 for current window
---- @param pos integer[] (row, col) tuple representing the new position
+--- @param pos [integer, integer] (row, col) tuple representing the new position
 function vim.api.nvim_win_set_cursor(window, pos) end
 
 --- Sets the window height.
@@ -2520,9 +2530,20 @@ function vim.api.nvim_win_set_width(window, width) end
 ---               When omitted include the whole line.
 --- - end_vcol: Ending virtual column index on "end_row",
 ---             0-based exclusive, rounded up to full screen lines.
----             When omitted include the whole line.
---- @return table<string,any> # Dict containing text height information, with these keys:
+---             When 0 only include diff filler and virtual lines above
+---             "end_row". When omitted include the whole line.
+--- - max_height: Don't add the height of lines below the row
+---               for which this height is reached. Useful to e.g. limit the
+---               height to the window height, avoiding unnecessary work. Or
+---               to find out how many buffer lines beyond "start_row" take
+---               up a certain number of logical lines (returned in
+---               "end_row" and "end_vcol").
+--- @return vim.api.keyset.win_text_height_ret # Dict containing text height information, with these keys:
 --- - all: The total number of screen lines occupied by the range.
 --- - fill: The number of diff filler or virtual lines among them.
+--- - end_row: The row on which the returned height is reached (first row of
+---   a closed fold).
+--- - end_vcol: Ending virtual column in "end_row" where "max_height" or the returned
+---   height is reached. 0 if "end_row" is a closed fold.
 ---
 function vim.api.nvim_win_text_height(window, opts) end

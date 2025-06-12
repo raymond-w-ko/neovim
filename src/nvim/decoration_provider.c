@@ -34,7 +34,7 @@ static void decor_provider_error(DecorProvider *provider, const char *name, cons
 {
   const char *ns = describe_ns(provider->ns_id, "(UNKNOWN PLUGIN)");
   ELOG("Error in decoration provider \"%s\" (ns=%s):\n%s", name, ns, msg);
-  msg_schedule_semsg_multiline("Error in decoration provider \"%s\" (ns=%s):\n%s", name, ns, msg);
+  msg_schedule_semsg_multiline("Decoration provider \"%s\" (ns=%s):\n%s", name, ns, msg);
 }
 
 // Note we pass in a provider index as this function may cause decor_providers providers to be
@@ -118,6 +118,8 @@ void decor_providers_start(void)
       ADD_C(args, INTEGER_OBJ((int)display_tick));
       bool active = decor_provider_invoke((int)i, "start", p->redraw_start, args, true);
       kv_A(decor_providers, i).state = active ? kDecorProviderActive : kDecorProviderRedrawDisabled;
+    } else if (p->state != kDecorProviderDisabled) {
+      kv_A(decor_providers, i).state = kDecorProviderActive;
     }
   }
 }
@@ -220,7 +222,6 @@ void decor_providers_invoke_end(void)
       MAXSIZE_TEMP_ARRAY(args, 1);
       ADD_C(args, INTEGER_OBJ((int)display_tick));
       decor_provider_invoke((int)i, "end", p->redraw_end, args, true);
-      kv_A(decor_providers, i).state = kDecorProviderActive;
     }
   }
   decor_check_to_be_deleted();

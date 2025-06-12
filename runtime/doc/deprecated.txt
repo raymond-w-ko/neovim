@@ -21,7 +21,8 @@ API
 
 DIAGNOSTICS
 
-• todo
+• "float" in |vim.diagnostic.JumpOpts|.		Use "on_jump" instead.
+• "float" in |vim.diagnostic.Opts.Jump|.	Use "on_jump" instead.
 
 HIGHLIGHTS
 
@@ -29,7 +30,11 @@ HIGHLIGHTS
 
 LSP
 
-• todo
+• *vim.lsp.client_is_stopped()*		Use |vim.lsp.get_client_by_id()| instead.
+• *vim.lsp.util.stylize_markdown()*	Use |vim.treesitter.start()| with
+					`vim.wo.conceallevel = 2`.
+• *vim.lsp.log.should_log()*		Use |vim.lsp.log.set_format_func()| instead
+					and return `nil` to omit entries from the logfile.
 
 LUA
 
@@ -93,7 +98,7 @@ LUA
 • vim.validate(opts: table) Use form 1. See |vim.validate()|.
 
 VIMSCRIPT
-• *termopen()* Use |jobstart() with `{term: v:true}`.
+• *termopen()* Use |jobstart()| with `{term: v:true}`.
 
 ------------------------------------------------------------------------------
 DEPRECATED IN 0.10					*deprecated-0.10*

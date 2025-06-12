@@ -111,8 +111,8 @@ local function check_watcher()
     watchfunc_name = 'libuv-watch'
   elseif watchfunc == vim._watch.watchdirs then
     watchfunc_name = 'libuv-watchdirs'
-  elseif watchfunc == vim._watch.inotifywait then
-    watchfunc_name = 'inotifywait'
+  elseif watchfunc == vim._watch.inotify then
+    watchfunc_name = 'inotify'
   else
     local nm = debug.getinfo(watchfunc, 'S').source
     watchfunc_name = string.format('Custom (%s)', nm)
@@ -198,7 +198,7 @@ local function check_enabled_configs()
         local v_str --- @type string?
         if k == 'name' then
           v_str = nil
-        elseif k == 'filetypes' or k == 'root_markers' then
+        elseif k == 'filetypes' or (k == 'root_markers' and type(v[1]) == 'string') then
           v_str = table.concat(v, ', ')
         elseif type(v) == 'function' then
           v_str = func_tostring(v)

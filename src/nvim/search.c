@@ -391,7 +391,7 @@ int ignorecase(char *pat)
   return ignorecase_opt(pat, p_ic, p_scs);
 }
 
-/// As ignorecase() put pass the "ic" and "scs" flags.
+/// As ignorecase() but pass the "ic" and "scs" flags.
 int ignorecase_opt(char *pat, int ic_in, int scs)
 {
   int ic = ic_in;
@@ -1264,6 +1264,7 @@ int do_search(oparg_T *oap, int dirc, int search_delim, char *pat, size_t patlen
       // do not fill the msgbuf buffer, if cmd_silent is set, leave it
       // empty for the search_stat feature.
       if (!cmd_silent) {
+        ui_busy_start();
         msgbuf[0] = (char)dirc;
         if (utf_iscomposing_first(utf_ptr2char(p))) {
           // Use a space to draw the composing char on.
@@ -1310,6 +1311,7 @@ int do_search(oparg_T *oap, int dirc, int search_delim, char *pat, size_t patlen
 
         gotocmdline(false);
         ui_flush();
+        ui_busy_stop();
         msg_nowait = true;  // don't wait for this message
       }
 
@@ -2363,7 +2365,7 @@ void showmatch(int c)
 
   bool col_visible = curwin->w_p_wrap
                      || (vcol >= curwin->w_leftcol
-                         && vcol < curwin->w_leftcol + curwin->w_width_inner);
+                         && vcol < curwin->w_leftcol + curwin->w_view_width);
   if (!col_visible) {
     return;
   }
@@ -2722,12 +2724,9 @@ static void update_search_stat(int dirc, pos_T *pos, pos_T *cursor_pos, searchst
                 || (dirc == '/' && lt(p, lastpos)));
 
   // If anything relevant changed the count has to be recomputed.
-  // STRNICMP ignores case, but we should not ignore case.
-  // Unfortunately, there is no STRNICMP function.
-  // XXX: above comment should be "no MB_STRCMP function" ?
   if (!(chgtick == buf_get_changedtick(curbuf)
         && (lastpat != NULL  // suppress clang/NULL passed as nonnull parameter
-            && mb_strnicmp(lastpat, spats[last_idx].pat, lastpatlen) == 0
+            && strncmp(lastpat, spats[last_idx].pat, lastpatlen) == 0
             && lastpatlen == spats[last_idx].patlen)
         && equalpos(lastpos, *cursor_pos)
         && lbuf == curbuf)
@@ -3022,6 +3021,11 @@ static int fuzzy_match_compute_score(const char *const fuzpat, const char *const
   // Apply unmatched penalty
   const int unmatched = strSz - numMatches;
   score += UNMATCHED_LETTER_PENALTY * unmatched;
+  // In a long string, not all matches may be found due to the recursion limit.
+  // If at least one match is found, reset the score to a non-negative value.
+  if (score < 0 && numMatches > 0) {
+    score = 0;
+  }
 
   // Apply ordering bonuses
   for (int i = 0; i < numMatches; i++) {
@@ -3745,22 +3749,6 @@ bool search_for_fuzzy_match(buf_T *buf, pos_T *pos, char *pattern, int dir, pos_
           found_new_match = fuzzy_match_str_in_line(ptr, pattern,
                                                     len, &current_pos, score);
           if (found_new_match) {
-            if (ctrl_x_mode_normal()) {
-              if (strncmp(*ptr, pattern, (size_t)(*len)) == 0 && pattern[*len] == NUL) {
-                char *next_word_end = find_word_start(*ptr + *len);
-                if (*next_word_end != NUL && *next_word_end != NL) {
-                  // Find end of the word.
-                  while (*next_word_end != NUL) {
-                    int l = utfc_ptr2len(next_word_end);
-                    if (l < 2 && !vim_iswordc(*next_word_end)) {
-                      break;
-                    }
-                    next_word_end += l;
-                  }
-                }
-                *len = (int)(next_word_end - *ptr);
-              }
-            }
             *pos = current_pos;
             break;
           } else if (looped_around && current_pos.lnum == circly_end.lnum) {

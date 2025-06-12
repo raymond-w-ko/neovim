@@ -344,7 +344,8 @@ BufWriteCmd			Before writing the whole buffer to a file.
 				The buffer contents should not be changed.
 				When the command resets 'modified' the undo
 				information is adjusted to mark older undo
-				states as 'modified', like |:write| does.
+				states as 'modified', like |:write| does.  Use
+				the |'[| and |']| marks for the range of lines.
 				|Cmd-event|
 							*BufWritePost*
 BufWritePost			After writing the whole buffer to a file
@@ -400,6 +401,16 @@ CmdlineLeave			Before leaving the command-line (including
 				Note: `abort` can only be changed from false
 				to true: cannot execute an already aborted
 				cmdline by changing it to false.
+							*CmdlineLeavePre*
+CmdlineLeavePre			Just before leaving the command line, and
+				before |CmdlineLeave|.  Useful for capturing
+				completion info with |cmdcomplete_info()|, as
+				this information is cleared before
+				|CmdlineLeave| is triggered.  Triggered for
+				non-interactive use of ":" in a mapping, but
+				not when using |<Cmd>|.  Also triggered when
+				abandoning the command line by typing CTRL-C
+				or <Esc>.  <afile> is set to |cmdline-char|.
 							*CmdwinEnter*
 CmdwinEnter			After entering the command-line window.
 				Useful for setting options specifically for
@@ -477,7 +488,7 @@ CompleteDone			After Insert mode completion is done.  Either
 						- "accept": completion was
 						  accepted by |complete_CTRL-Y|.
 						- "cancel": completion was
-						  stopped by |complete_CTRL-E.
+						  stopped by |complete_CTRL-E|.
 						- "discard": completion was
 						  abandoned for other reason.
 
@@ -648,14 +659,14 @@ FileType			When the 'filetype' option has been set.  The
 FileWriteCmd			Before writing to a file, when not writing the
 				whole buffer.  Should do the writing to the
 				file.  Should not change the buffer.  Use the
-				'[ and '] marks for the range of lines.
+				|'[| and |']| marks for the range of lines.
 				|Cmd-event|
 							*FileWritePost*
 FileWritePost			After writing to a file, when not writing the
 				whole buffer.
 							*FileWritePre*
 FileWritePre			Before writing to a file, when not writing the
-				whole buffer.  Use the '[ and '] marks for the
+				whole buffer.  Use the |'[| and |']| marks for the
 				range of lines.
 							*FilterReadPost*
 FilterReadPost			After reading a file from a filter command.
@@ -1034,7 +1045,7 @@ TermRequest			When a |:terminal| child process emits an OSC,
 				autocommand defined without |autocmd-nested|.
 
 							*TermResponse*
-TermResponse			When Nvim receives an OSC or DCS response from
+TermResponse			When Nvim receives an OSC, DCS, or APC response from
 				the host terminal. Sets |v:termresponse|. The
 				|event-data| is a table with the following fields:
 
@@ -1185,6 +1196,13 @@ WinScrolled			After any window in the current tab page
 				scrolled the text (horizontally or vertically)
 				or changed width or height.  See
 				|win-scrolled-resized|.
+
+				Note: This can not be skipped with
+				`:noautocmd`, because it triggers after
+				processing normal commands when Vim is back in
+				the main loop.  If you want to disable this,
+				consider setting the 'eventignore' option
+				instead.
 
 				The pattern is matched against the |window-ID|
 				of the first window that scrolled or resized.

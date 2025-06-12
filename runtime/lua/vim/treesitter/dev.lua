@@ -1,5 +1,7 @@
 local api = vim.api
 
+local Range = require('vim.treesitter._range')
+
 local M = {}
 
 ---@class (private) vim.treesitter.dev.TSTreeView
@@ -13,7 +15,7 @@ local TSTreeView = {}
 ---@class (private) vim.treesitter.dev.TSTreeViewOpts
 ---@field anon boolean If true, display anonymous nodes.
 ---@field lang boolean If true, display the language alongside each node.
----@field indent number Number of spaces to indent nested lines.
+---@field indent integer Number of spaces to indent nested lines.
 
 ---@class (private) vim.treesitter.dev.Node
 ---@field node TSNode Treesitter node
@@ -96,16 +98,20 @@ function TSTreeView:new(bufnr, lang)
 
   parser:for_each_tree(function(parent_tree, parent_ltree)
     local parent = parent_tree:root()
+    local parent_range = { parent:range() }
     for _, child in pairs(parent_ltree:children()) do
       for _, tree in pairs(child:trees()) do
         local r = tree:root()
-        local node = assert(parent:named_descendant_for_range(r:range()))
-        local id = node:id()
-        if not injections[id] or r:byte_length() > injections[id].root:byte_length() then
-          injections[id] = {
-            lang = child:lang(),
-            root = r,
-          }
+        local r_range = { r:range() }
+        if Range.contains(parent_range, r_range) then
+          local node = assert(parent:named_descendant_for_range(r:range()))
+          local id = node:id()
+          if not injections[id] or r:byte_length() > injections[id].root:byte_length() then
+            injections[id] = {
+              lang = child:lang(),
+              root = r,
+            }
+          end
         end
       end
     end
@@ -284,7 +290,7 @@ end
 --- The node number is dependent on whether or not anonymous nodes are displayed.
 ---
 ---@param i integer Node number to get
----@return vim.treesitter.dev.Node
+---@return vim.treesitter.dev.Node?
 ---@package
 function TSTreeView:get(i)
   local t = self.opts.anon and self.nodes or self.named
@@ -323,8 +329,7 @@ end
 --- source buffer as its only argument and should return a string.
 --- @field title (string|fun(bufnr:integer):string|nil)
 
---- @private
----
+--- @nodoc
 --- @param opts vim.treesitter.dev.inspect_tree.Opts?
 function M.inspect_tree(opts)
   vim.validate('opts', opts, 'table', true)
@@ -395,7 +400,7 @@ function M.inspect_tree(opts)
 
       -- update source window if original was closed
       if not api.nvim_win_is_valid(win) then
-        win = vim.fn.win_findbuf(buf)[1]
+        win = assert(vim.fn.win_findbuf(buf)[1])
       end
 
       api.nvim_set_current_win(win)
@@ -445,6 +450,8 @@ function M.inspect_tree(opts)
     end,
   })
 
+  api.nvim_buf_set_keymap(b, 'n', 'q', '<C-w>c', { desc = 'Close language tree window' })
+
   local group = api.nvim_create_augroup('nvim.treesitter.dev', {})
 
   api.nvim_create_autocmd('CursorMoved', {
@@ -467,7 +474,7 @@ function M.inspect_tree(opts)
 
       -- update source window if original was closed
       if not api.nvim_win_is_valid(win) then
-        win = vim.fn.win_findbuf(buf)[1]
+        win = assert(vim.fn.win_findbuf(buf)[1])
       end
 
       local topline, botline = vim.fn.line('w0', win), vim.fn.line('w$', win)
@@ -591,7 +598,7 @@ local function update_editor_highlights(query_win, base_win, lang)
   end
 end
 
---- @private
+--- @nodoc
 --- @param lang? string language to open the query editor for.
 --- @return boolean? `true` on success, `nil` on failure
 --- @return string? error message, if applicable

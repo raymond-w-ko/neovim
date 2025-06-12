@@ -228,6 +228,24 @@ describe(':Man', function()
     matches('quit works!!', fn.system(args, { 'manpage contents' }))
   end)
 
+  it('raw manpage into (:Man!) creates a new buffer #30132', function()
+    local args = {
+      nvim_prog,
+      '--headless',
+      '+Man! foo',
+      '+echo bufname()',
+      '+enew',
+      '+Man! foo',
+      '+echo bufname()',
+      '+enew',
+      '+Man! foo',
+      '+echo bufname()',
+      '+q',
+    }
+    local out = fn.system(args, { 'manpage contents' })
+    assert(out and out:match('man://%?new=%d'))
+  end)
+
   it('reports non-existent man pages for absolute paths', function()
     skip(is_ci('cirrus'))
     local actual_file = tmpname()
@@ -235,9 +253,7 @@ describe(':Man', function()
     matches('^/.+', actual_file)
     local args = { nvim_prog, '--headless', '+:Man ' .. actual_file, '+q' }
     matches(
-      ('Error detected while processing command line:\r\n' .. 'man.lua: no manual entry for %s'):format(
-        pesc(actual_file)
-      ),
+      ('Error in command line:\r\n' .. 'man.lua: no manual entry for %s'):format(pesc(actual_file)),
       fn.system(args, { '' })
     )
     os.remove(actual_file)

@@ -149,6 +149,8 @@ typedef struct {
 #define w_p_wfw w_onebuf_opt.wo_wfw    // 'winfixwidth'
   int wo_pvw;
 #define w_p_pvw w_onebuf_opt.wo_pvw    // 'previewwindow'
+  OptInt wo_lhi;
+#define w_p_lhi w_onebuf_opt.wo_lhi    // 'lhistory'
   int wo_rl;
 #define w_p_rl w_onebuf_opt.wo_rl      // 'rightleft'
   char *wo_rlc;
@@ -366,7 +368,7 @@ struct file_buffer {
   int b_locked;                 // Buffer is being closed or referenced, don't
                                 // let autocommands wipe it out.
   int b_locked_split;           // Buffer is being closed, don't allow opening
-                                // a new window with it.
+                                // it in more windows.
   int b_ro_locked;              // Non-zero when the buffer can't be changed.
                                 // Used for FileChangedRO
 
@@ -556,6 +558,7 @@ struct file_buffer {
   char *b_p_fo;                 ///< 'formatoptions'
   char *b_p_flp;                ///< 'formatlistpat'
   int b_p_inf;                  ///< 'infercase'
+  char *b_p_ise;                ///< 'isexpand' local value
   char *b_p_isk;                ///< 'iskeyword'
   char *b_p_def;                ///< 'define' local value
   char *b_p_inc;                ///< 'include'
@@ -603,6 +606,7 @@ struct file_buffer {
   char *b_p_keymap;             ///< 'keymap'
 
   // local values for options which are normally global
+  char *b_p_gefm;               ///< 'grepformat' local value
   char *b_p_gp;                 ///< 'grepprg' local value
   char *b_p_mp;                 ///< 'makeprg' local value
   char *b_p_efm;                ///< 'errorformat' local value
@@ -717,6 +721,11 @@ struct file_buffer {
 
   MarkTree b_marktree[1];
   Map(uint32_t, uint32_t) b_extmark_ns[1];         // extmark namespaces
+
+  // Store the line count as it was before appending or inserting lines.
+  // Used to determine a valid range before splicing marks, when the line
+  // count has already changed.
+  int b_prev_line_count;
 
   // array of channel_id:s which have asked to receive updates for this
   // buffer.
@@ -988,6 +997,7 @@ typedef struct {
   bool noautocmd;
   bool fixed;
   bool hide;
+  int _cmdline_offset;
 } WinConfig;
 
 #define WIN_CONFIG_INIT ((WinConfig){ .height = 0, .width = 0, \
@@ -1001,7 +1011,8 @@ typedef struct {
                                       .style = kWinStyleUnused, \
                                       .noautocmd = false, \
                                       .hide = false, \
-                                      .fixed = false })
+                                      .fixed = false, \
+                                      ._cmdline_offset = INT_MAX })
 
 // Structure to store last cursor position and topline.  Used by check_lnums()
 // and reset_lnums().
@@ -1049,6 +1060,8 @@ typedef struct {
   schar_T msgsep;
   schar_T eob;
   schar_T lastline;
+  schar_T trunc;
+  schar_T truncrl;
 } fcs_chars_T;
 
 /// Structure which contains all information that belongs to a window.
@@ -1162,9 +1175,9 @@ struct window_S {
                      ///< this includes float border but excludes special columns
                      ///< implemented in win_line() (i.e. signs, folds, numbers)
 
-  // inner size of window, which can be overridden by external UI
-  int w_height_inner;
-  int w_width_inner;
+  // Size of the window viewport. This is the area usable to draw columns and buffer contents
+  int w_view_height;
+  int w_view_width;
   // external UI request. If non-zero, the inner size will use this.
   int w_height_request;
   int w_width_request;
@@ -1226,6 +1239,7 @@ struct window_S {
   // This is used for efficient redrawing.
   int w_lines_valid;                // number of valid entries
   wline_T *w_lines;
+  int w_lines_size;
 
   garray_T w_folds;                 // array of nested folds
   bool w_fold_manual;               // when true: some folds are opened/closed
@@ -1322,7 +1336,7 @@ struct window_S {
   int w_tagstackidx;                    // idx just below active entry
   int w_tagstacklen;                    // number of tags on stack
 
-  ScreenGrid w_grid;                    // the grid specific to the window
+  GridView w_grid;                      // area to draw on, excluding borders and winbar
   ScreenGrid w_grid_alloc;              // the grid specific to the window
   bool w_pos_changed;                   // true if window position changed
   bool w_floating;                      ///< whether the window is floating

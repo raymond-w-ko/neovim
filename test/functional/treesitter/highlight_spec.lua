@@ -82,7 +82,7 @@ local hl_grid_legacy_c = [[
     {15:return} {26:0};                                                      |
   }                                                                |
   {1:~                                                                }|*2
-                                                                   |
+  14 more lines                                                    |
 ]]
 
 local hl_grid_ts_c = [[
@@ -102,7 +102,7 @@ local hl_grid_ts_c = [[
     {15:return} {26:0};                                                      |
   }                                                                |
   {1:~                                                                }|*2
-                                                                   |
+  {MATCH:1?4? m?o?r?e? l?i?n?e?s?.*}|
 ]]
 
 local test_text_c = [[
@@ -511,6 +511,120 @@ describe('treesitter highlighting (C)', function()
     end)
 
     screen:expect { grid = injection_grid_expected_c }
+  end)
+
+  it('supports combined injections #31777', function()
+    insert([=[
+      -- print([[
+      -- some
+      -- random
+      -- text
+      -- here]])
+    ]=])
+
+    exec_lua(function()
+      local parser = vim.treesitter.get_parser(0, 'lua', {
+        injections = {
+          lua = [[
+          ; query
+          ((comment_content) @injection.content
+            (#set! injection.self)
+            (#set! injection.combined))
+          ]],
+        },
+      })
+      local highlighter = vim.treesitter.highlighter
+      highlighter.new(parser, {
+        queries = {
+          lua = [[
+            ; query
+            (string) @string
+            (comment) @comment
+            (function_call (identifier) @function.call)
+            [ "(" ")" ] @punctuation.bracket
+          ]],
+        },
+      })
+    end)
+
+    screen:expect([=[
+      {18:-- }{25:print}{16:(}{26:[[}                                                      |
+      {18:--}{26: some}                                                          |
+      {18:-- random}                                                        |
+      {18:-- text}                                                          |
+      {18:-- here]])}                                                       |
+      ^                                                                 |
+      {1:~                                                                }|*11
+                                                                       |
+    ]=])
+    -- NOTE: Once #31777 is fixed, this test case should be updated to the following:
+    -- screen:expect([=[
+    --   {18:-- }{25:print}{16:(}{26:[[}                                                      |
+    --   {18:--}{26: some}                                                          |
+    --   {18:--}{26: random}                                                        |
+    --   {18:--}{26: text}                                                          |
+    --   {18:--}{26: here]]}{16:)}                                                       |
+    --   ^                                                                   |
+    --   {1:~                                                                }|*11
+    --                                                                    |
+    -- ]=])
+  end)
+
+  it('supports complicated combined injections', function()
+    insert([[
+      -- # Markdown here
+      --
+      -- ```c
+      -- int main() {
+      --   printf("Hello, world!");
+      -- }
+      -- ```
+    ]])
+
+    exec_lua(function()
+      local parser = vim.treesitter.get_parser(0, 'lua', {
+        injections = {
+          lua = [[
+          ; query
+          ((comment) @injection.content
+            (#offset! @injection.content 0 3 0 1)
+            (#lua-match? @injection.content "[-][-] ")
+            (#set! injection.combined)
+            (#set! injection.include-children)
+            (#set! injection.language "markdown"))
+          ]],
+        },
+      })
+      local highlighter = vim.treesitter.highlighter
+      highlighter.new(parser, {
+        queries = {
+          lua = [[
+            ; query
+            (string) @string
+            (comment) @comment
+            (function_call (identifier) @function.call)
+            [ "(" ")" ] @punctuation.bracket
+          ]],
+        },
+      })
+    end)
+
+    screen:add_extra_attr_ids({
+      [131] = { foreground = Screen.colors.Fuchsia, bold = true },
+    })
+
+    screen:expect([[
+      {18:-- }{131:# Markdown here}                                               |
+      {18:--}                                                               |
+      {18:-- ```}{15:c}                                                          |
+      {18:-- }{16:int}{18: }{25:main}{16:()}{18: }{16:{}                                                  |
+      {18:--   }{25:printf}{16:(}{26:"Hello, world!"}{16:);}                                    |
+      {18:-- }{16:}}                                                             |
+      {18:-- ```}                                                           |
+      ^                                                                 |
+      {1:~                                                                }|*9
+                                                                       |
+    ]])
   end)
 
   it("supports injecting by ft name in metadata['injection.language']", function()
@@ -1280,6 +1394,30 @@ printf('Hello World!');
       {8:126 }^                                    |
                                               |
     ]])
+    feed('ggdj')
+    command('set concealcursor=n')
+    screen:expect([[
+      {8:  2 }{25:^printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8:  4 }                                    |
+      {8:  6 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8:  8 }                                    |
+      {8: 10 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8: 12 }                                    |
+      {8: 14 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8: 16 }                                    |
+      {8: 18 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8: 20 }                                    |
+      {8: 22 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8: 24 }                                    |
+      {8: 26 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+      {8: 28 }                                    |
+      {8: 30 }{25:printf}{16:(}{26:'Hello World!'}{16:);}             |
+                                              |
+    ]])
+    exec_lua(function()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+      assert(vim.api.nvim_win_text_height(0, {}).all == 1, 'line concealed')
+    end)
   end)
 end)
 

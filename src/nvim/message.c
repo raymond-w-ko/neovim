@@ -29,6 +29,7 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
+#include "nvim/ex_getln.h"
 #include "nvim/fileio.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
@@ -171,7 +172,9 @@ static void ui_ext_msg_set_pos(int row, bool scrolled)
   char buf[MAX_SCHAR_SIZE];
   size_t size = schar_get(buf, curwin->w_p_fcs_chars.msgsep);
   ui_call_msg_set_pos(msg_grid.handle, row, scrolled,
-                      (String){ .data = buf, .size = size });
+                      (String){ .data = buf, .size = size }, msg_grid.zindex,
+                      (int)msg_grid.comp_index);
+  msg_grid.pending_comp_index_update = false;
 }
 
 void msg_grid_set_pos(int row, bool scrolled)
@@ -233,7 +236,6 @@ void msg_grid_validate(void)
       grid_clear(&msg_grid_adj, Rows - diff, Rows, 0, Columns, HL_ATTR(HLF_MSG));
     }
   }
-  msg_grid_adj.cols = Columns;
 
   if (msg_grid.chars && !msg_scrolled && cmdline_row < msg_grid_pos) {
     // TODO(bfredl): this should already be the case, but fails in some
@@ -592,7 +594,7 @@ static char *get_emsg_source(void)
       sname = SOURCING_NAME;
     }
 
-    const char *const p = _("Error detected while processing %s:");
+    const char *const p = _("Error in %s:");
     const size_t buf_len = strlen(sname) + strlen(p) + 1;
     char *const buf = xmalloc(buf_len);
     snprintf(buf, buf_len, p, sname);
@@ -1030,8 +1032,15 @@ static void msg_hist_add(const char *s, int len, int hl_id)
   msg_hist_add_multihl(msg, false);
 }
 
+static bool do_clear_hist_temp = true;
+
 static void msg_hist_add_multihl(HlMessage msg, bool temp)
 {
+  if (do_clear_hist_temp) {
+    msg_hist_clear_temp();
+    do_clear_hist_temp = false;
+  }
+
   if (msg_hist_off || msg_silent != 0) {
     hl_msg_free(msg);
     return;
@@ -1179,10 +1188,12 @@ void ex_messages(exarg_T *eap)
   Array entries = ARRAY_DICT_INIT;
   MessageHistoryEntry *p = eap->skip ? msg_hist_temp : msg_hist_first;
   int skip = eap->addr_count ? (msg_hist_len - eap->line2) : 0;
-  while (p != NULL) {
+  for (; p != NULL; p = p->next) {
+    // Skip over count or temporary "g<" messages.
     if ((p->temp && !eap->skip) || skip-- > 0) {
-      // Skipping over count or temporary "g<" messages.
-    } else if (ui_has(kUIMessages)) {
+      continue;
+    }
+    if (ui_has(kUIMessages) && !msg_silent) {
       Array entry = ARRAY_DICT_INIT;
       ADD(entry, CSTR_TO_OBJ(p->kind));
       Array content = ARRAY_DICT_INIT;
@@ -1196,10 +1207,12 @@ void ex_messages(exarg_T *eap)
       }
       ADD(entry, ARRAY_OBJ(content));
       ADD(entries, ARRAY_OBJ(entry));
-    } else {
-      msg_multihl(p->msg, p->kind, false, false);
     }
-    p = p->next;
+    if (redirecting() || !ui_has(kUIMessages)) {
+      msg_silent += ui_has(kUIMessages);
+      msg_multihl(p->msg, p->kind, false, false);
+      msg_silent -= ui_has(kUIMessages);
+    }
   }
   if (kv_size(entries) > 0) {
     ui_call_msg_history_show(entries);
@@ -2011,6 +2024,11 @@ void msg_prt_line(const char *s, bool list)
     } else {
       hl_id = 0;
       int c = (uint8_t)(*s++);
+      if (c >= 0x80) {  // Illegal byte
+        col += utf_char2cells(c);
+        msg_putchar(c);
+        continue;
+      }
       sc_extra = NUL;
       sc_final = NUL;
       if (list) {
@@ -2206,8 +2224,6 @@ static void msg_ext_emit_chunk(void)
   ADD(*msg_ext_chunks, ARRAY_OBJ(chunk));
 }
 
-static bool do_clear_hist_temp = true;
-
 /// The display part of msg_puts_len().
 /// May be called recursively to display scroll-back text.
 static void msg_puts_display(const char *str, int maxlen, int hl_id, int recurse)
@@ -2236,10 +2252,6 @@ static void msg_puts_display(const char *str, int maxlen, int hl_id, int recurse
     int col = (int)(maxlen < 0 ? mb_string2cells(p) : mb_string2cells_len(p, (size_t)(maxlen)));
     msg_col = (lastline ? 0 : msg_col) + col;
 
-    if (do_clear_hist_temp && !strequal(msg_ext_kind, "return_prompt")) {
-      msg_hist_clear_temp();
-      do_clear_hist_temp = false;
-    }
     return;
   }
 
@@ -2382,18 +2394,17 @@ static void msg_puts_display(const char *str, int maxlen, int hl_id, int recurse
 void msg_line_flush(void)
 {
   if (cmdmsg_rl) {
-    grid_line_mirror();
+    grid_line_mirror(msg_grid.cols);
   }
   grid_line_flush_if_valid_row();
 }
 
 void msg_cursor_goto(int row, int col)
 {
-  ScreenGrid *grid = &msg_grid_adj;
   if (cmdmsg_rl) {
     col = Columns - 1 - col;
   }
-  grid_adjust(&grid, &row, &col);
+  ScreenGrid *grid = grid_adjust(&msg_grid_adj, &row, &col);
   ui_grid_cursor_goto(grid->handle, row, col);
 }
 
@@ -2525,6 +2536,13 @@ void msg_ui_refresh(void)
 {
   if (ui_has(kUIMultigrid) && msg_grid.chars) {
     ui_call_grid_resize(msg_grid.handle, msg_grid.cols, msg_grid.rows);
+    ui_ext_msg_set_pos(msg_grid_pos, msg_scrolled);
+  }
+}
+
+void msg_ui_flush(void)
+{
+  if (ui_has(kUIMultigrid) && msg_grid.chars && msg_grid.pending_comp_index_update) {
     ui_ext_msg_set_pos(msg_grid_pos, msg_scrolled);
   }
 }
@@ -2689,6 +2707,7 @@ void show_sb_text(void)
 {
   if (ui_has(kUIMessages)) {
     exarg_T ea = { .arg = "", .skip = true };
+    msg_ext_clear(true);
     ex_messages(&ea);
     return;
   }
@@ -2969,7 +2988,7 @@ static bool do_more_prompt(int typed_char)
           }
 
           if (toscroll == -1 && !to_redraw) {
-            grid_ins_lines(&msg_grid_adj, 0, 1, Rows, 0, Columns);
+            grid_ins_lines(&msg_grid, 0, 1, Rows, 0, Columns);
             grid_clear(&msg_grid_adj, 0, 1, 0, Columns, HL_ATTR(HLF_MSG));
             // display line at top
             disp_sb_line(0, mp);
@@ -3054,13 +3073,17 @@ void msg_moremsg(bool full)
 }
 
 /// Repeat the message for the current mode: MODE_ASKMORE, MODE_EXTERNCMD,
-/// MODE_CONFIRM or exmode_active.
+/// confirm() prompt or exmode_active.
 void repeat_message(void)
 {
+  if (ui_has(kUIMessages)) {
+    return;
+  }
+
   if (State == MODE_ASKMORE) {
     msg_moremsg(true);          // display --more-- message again
     msg_row = Rows - 1;
-  } else if (State == MODE_CONFIRM) {
+  } else if (State == MODE_CMDLINE && confirm_msg != NULL) {
     display_confirm_msg();      // display ":confirm" message again
     msg_row = Rows - 1;
   } else if (State == MODE_EXTERNCMD) {
@@ -3171,7 +3194,8 @@ void msg_ext_ui_flush(void)
   msg_ext_emit_chunk();
   if (msg_ext_chunks->size > 0) {
     Array *tofree = msg_ext_init_chunks();
-    ui_call_msg_show(cstr_as_string(msg_ext_kind), *tofree, msg_ext_overwrite, msg_ext_history);
+    ui_call_msg_show(cstr_as_string(msg_ext_kind), *tofree, msg_ext_overwrite, msg_ext_history,
+                     msg_ext_append);
     if (msg_ext_history || strequal(msg_ext_kind, "return_prompt")) {
       api_free_array(*tofree);
     } else {
@@ -3191,6 +3215,7 @@ void msg_ext_ui_flush(void)
     }
     msg_ext_overwrite = false;
     msg_ext_history = false;
+    msg_ext_append = false;
     msg_ext_kind = NULL;
   }
 }
@@ -3363,8 +3388,8 @@ void verbose_enter(void)
   }
   if (msg_ext_kind != verbose_kind) {
     pre_verbose_kind = msg_ext_kind;
-    msg_ext_set_kind("verbose");
   }
+  msg_ext_set_kind("verbose");
 }
 
 /// After giving verbose message.
@@ -3530,8 +3555,6 @@ int do_dialog(int type, const char *title, const char *message, const char *butt
   int oldState = State;
 
   msg_silent = 0;  // If dialog prompts for input, user needs to see it! #8788
-  State = MODE_CONFIRM;
-  setmouse();
 
   // Since we wait for a keypress, don't make the
   // user press RETURN as well afterwards.
@@ -3588,6 +3611,8 @@ int do_dialog(int type, const char *title, const char *message, const char *butt
   }
 
   xfree(hotkeys);
+  xfree(confirm_msg);
+  confirm_msg = NULL;
 
   msg_silent = save_msg_silent;
   State = oldState;
@@ -3668,7 +3693,6 @@ static char *console_dialog_alloc(const char *message, const char *buttons, bool
   }
 
   // Now allocate space for the strings
-  xfree(confirm_msg);
   confirm_msg = xmalloc((size_t)msg_len);
   snprintf(confirm_msg, (size_t)msg_len, "\n%s\n", message);
 
@@ -3831,9 +3855,7 @@ int vim_dialog_yesnoallcancel(int type, char *title, char *message, int dflt)
 void msg_check_for_delay(bool check_msg_scroll)
 {
   if ((emsg_on_display || (check_msg_scroll && msg_scroll))
-      && !did_wait_return
-      && emsg_silent == 0
-      && !in_assert_fails) {
+      && !did_wait_return && emsg_silent == 0 && !in_assert_fails && !ui_has(kUIMessages)) {
     ui_flush();
     os_delay(1006, true);
     emsg_on_display = false;

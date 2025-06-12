@@ -69,7 +69,6 @@
 #include "nvim/message.h"
 #include "nvim/mouse.h"
 #include "nvim/move.h"
-#include "nvim/msgpack_rpc/server.h"
 #include "nvim/normal.h"
 #include "nvim/normal_defs.h"
 #include "nvim/ops.h"
@@ -101,6 +100,7 @@
 #include "nvim/tag.h"
 #include "nvim/types_defs.h"
 #include "nvim/ui.h"
+#include "nvim/ui_client.h"
 #include "nvim/undo.h"
 #include "nvim/undo_defs.h"
 #include "nvim/usercmd.h"
@@ -4147,7 +4147,7 @@ void separate_nextcmd(exarg_T *eap)
 }
 
 /// get + command from ex argument
-static char *getargcmd(char **argp)
+char *getargcmd(char **argp)
 {
   char *arg = *argp;
   char *command = NULL;
@@ -4222,7 +4222,7 @@ static char *get_bad_name(expand_T *xp FUNC_ATTR_UNUSED, int idx)
 /// Get "++opt=arg" argument.
 ///
 /// @return  FAIL or OK.
-static int getargopt(exarg_T *eap)
+int getargopt(exarg_T *eap)
 {
   char *arg = eap->arg + 2;
   int *pp = NULL;
@@ -4828,16 +4828,23 @@ int before_quit_all(exarg_T *eap)
 }
 
 /// ":qall": try to quit all windows
-static void ex_quit_all(exarg_T *eap)
+/// ":restart": restart the Nvim server
+static void ex_quitall_or_restart(exarg_T *eap)
 {
   if (before_quit_all(eap) == FAIL) {
     return;
   }
   exiting = true;
-  if (eap->forceit || !check_changed_any(false, false)) {
+  Error err = ERROR_INIT;
+  if ((eap->forceit || !check_changed_any(false, false))
+      && (eap->cmdidx != CMD_restart || remote_ui_restart(current_ui, &err))) {
     getout(0);
   }
   not_exiting();
+  if (ERROR_SET(&err)) {
+    emsg(err.msg);  // UI disappeared already?
+    api_clear_error(&err);
+  }
 }
 
 /// ":close": close current window, unless it is the last one
@@ -5129,14 +5136,13 @@ static void ex_print(exarg_T *eap)
   if (curbuf->b_ml.ml_flags & ML_EMPTY) {
     emsg(_(e_empty_buffer));
   } else {
-    for (; !got_int; os_breakcheck()) {
-      print_line(eap->line1,
+    for (linenr_T line = eap->line1; line <= eap->line2 && !got_int; os_breakcheck()) {
+      print_line(line,
                  (eap->cmdidx == CMD_number || eap->cmdidx == CMD_pound
                   || (eap->flags & EXFLAG_NR)),
-                 eap->cmdidx == CMD_list || (eap->flags & EXFLAG_LIST));
-      if (++eap->line1 > eap->line2) {
-        break;
-      }
+                 eap->cmdidx == CMD_list || (eap->flags & EXFLAG_LIST),
+                 line == eap->line1);
+      line++;
     }
     setpcmark();
     // put cursor at last line
@@ -5554,8 +5560,8 @@ static void ex_detach(exarg_T *eap)
   if (eap && eap->forceit) {
     emsg("bang (!) not supported yet");
   } else {
-    // 1. (TODO) Send "detach" UI-event (notification only).
-    // 2. Perform server-side `nvim_ui_detach`.
+    // 1. Send "error_exit" UI-event (notification only).
+    // 2. Perform server-side UI detach.
     // 3. Close server-side channel without self-exit.
 
     if (!current_ui) {
@@ -5572,7 +5578,7 @@ static void ex_detach(exarg_T *eap)
 
     // Server-side UI detach. Doesn't close the channel.
     Error err2 = ERROR_INIT;
-    nvim_ui_detach(chan->id, &err2);
+    remote_ui_disconnect(chan->id, &err2, true);
     if (ERROR_SET(&err2)) {
       emsg(err2.msg);  // UI disappeared already?
       api_clear_error(&err2);
@@ -6360,7 +6366,7 @@ void ex_may_print(exarg_T *eap)
 {
   if (eap->flags != 0) {
     print_line(curwin->w_cursor.lnum, (eap->flags & EXFLAG_NR),
-               (eap->flags & EXFLAG_LIST));
+               (eap->flags & EXFLAG_LIST), true);
     ex_no_reprint = true;
   }
 }
@@ -7810,8 +7816,8 @@ static void ex_checkhealth(exarg_T *eap)
     return;
   }
 
-  const char *vimruntime_env = os_getenv("VIMRUNTIME");
-  if (vimruntime_env == NULL) {
+  char *vimruntime_env = os_getenv_noalloc("VIMRUNTIME");
+  if (!vimruntime_env) {
     emsg(_("E5009: $VIMRUNTIME is empty or unset"));
   } else {
     bool rtp_ok = NULL != strstr(p_rtp, vimruntime_env);

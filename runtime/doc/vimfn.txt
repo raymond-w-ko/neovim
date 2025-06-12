@@ -1,10 +1,10 @@
-*builtin.txt*	Nvim
+*vimfn.txt*	Nvim
 
 
 		  NVIM REFERENCE MANUAL
 
 
-Builtin functions		*vimscript-functions* *builtin-functions*
+Vimscript functions	*vimscript-functions* *builtin-functions* *builtin.txt*
 
 For functions grouped by what they are used for see |function-list|.
 
@@ -1061,6 +1061,29 @@ clearmatches([{win}])                                           *clearmatches()*
                 Parameters: ~
                   • {win} (`integer?`)
 
+cmdcomplete_info()                                          *cmdcomplete_info()*
+		Returns a |Dictionary| with information about cmdline
+		completion.  See |cmdline-completion|.
+		The items are:
+		   cmdline_orig	The original command-line string before
+				completion began.
+		   pum_visible	|TRUE| if popup menu is visible.
+				See |pumvisible()|.
+		   matches	List of all completion candidates. Each item
+				is a string.
+		   selected	Selected item index.  First index is zero.
+				Index is -1 if no item is selected (showing
+				typed text only, or the last completion after
+				no item is selected when using the <Up> or
+				<Down> keys)
+
+		Returns an empty |Dictionary| if no completion was attempted,
+		if there was only one candidate and it was fully completed, or
+		if an error occurred.
+
+                Return: ~
+                  (`table<string,any>`)
+
 col({expr} [, {winid}])                                                  *col()*
 		The result is a Number, which is the byte index of the column
 		position given with {expr}.
@@ -1213,6 +1236,7 @@ complete_info([{what}])                                        *complete_info()*
 		   "omni"	     Omni completion |i_CTRL-X_CTRL-O|
 		   "spell"	     Spelling suggestions |i_CTRL-X_s|
 		   "eval"	     |complete()| completion
+		   "register"	     Words from registers |i_CTRL-X_CTRL-R|
 		   "unknown"	     Other internal modes
 
 		If the optional {what} list argument is supplied, then only
@@ -1236,6 +1260,56 @@ complete_info([{what}])                                        *complete_info()*
 
                 Parameters: ~
                   • {what} (`any[]?`)
+
+                Return: ~
+                  (`table`)
+
+complete_match([{lnum}, {col}])                               *complete_match()*
+		Searches backward from the given position and returns a List
+		of matches according to the 'isexpand' option. When no
+		arguments are provided, uses the current cursor position.
+
+		Each match is represented as a List containing
+		[startcol, trigger_text] where:
+		- startcol: column position where completion should start,
+		  or -1 if no trigger position is found. For multi-character
+		  triggers, returns the column of the first character.
+		- trigger_text: the matching trigger string from 'isexpand',
+		  or empty string if no match was found or when using the
+		  default 'iskeyword' pattern.
+
+		When 'isexpand' is empty, uses the 'iskeyword' pattern "\k\+$"
+		to find the start of the current keyword.
+
+		Examples: >vim
+		  set isexpand=.,->,/,/*,abc
+		  func CustomComplete()
+		    let res = complete_match()
+		    if res->len() == 0 | return | endif
+		    let [col, trigger] = res[0]
+		    let items = []
+		    if trigger == '/*'
+		      let items = ['/** */']
+		    elseif trigger == '/'
+		      let items = ['/*! */', '// TODO:', '// fixme:']
+		    elseif trigger == '.'
+		      let items = ['length()']
+		    elseif trigger =~ '^\->'
+		      let items = ['map()', 'reduce()']
+		    elseif trigger =~ '^\abc'
+		      let items = ['def', 'ghk']
+		    endif
+		    if items->len() > 0
+		      let startcol = trigger =~ '^/' ? col : col + len(trigger)
+		      call complete(startcol, items)
+		    endif
+		  endfunc
+		  inoremap <Tab> <Cmd>call CustomComplete()<CR>
+<
+
+                Parameters: ~
+                  • {lnum} (`integer?`)
+                  • {col} (`integer?`)
 
                 Return: ~
                   (`table`)
@@ -2384,7 +2458,7 @@ finddir({name} [, {path} [, {count}]])                               *finddir()*
                   • {count} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`string|string[]`)
 
 findfile({name} [, {path} [, {count}]])                             *findfile()*
 		Just like |finddir()|, but find a file instead of a directory.
@@ -2397,10 +2471,10 @@ findfile({name} [, {path} [, {count}]])                             *findfile()*
                 Parameters: ~
                   • {name} (`string`)
                   • {path} (`string?`)
-                  • {count} (`any?`)
+                  • {count} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`string|string[]`)
 
 flatten({list} [, {maxdepth}])                                       *flatten()*
 		Flatten {list} up to {maxdepth} levels.  Without {maxdepth}
@@ -3244,7 +3318,7 @@ getcharsearch()                                                *getcharsearch()*
                 Return: ~
                   (`table`)
 
-getcharstr([{expr}])                                              *getcharstr()*
+getcharstr([{expr} [, {opts}]])                                   *getcharstr()*
 		The same as |getchar()|, except that this always returns a
 		String, and "number" isn't allowed in {opts}.
 
@@ -3378,6 +3452,7 @@ getcompletion({pat}, {type} [, {filtered}])                    *getcompletion()*
 		file		file and directory names
 		file_in_path	file and directory names in |'path'|
 		filetype	filetype names |'filetype'|
+		filetypecmd	|:filetype| suboptions
 		function	function name
 		help		help subjects
 		highlight	highlight groups
@@ -3462,7 +3537,7 @@ getcurpos([{winid}])                                               *getcurpos()*
                   • {winid} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`[integer, integer, integer, integer, integer]`)
 
 getcursorcharpos([{winid}])                                 *getcursorcharpos()*
 		Same as |getcurpos()| but the column number in the returned
@@ -3771,7 +3846,7 @@ getmatches([{win}])                                               *getmatches()*
                   • {win} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`vim.fn.getmatches.ret.item[]`)
 
 getmousepos()                                                    *getmousepos()*
 		Returns a |Dictionary| with the last known position of the
@@ -3877,7 +3952,7 @@ getpos({expr})                                                        *getpos()*
                   • {expr} (`string`)
 
                 Return: ~
-                  (`integer[]`)
+                  (`[integer, integer, integer, integer]`)
 
 getqflist([{what}])                                                *getqflist()*
 		Returns a |List| with all the current quickfix errors.  Each
@@ -4014,6 +4089,7 @@ getreg([{regname} [, 1 [, {list}]]])                                  *getreg()*
 
                 Parameters: ~
                   • {regname} (`string?`)
+                  • {expr} (`any?`)
                   • {list} (`nil|false?`)
 
                 Return: ~
@@ -4093,6 +4169,10 @@ getregion({pos1}, {pos2} [, {opts}])                               *getregion()*
 		- It is evaluated in current window context, which makes a
 		  difference if the buffer is displayed in a window with
 		  different 'virtualedit' or 'list' values.
+		- When specifying an exclusive selection and {pos1} and {pos2}
+		  are equal, the returned list contains a single character as
+		  if selection is inclusive, to match the behavior of an empty
+		  exclusive selection in Visual mode.
 
 		Examples: >vim
 			xnoremap <CR>
@@ -4101,9 +4181,9 @@ getregion({pos1}, {pos2} [, {opts}])                               *getregion()*
 <
 
                 Parameters: ~
-                  • {pos1} (`table`)
-                  • {pos2} (`table`)
-                  • {opts} (`table?`)
+                  • {pos1} (`[integer, integer, integer, integer]`)
+                  • {pos2} (`[integer, integer, integer, integer]`)
+                  • {opts} (`{type?:string, exclusive?:boolean}?`)
 
                 Return: ~
                   (`string[]`)
@@ -4141,12 +4221,13 @@ getregionpos({pos1}, {pos2} [, {opts}])                         *getregionpos()*
 					(default: |FALSE|)
 
                 Parameters: ~
-                  • {pos1} (`table`)
-                  • {pos2} (`table`)
-                  • {opts} (`table?`)
+                  • {pos1} (`[integer, integer, integer, integer]`)
+                  • {pos2} (`[integer, integer, integer, integer]`)
+                  • {opts}
+                    (`{type?:string, exclusive?:boolean, eol?:boolean}?`)
 
                 Return: ~
-                  (`integer[][][]`)
+                  (`[ [integer, integer, integer, integer], [integer, integer, integer, integer] ][]`)
 
 getregtype([{regname}])                                           *getregtype()*
 		The result is a String, which is type of register {regname}.
@@ -7395,7 +7476,8 @@ printf({fmt}, {expr1} ...)                                            *printf()*
 <		      1.41
 
 		You will get an overflow error |E1510|, when the field-width
-		or precision will result in a string longer than 6400 chars.
+		or precision will result in a string longer than 1 MB
+		(1024*1024 = 1048576) chars.
 
 							*E1500*
 		You cannot mix positional and non-positional arguments: >vim
@@ -7771,7 +7853,7 @@ readfile({fname} [, {type} [, {max}]])                              *readfile()*
                   • {max} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`string[]`)
 
 reduce({object}, {func} [, {initial}])                           *reduce()* *E998*
 		{func} is called for every item in {object}, which can be a
@@ -8340,11 +8422,11 @@ searchcount([{options}])                                         *searchcount()*
 
 		To get the last search count when |n| or |N| was pressed, call
 		this function with `recompute: 0` . This sometimes returns
-		wrong information because |n| and |N|'s maximum count is 99.
-		If it exceeded 99 the result must be max count + 1 (100). If
+		wrong information because |n| and |N|'s maximum count is 999.
+		If it exceeded 999 the result must be max count + 1 (1000). If
 		you want to get correct information, specify `recompute: 1`: >vim
 
-			" result == maxcount + 1 (100) when many matches
+			" result == maxcount + 1 (1000) when many matches
 			let result = searchcount(#{recompute: 0})
 
 			" Below returns correct result (recompute defaults
@@ -8867,6 +8949,8 @@ setcursorcharpos({list})
 			call cursor(4, 3)
 <		positions the cursor on the first character '여'.
 
+		Returns 0 when the position could be set, -1 otherwise.
+
                 Parameters: ~
                   • {list} (`integer[]`)
 
@@ -8980,7 +9064,7 @@ setmatches({list} [, {win}])                                      *setmatches()*
 		window ID instead of the current window.
 
                 Parameters: ~
-                  • {list} (`any`)
+                  • {list} (`vim.fn.getmatches.ret.item[]`)
                   • {win} (`integer?`)
 
                 Return: ~
@@ -11659,7 +11743,7 @@ virtcol({expr} [, {list} [, {winid}]])                               *virtcol()*
                   • {winid} (`integer?`)
 
                 Return: ~
-                  (`any`)
+                  (`integer|[integer, integer]`)
 
 virtcol2col({winid}, {lnum}, {col})                              *virtcol2col()*
 		The result is a Number, which is the byte index of the
@@ -11975,14 +12059,13 @@ windowsversion()                                              *windowsversion()*
                   (`string`)
 
 winheight({nr})                                                    *winheight()*
-		The result is a Number, which is the height of window {nr}.
-		{nr} can be the window number or the |window-ID|.
-		When {nr} is zero, the height of the current window is
-		returned.  When window {nr} doesn't exist, -1 is returned.
-		An existing window always has a height of zero or more.
-		This excludes any window toolbar line.
+		Gets the height of |window-ID| {nr} (zero for "current
+		window"), excluding any 'winbar' and 'statusline'. Returns -1
+		if window {nr} doesn't exist. An existing window always has
+		a height of zero or more.
+
 		Examples: >vim
-		  echo "The current window has " .. winheight(0) .. " lines."
+		  echo "Current window has " .. winheight(0) .. " lines."
 <
 
                 Parameters: ~
@@ -12032,7 +12115,7 @@ winlayout([{tabnr}])                                               *winlayout()*
                   • {tabnr} (`integer?`)
 
                 Return: ~
-                  (`any[]`)
+                  (`vim.fn.winlayout.ret`)
 
 winline()                                                            *winline()*
 		The result is a Number, which is the screen line of the cursor
@@ -12047,7 +12130,8 @@ winline()                                                            *winline()*
 winnr([{arg}])                                                         *winnr()*
 		The result is a Number, which is the number of the current
 		window.  The top window has number 1.
-		Returns zero for a popup window.
+		Returns zero for a hidden or non |focusable| window, unless
+		it is the current window.
 
 		The optional argument {arg} supports the following values:
 			$	the number of the last window (the window
@@ -12149,18 +12233,21 @@ winsaveview()                                                    *winsaveview()*
                   (`vim.fn.winsaveview.ret`)
 
 winwidth({nr})                                                      *winwidth()*
-		The result is a Number, which is the width of window {nr}.
-		{nr} can be the window number or the |window-ID|.
-		When {nr} is zero, the width of the current window is
-		returned.  When window {nr} doesn't exist, -1 is returned.
-		An existing window always has a width of zero or more.
-		Examples: >vim
-		  echo "The current window has " .. winwidth(0) .. " columns."
+		Gets the width of |window-ID| {nr} (zero for "current
+		window"), including columns (|sign-column|, 'statuscolumn',
+		etc.). Returns -1 if window {nr} doesn't exist. An existing
+		window always has a width of zero or more.
+
+		Example: >vim
+		  echo "Current window has " .. winwidth(0) .. " columns."
 		  if winwidth(0) <= 50
 		    50 wincmd |
 		  endif
-<		For getting the terminal or screen size, see the 'columns'
-		option.
+<
+		To get the buffer "viewport", use |getwininfo()|: >vim
+		    :echo getwininfo(win_getid())[0].width - getwininfo(win_getid())[0].textoff
+<
+		To get the Nvim screen size, see the 'columns' option.
 
                 Parameters: ~
                   • {nr} (`integer`)

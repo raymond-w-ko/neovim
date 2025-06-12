@@ -128,6 +128,15 @@ RSC[ms.client_registerCapability] = function(_, params, ctx)
   for bufnr in pairs(client.attached_buffers) do
     vim.lsp._set_defaults(client, bufnr)
   end
+  for _, reg in ipairs(params.registrations) do
+    if reg.method == ms.textDocument_documentColor then
+      for bufnr in pairs(client.attached_buffers) do
+        if vim.lsp.document_color.is_enabled(bufnr) then
+          vim.lsp.document_color._buf_refresh(bufnr, client.id)
+        end
+      end
+    end
+  end
   return vim.NIL
 end
 
@@ -232,7 +241,7 @@ end
 ---
 --- The returned function has an optional {config} parameter that accepts |vim.lsp.ListOpts|
 ---
----@param map_result fun(resp, bufnr: integer, position_encoding: 'utf-8'|'utf-16'|'utf-32'): table to convert the response
+---@param map_result fun(resp: any, bufnr: integer, position_encoding: 'utf-8'|'utf-16'|'utf-32'): table to convert the response
 ---@param entity string name of the resource used in a `not found` error message
 ---@param title_fn fun(ctx: lsp.HandlerContext): string Function to call to generate list title
 ---@return lsp.Handler
@@ -467,8 +476,6 @@ RCS[ms.textDocument_documentHighlight] = function(_, result, ctx)
   util.buf_highlight_references(ctx.bufnr, result, client.offset_encoding)
 end
 
---- @private
----
 --- Displays call hierarchy in the quickfix window.
 ---
 --- @param direction 'from'|'to' `"from"` for incoming calls and `"to"` for outgoing calls

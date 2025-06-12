@@ -222,6 +222,7 @@ describe('vim.hl.on_yank', function()
 
   it('does not show errors even if buffer is wiped before timeout', function()
     command('new')
+    n.feed('ifoo<esc>') -- set '[, ']
     exec_lua(function()
       vim.hl.on_yank({
         timeout = 10,
@@ -258,9 +259,9 @@ describe('vim.hl.on_yank', function()
     eq({ win }, api.nvim__ns_get(ns).wins)
     command('wincmd w')
     eq({ win }, api.nvim__ns_get(ns).wins)
-    -- Use a new vim.hl.range() call to cancel the previous timer
+    -- Use a new vim.hl.on_yank() call to cancel the previous timer
     exec_lua(function()
-      vim.hl.range(0, ns, 'Search', { 0, 0 }, { 0, 0 }, { timeout = 0 })
+      vim.hl.on_yank({ timeout = 0, on_macro = true, event = { operator = 'y' } })
     end)
   end)
 
@@ -283,9 +284,9 @@ describe('vim.hl.on_yank', function()
     eq({ win }, api.nvim__ns_get(ns).wins)
     command('wincmd w')
     eq({ win }, api.nvim__ns_get(ns).wins)
-    -- Use a new vim.hl.range() call to cancel the previous timer
+    -- Use a new vim.hl.on_yank() call to cancel the previous timer
     exec_lua(function()
-      vim.hl.range(0, ns, 'Search', { 0, 0 }, { 0, 0 }, { timeout = 0 })
+      vim.hl.on_yank({ timeout = 0, on_macro = true, event = { operator = 'y' } })
     end)
   end)
 
@@ -320,5 +321,9 @@ describe('vim.hl.on_yank', function()
       {1:~                                                           }|
                                                                   |
     ]])
+    -- Use a new vim.hl.on_yank() call to cancel the previous timer
+    exec_lua(function()
+      vim.hl.on_yank({ timeout = 0, on_macro = true, event = { operator = 'y' } })
+    end)
   end)
 end)

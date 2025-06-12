@@ -5,7 +5,7 @@
 local util = require('gen.util')
 local fmt = string.format
 
-local DEP_API_METADATA = 'build/funcs_metadata.mpack'
+local DEP_API_METADATA = arg[1]
 local TEXT_WIDTH = 78
 
 --- @class vim.api.metadata
@@ -32,6 +32,7 @@ local LUA_API_RETURN_OVERRIDES = {
   nvim_get_command = 'table<string,vim.api.keyset.command_info>',
   nvim_get_keymap = 'vim.api.keyset.get_keymap[]',
   nvim_get_mark = 'vim.api.keyset.get_mark',
+  nvim_eval_statusline = 'vim.api.keyset.eval_statusline_ret',
 
   -- Can also return table<string,vim.api.keyset.get_hl_info>, however we need to
   -- pick one to get some benefit.
@@ -45,6 +46,7 @@ local LUA_API_RETURN_OVERRIDES = {
   nvim_get_option_info2 = 'vim.api.keyset.get_option_info',
   nvim_parse_cmd = 'vim.api.keyset.parse_cmd',
   nvim_win_get_config = 'vim.api.keyset.win_config',
+  nvim_win_text_height = 'vim.api.keyset.win_text_height_ret',
 }
 
 local LUA_API_KEYSET_OVERRIDES = {
@@ -174,7 +176,13 @@ local function api_type(t)
   local as0 = t:match('^ArrayOf%((.*)%)')
   if as0 then
     local as = split(as0, ', ')
-    return api_type(as[1]) .. '[]'
+    local a = api_type(as[1])
+    local count = tonumber(as[2])
+    if count then
+      return ('[%s]'):format(a:rep(count, ', '))
+    else
+      return a .. '[]'
+    end
   end
 
   local d = t:match('^Dict%((.*)%)')
@@ -949,17 +957,17 @@ local CONFIG = {
     render = render_api_keyset_meta,
   },
   {
-    path = 'runtime/doc/builtin.txt',
+    path = 'runtime/doc/vimfn.txt',
     funcs = get_eval_meta,
     render = render_eval_doc,
     header = {
-      '*builtin.txt*	Nvim',
+      '*vimfn.txt*	Nvim',
       '',
       '',
       '\t\t  NVIM REFERENCE MANUAL',
       '',
       '',
-      'Builtin functions\t\t*vimscript-functions* *builtin-functions*',
+      'Vimscript functions\t*vimscript-functions* *builtin-functions* *builtin.txt*',
       '',
       'For functions grouped by what they are used for see |function-list|.',
       '',

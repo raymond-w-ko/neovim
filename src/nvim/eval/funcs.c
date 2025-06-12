@@ -1556,7 +1556,7 @@ static void f_exists(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   const char *p = tv_get_string(&argvars[0]);
   if (*p == '$') {  // Environment variable.
     // First try "normal" environment variables (fast).
-    if (os_env_exists(p + 1)) {
+    if (os_env_exists(p + 1, false)) {
       n = true;
     } else {
       // Try expanding things like $VIM and ${HOME}.
@@ -3881,9 +3881,9 @@ dict_T *create_environment(const dictitem_T *job_env, const bool clear_env, cons
       size_t len = strlen(required_env_vars[i]);
       dictitem_T *dv = tv_dict_find(env, required_env_vars[i], (ptrdiff_t)len);
       if (!dv) {
-        const char *env_var = os_getenv(required_env_vars[i]);
+        char *env_var = os_getenv(required_env_vars[i]);
         if (env_var) {
-          tv_dict_add_str(env, required_env_vars[i], len, env_var);
+          tv_dict_add_allocated_str(env, required_env_vars[i], len, env_var);
         }
       }
     }
@@ -4019,8 +4019,8 @@ void f_jobstart(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     overlapped = false;
     detach = false;
     stdin_mode = kChannelStdinPipe;
-    width = (uint16_t)MAX(0, curwin->w_width_inner - win_col_off(curwin));
-    height = (uint16_t)curwin->w_height_inner;
+    width = (uint16_t)MAX(0, curwin->w_view_width - win_col_off(curwin));
+    height = (uint16_t)curwin->w_view_height;
   }
 
   if (pty) {
@@ -6357,10 +6357,10 @@ static void f_rpcrequest(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
       name = get_client_info(chan, "name");
     }
     if (name) {
-      semsg_multiline("rpc_error", "Error invoking '%s' on channel %" PRIu64 " (%s):\n%s",
+      semsg_multiline("rpc_error", "Invoking '%s' on channel %" PRIu64 " (%s):\n%s",
                       method, chan_id, name, err.msg);
     } else {
-      semsg_multiline("rpc_error", "Error invoking '%s' on channel %" PRIu64 ":\n%s",
+      semsg_multiline("rpc_error", "Invoking '%s' on channel %" PRIu64 ":\n%s",
                       method, chan_id, err.msg);
     }
 
