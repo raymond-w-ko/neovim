@@ -607,6 +607,7 @@ predicate_handlers['any-vim-match?'] = predicate_handlers['any-match?']
 ---@nodoc
 ---@class vim.treesitter.query.TSMetadata
 ---@field range? Range
+---@field offset? Range4
 ---@field conceal? string
 ---@field bo.commentstring? string
 ---@field [integer]? vim.treesitter.query.TSMetadata
@@ -645,29 +646,21 @@ local directive_handlers = {
     if not nodes or #nodes == 0 then
       return
     end
-    assert(#nodes == 1, '#offset! does not support captures on multiple nodes')
-
-    local node = nodes[1]
 
     if not metadata[capture_id] then
       metadata[capture_id] = {}
     end
 
-    local range = metadata[capture_id].range or { node:range() }
-    local start_row_offset = pred[3] or 0
-    local start_col_offset = pred[4] or 0
-    local end_row_offset = pred[5] or 0
-    local end_col_offset = pred[6] or 0
-
-    range[1] = range[1] + start_row_offset
-    range[2] = range[2] + start_col_offset
-    range[3] = range[3] + end_row_offset
-    range[4] = range[4] + end_col_offset
-
-    -- If this produces an invalid range, we just skip it.
-    if range[1] < range[3] or (range[1] == range[3] and range[2] <= range[4]) then
-      metadata[capture_id].range = range
-    end
+    metadata[capture_id].offset = {
+      pred[3] --[[@as integer]]
+        or 0,
+      pred[4] --[[@as integer]]
+        or 0,
+      pred[5] --[[@as integer]]
+        or 0,
+      pred[6] --[[@as integer]]
+        or 0,
+    }
   end,
   -- Transform the content of the node
   -- Example: (#gsub! @_node ".*%.(.*)" "%1")
@@ -1063,9 +1056,9 @@ end
 ---   - max_start_depth (integer) if non-zero, sets the maximum start depth
 ---     for each match. This is used to prevent traversing too deep into a tree.
 ---   - match_limit (integer) Set the maximum number of in-progress matches (Default: 256).
---- - all (boolean) When `false` (default `true`), the returned table maps capture IDs to a single
----   (last) node instead of the full list of matching nodes. This option is only for backward
----   compatibility and will be removed in a future release.
+---   - all (boolean) When `false` (default `true`), the returned table maps capture IDs to a single
+---     (last) node instead of the full list of matching nodes. This option is only for backward
+---     compatibility and will be removed in a future release.
 ---
 ---@return (fun(): integer, table<integer, TSNode[]>, vim.treesitter.query.TSMetadata, TSTree): pattern id, match, metadata, tree
 function Query:iter_matches(node, source, start, stop, opts)

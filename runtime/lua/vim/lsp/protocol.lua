@@ -344,6 +344,7 @@ function protocol.make_client_capabilities()
         tagSupport = {
           valueSet = get_value_set(constants.DiagnosticTag),
         },
+        dataSupport = true,
       },
       inlayHint = {
         dynamicRegistration = true,
@@ -403,8 +404,7 @@ function protocol.make_client_capabilities()
         },
 
         overlappingTokenSupport = true,
-        -- TODO(jdrouhard): Add support for this
-        multilineTokenSupport = false,
+        multilineTokenSupport = true,
         serverCancelSupport = false,
         augmentsSyntaxTokens = true,
       },
@@ -430,6 +430,8 @@ function protocol.make_client_capabilities()
         resolveSupport = {
           properties = { 'edit', 'command' },
         },
+        disabledSupport = true,
+        honorsChangeAnnotations = true,
       },
       codeLens = {
         dynamicRegistration = false,
@@ -440,6 +442,9 @@ function protocol.make_client_capabilities()
       foldingRange = {
         dynamicRegistration = false,
         lineFoldingOnly = true,
+        foldingRangeKind = {
+          valueSet = { 'comment', 'imports', 'region' },
+        },
         foldingRange = {
           collapsedText = true,
         },
@@ -525,9 +530,9 @@ function protocol.make_client_capabilities()
       rename = {
         dynamicRegistration = true,
         prepareSupport = true,
+        honorsChangeAnnotations = true,
       },
       publishDiagnostics = {
-        relatedInformation = true,
         tagSupport = {
           valueSet = get_value_set(constants.DiagnosticTag),
         },
@@ -538,6 +543,9 @@ function protocol.make_client_capabilities()
       },
       colorProvider = {
         dynamicRegistration = true,
+      },
+      selectionRange = {
+        dynamicRegistration = false,
       },
     },
     workspace = {
@@ -556,6 +564,7 @@ function protocol.make_client_capabilities()
       workspaceEdit = {
         resourceOperations = { 'rename', 'create', 'delete' },
         normalizesLineEndings = true,
+        changeAnnotationSupport = { groupsOnLabel = true },
       },
       semanticTokens = {
         refreshSupport = true,

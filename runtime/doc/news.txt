@@ -18,13 +18,18 @@ BREAKING CHANGES IN HEAD OR EXPERIMENTAL                    *news-breaking-dev*
 The following changes to UNRELEASED features were made during the development
 cycle (Nvim HEAD, the "master" branch).
 
+EVENTS
+
+• Renamed "nvim.find_exrc" |default-autocmds| group to "nvim.exrc".
+
 EXPERIMENTS
 
 • todo
 
 LSP
 
-• todo
+• |vim.lsp.buf.selection_range()| now accepts an integer which specifies its
+  direction, rather than a string `'outer'` or `'inner'`.
 
 OPTIONS
 
@@ -62,7 +67,10 @@ EDITOR
 
 EVENTS
 
-• todo
+• |ui-messages| no longer emits the `msg_show.return_prompt`, `msg_clear` and
+  `msg_history_clear` events. These events arbitrarily assume a message UI
+  mimicking the legacy message grid. Benefit: reduced UI event traffic and
+  more flexibility for UIs.
 
 HIGHLIGHTS
 
@@ -88,7 +96,11 @@ PLUGINS
 
 TREESITTER
 
-• todo
+• |treesitter-directive-offset!| can now be applied to quantified captures. It
+  no longer sets `metadata[capture_id].range`; it instead sets
+  `metadata[capture_id].offset`. The offset will be applied in
+  |vim.treesitter.get_range()|, which should be preferred over reading
+  metadata directly for retrieving node ranges.
 
 TUI
 
@@ -142,6 +154,8 @@ EDITOR
 • |omnicompletion| in `help` buffer. |ft-help-omni|
 • Setting "'0" in 'shada' prevents storing the jumplist in the shada file.
 • 'shada' now correctly respects "/0" and "f0".
+• |prompt-buffer| supports multiline input/paste, undo/redo, and o/O normal
+  commands.
 
 EVENTS
 
@@ -167,6 +181,13 @@ LSP
   "resolving" it).
 • Support for `workspace/diagnostic`: |vim.lsp.buf.workspace_diagnostics()|
   https://microsoft.github.io/language-server-protocol/specifications/specification-current/#workspace_dagnostics
+• Incremental selection is now supported via `textDocument/selectionRange`.
+  `an` selects outwards and `in` selects inwards.
+• Support for multiline semantic tokens.
+• Support for the `disabled` field on code actions.
+• The function form of `cmd` in a vim.lsp.Config or vim.lsp.ClientConfig
+  receives the resolved config as the second arg: `cmd(dispatchers, config)`.
+• Support for annotated text edits.
 
 LUA
 
@@ -237,12 +258,14 @@ UI
 VIMSCRIPT
 
 • |cmdcomplete_info()| gets current cmdline completion info.
+• |prompt_getinput()| gets current user-input in prompt-buffer.
 
 ==============================================================================
 CHANGED FEATURES                                                 *news-changed*
 
 These existing features changed their behavior.
 
+• |gv| works in operator pending mode and does not abort.
 • 'smartcase' applies to completion filtering.
 • 'spellfile' location defaults to `stdpath("data").."/site/spell/"` instead of
   the first writable directory in 'runtimepath'.

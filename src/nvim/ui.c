@@ -748,20 +748,11 @@ void ui_call_event(char *name, bool fast, Array args)
   bool handled = false;
   UIEventCallback *event_cb;
 
-  // Return prompt is still a non-fast event, other prompt messages are
-  // followed by a "cmdline_show" event.
-  if (strcmp(name, "msg_show") == 0) {
-    fast = !strequal(args.items[0].data.string.data, "return_prompt");
-  }
-
   map_foreach(&ui_event_cbs, ui_event_ns_id, event_cb, {
     Error err = ERROR_INIT;
     uint32_t ns_id = ui_event_ns_id;
     Object res = nlua_call_ref_ctx(fast, event_cb->cb, name, args, kRetNilBool, NULL, &err);
     ui_event_ns_id = 0;
-    // TODO(bfredl/luukvbaal): should this be documented or reconsidered?
-    // Why does truthy return from Lua callback mean remote UI should not receive
-    // the event.
     if (LUARET_TRUTHY(res)) {
       handled = true;
     }
