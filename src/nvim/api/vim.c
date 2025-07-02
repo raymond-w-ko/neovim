@@ -513,7 +513,7 @@ Object nvim_exec_lua(String code, Array args, Arena *arena, Error *err)
   FUNC_API_REMOTE_ONLY
 {
   // TODO(bfredl): convert directly from msgpack to lua and then back again
-  return nlua_exec(code, args, kRetObject, arena, err);
+  return nlua_exec(code, NULL, args, kRetObject, arena, err);
 }
 
 /// Calculates the number of display cells occupied by `text`.
@@ -762,7 +762,7 @@ void nvim_set_vvar(String name, Object value, Error *err)
 ///          - kind: Set the |ui-messages| kind with which this message will be emitted.
 ///          - verbose: Message is controlled by the 'verbose' option. Nvim invoked with `-V3log`
 ///            will write the message to the "log" file instead of standard output.
-void nvim_echo(ArrayOf(Tuple(String, HLGroupID)) chunks, Boolean history, Dict(echo_opts) *opts,
+void nvim_echo(ArrayOf(Tuple(String, *HLGroupID)) chunks, Boolean history, Dict(echo_opts) *opts,
                Error *err)
   FUNC_API_SINCE(7)
 {
