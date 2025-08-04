@@ -6,6 +6,10 @@ local ms = lsp.protocol.Methods
 local changetracking = lsp._changetracking
 local validate = vim.validate
 
+--- Tracks all clients initialized.
+---@type table<integer,vim.lsp.Client>
+local all_clients = {}
+
 --- @alias vim.lsp.client.on_init_cb fun(client: vim.lsp.Client, init_result: lsp.InitializeResult)
 --- @alias vim.lsp.client.on_attach_cb fun(client: vim.lsp.Client, bufnr: integer)
 --- @alias vim.lsp.client.on_exit_cb fun(code: integer, signal: integer, client_id: integer)
@@ -63,10 +67,7 @@ local validate = vim.validate
 --- ```
 --- @field cmd_env? table
 ---
---- Client commands. Map of command names to user-defined functions. Commands passed to `start()`
---- take precedence over the global command registry. Each key must be a unique command name, and
---- the value is a function which is called if any LSP action (code action, code lenses, …) triggers
---- the command.
+--- Map of client-defined commands overriding the global |vim.lsp.commands|.
 --- @field commands? table<string,fun(command: lsp.Command, ctx: table)>
 ---
 --- Daemonize the server process so that it runs in a separate process group from Nvim.
@@ -208,6 +209,8 @@ local validate = vim.validate
 --- See [vim.lsp.ClientConfig].
 --- @field workspace_folders lsp.WorkspaceFolder[]?
 ---
+--- Whether linked editing ranges are enabled for this client.
+--- @field _linked_editing_enabled boolean?
 ---
 --- Track this so that we can escalate automatically if we've already tried a
 --- graceful shutdown
@@ -494,6 +497,9 @@ end
 
 --- @nodoc
 function Client:initialize()
+  -- Register all initialized clients.
+  all_clients[self.id] = self
+
   local config = self.config
 
   local root_uri --- @type string?
@@ -617,7 +623,7 @@ function Client:_process_static_registrations()
         id = self.server_capabilities[capability].id,
         method = method,
         registerOptions = {
-          documentSelector = self.server_capabilities[capability].documentSelector, ---@type lsp.DocumentSelector?
+          documentSelector = self.server_capabilities[capability].documentSelector, ---@type lsp.DocumentSelector|lsp.null
         },
       }
     end
@@ -957,15 +963,19 @@ end
 function Client:_get_registration(method, bufnr)
   bufnr = vim._resolve_bufnr(bufnr)
   for _, reg in ipairs(self.registrations[method] or {}) do
-    local regoptions = reg.registerOptions --[[@as {documentSelector:lsp.TextDocumentFilter[]}]]
-    if not regoptions or not regoptions.documentSelector then
+    local regoptions = reg.registerOptions --[[@as {documentSelector:lsp.DocumentSelector|lsp.null}]]
+    if
+      not regoptions
+      or regoptions == vim.NIL
+      or not regoptions.documentSelector
+      or regoptions.documentSelector == vim.NIL
+    then
       return reg
     end
-    local documentSelector = regoptions.documentSelector
     local language = self:_get_language_id(bufnr)
     local uri = vim.uri_from_bufnr(bufnr)
     local fname = vim.uri_to_fname(uri)
-    for _, filter in ipairs(documentSelector) do
+    for _, filter in ipairs(regoptions.documentSelector) do
       local flang, fscheme, fpat = filter.language, filter.scheme, filter.pattern
       if
         not (flang and language ~= flang)
@@ -1080,7 +1090,10 @@ function Client:on_attach(bufnr)
   -- opt-out (deleting the semanticTokensProvider from capabilities)
   vim.schedule(function()
     if vim.tbl_get(self.server_capabilities, 'semanticTokensProvider', 'full') then
-      lsp.semantic_tokens.start(bufnr, self.id)
+      lsp.semantic_tokens._start(bufnr, self.id)
+    end
+    if vim.tbl_get(self.server_capabilities, 'foldingRangeProvider') then
+      lsp._folding_range._setup(bufnr)
     end
   end)
 
@@ -1153,7 +1166,7 @@ end
 --- @param method (vim.lsp.protocol.Method.ServerToClient) LSP method name
 --- @param params (table) The parameters for that method
 --- @return any result
---- @return lsp.ResponseError error code and message set in case an exception happens during the request.
+--- @return lsp.ResponseError? error code and message set in case an exception happens during the request.
 function Client:_server_request(method, params)
   log.trace('server_request', method, params)
   local handler = self:_resolve_handler(method)
@@ -1184,12 +1197,87 @@ function Client:_on_error(code, err)
   end
 end
 
+---@param bufnr integer resolved buffer
+function Client:_on_detach(bufnr)
+  if self.attached_buffers[bufnr] and api.nvim_buf_is_valid(bufnr) then
+    api.nvim_exec_autocmds('LspDetach', {
+      buffer = bufnr,
+      modeline = false,
+      data = { client_id = self.id },
+    })
+  end
+
+  changetracking.reset_buf(self, bufnr)
+
+  if self:supports_method(ms.textDocument_didClose) then
+    local uri = vim.uri_from_bufnr(bufnr)
+    local params = { textDocument = { uri = uri } }
+    self:notify(ms.textDocument_didClose, params)
+  end
+
+  self.attached_buffers[bufnr] = nil
+
+  local namespace = lsp.diagnostic.get_namespace(self.id)
+  vim.diagnostic.reset(namespace, bufnr)
+end
+
+--- Reset defaults set by `set_defaults`.
+--- Must only be called if the last client attached to a buffer exits.
+local function reset_defaults(bufnr)
+  if vim.bo[bufnr].tagfunc == 'v:lua.vim.lsp.tagfunc' then
+    vim.bo[bufnr].tagfunc = nil
+  end
+  if vim.bo[bufnr].omnifunc == 'v:lua.vim.lsp.omnifunc' then
+    vim.bo[bufnr].omnifunc = nil
+  end
+  if vim.bo[bufnr].formatexpr == 'v:lua.vim.lsp.formatexpr()' then
+    vim.bo[bufnr].formatexpr = nil
+  end
+  vim._with({ buf = bufnr }, function()
+    local keymap = vim.fn.maparg('K', 'n', false, true)
+    if keymap and keymap.callback == vim.lsp.buf.hover and keymap.buffer == 1 then
+      vim.keymap.del('n', 'K', { buffer = bufnr })
+    end
+  end)
+end
+
 --- @private
 --- Invoked on client exit.
 ---
 --- @param code integer) exit code of the process
 --- @param signal integer the signal used to terminate (if any)
 function Client:_on_exit(code, signal)
+  vim.schedule(function()
+    for bufnr in pairs(self.attached_buffers) do
+      self:_on_detach(bufnr)
+      if #lsp.get_clients({ bufnr = bufnr, _uninitialized = true }) == 0 then
+        reset_defaults(bufnr)
+      end
+    end
+  end)
+
+  -- Schedule the deletion of the client object so that it exists in the execution of LspDetach
+  -- autocommands
+  vim.schedule(function()
+    all_clients[self.id] = nil
+
+    -- Client can be absent if executable starts, but initialize fails
+    -- init/attach won't have happened
+    if self then
+      changetracking.reset(self)
+    end
+    if code ~= 0 or (signal ~= 0 and signal ~= 15) then
+      local msg = string.format(
+        'Client %s quit with exit code %s and signal %s. Check log for errors: %s',
+        self and self.name or 'unknown',
+        code,
+        signal,
+        lsp.get_log_path()
+      )
+      vim.notify(msg, vim.log.levels.WARN)
+    end
+  end)
+
   self:_run_callbacks(
     self._on_exit_cbs,
     lsp.client_errors.ON_EXIT_CALLBACK_ERROR,
@@ -1237,5 +1325,8 @@ function Client:_remove_workspace_folder(dir)
     end
   end
 end
+
+-- Export for internal use only.
+Client._all = all_clients
 
 return Client

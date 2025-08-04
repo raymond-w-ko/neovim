@@ -79,6 +79,7 @@ local new_layout = {
   ['news-0.10.txt'] = true,
   ['news-0.11.txt'] = true,
   ['nvim.txt'] = true,
+  ['pack.txt'] = true,
   ['provider.txt'] = true,
   ['tui.txt'] = true,
   ['ui.txt'] = true,
@@ -88,8 +89,9 @@ local new_layout = {
 -- Map of new:old pages, to redirect renamed pages.
 local redirects = {
   ['credits'] = 'backers',
-  ['tui'] = 'term',
   ['terminal'] = 'nvim_terminal_emulator',
+  ['tui'] = 'term',
+  ['api-ui-events'] = 'ui',
 }
 
 -- TODO: These known invalid |links| require an update to the relevant docs.
@@ -1343,7 +1345,10 @@ This document moved to: |%s|
       local redirect_to = ('%s/%s'):format(to_dir, get_helppage(redirect_from))
       local redirect_html, _ =
         gen_one(redirect_from, redirect_text, redirect_to, false, commit or '?', parser_path)
-      assert(redirect_html:find(helpfile_tag))
+      assert(
+        redirect_html:find(vim.pesc(helpfile_tag)),
+        ('not found in redirect html: %s'):format(helpfile_tag)
+      )
       tofile(redirect_to, redirect_html)
 
       print(

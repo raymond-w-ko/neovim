@@ -144,6 +144,11 @@ local constants = {
     TypeParameter = 26,
   },
 
+  -- Extra annotations that tweak the rendering of a symbol.
+  SymbolTag = {
+    Deprecated = 1,
+  },
+
   -- Represents reasons why a text document is saved.
   TextDocumentSaveReason = {
     -- Manually triggered, e.g. by the user pressing save, by starting debugging,
@@ -344,6 +349,8 @@ function protocol.make_client_capabilities()
           valueSet = get_value_set(constants.DiagnosticTag),
         },
         dataSupport = true,
+        relatedInformation = true,
+        relatedDocumentSupport = true,
       },
       inlayHint = {
         dynamicRegistration = true,
@@ -525,6 +532,9 @@ function protocol.make_client_capabilities()
           valueSet = get_value_set(constants.SymbolKind),
         },
         hierarchicalDocumentSymbolSupport = true,
+        tagSupport = {
+          valueSet = get_value_set(constants.SymbolTag),
+        },
       },
       rename = {
         dynamicRegistration = true,
@@ -532,6 +542,7 @@ function protocol.make_client_capabilities()
         honorsChangeAnnotations = true,
       },
       publishDiagnostics = {
+        relatedInformation = true,
         tagSupport = {
           valueSet = get_value_set(constants.DiagnosticTag),
         },
@@ -544,6 +555,9 @@ function protocol.make_client_capabilities()
         dynamicRegistration = true,
       },
       selectionRange = {
+        dynamicRegistration = false,
+      },
+      linkedEditingRange = {
         dynamicRegistration = false,
       },
     },

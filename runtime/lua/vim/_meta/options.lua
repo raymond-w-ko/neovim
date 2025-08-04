@@ -111,6 +111,15 @@ vim.o.acd = vim.o.autochdir
 vim.go.autochdir = vim.o.autochdir
 vim.go.acd = vim.go.autochdir
 
+--- When on, Vim shows a completion menu as you type, similar to using
+--- `i_CTRL-N`, but triggered automatically.  See `ins-autocompletion`.
+---
+--- @type boolean
+vim.o.autocomplete = false
+vim.o.ac = vim.o.autocomplete
+vim.go.autocomplete = vim.o.autocomplete
+vim.go.ac = vim.go.autocomplete
+
 --- Copy indent from current line when starting a new line (typing <CR>
 --- in Insert mode or when using the "o" or "O" command).  If you do not
 --- type anything on the new line except <BS> or CTRL-D and then type
@@ -619,10 +628,10 @@ vim.bo.bl = vim.bo.buflisted
 ---   help		help buffer (do not set this manually)
 ---   nofile	buffer is not related to a file, will not be written
 ---   nowrite	buffer will not be written
+---   prompt	buffer where only the last section can be edited, for
+--- 		use by plugins. `prompt-buffer`
 ---   quickfix	list of errors `:cwindow` or locations `:lwindow`
 ---   terminal	`terminal-emulator` buffer
----   prompt	buffer where only the last line can be edited, meant
---- 		to be used by a plugin, see `prompt-buffer`
 ---
 --- This option is used together with 'bufhidden' and 'swapfile' to
 --- specify special kinds of buffers.   See `special-buffers`.
@@ -664,6 +673,14 @@ vim.o.bt = vim.o.buftype
 vim.bo.buftype = vim.o.buftype
 vim.bo.bt = vim.bo.buftype
 
+--- Sets a buffer "busy" status. Indicated in the default statusline.
+--- When busy status is larger then 0 busy flag is shown in statusline.
+--- The semantics of "busy" are arbitrary, typically decided by the plugin that owns the buffer.
+---
+--- @type integer
+vim.o.busy = 0
+vim.bo.busy = vim.o.busy
+
 --- Specifies details about changing the case of letters.  It may contain
 --- these words, separated by a comma:
 --- internal	Use internal case mapping functions, the current
@@ -683,12 +700,11 @@ vim.go.cmp = vim.go.casemap
 --- When on, `:cd`, `:tcd` and `:lcd` without an argument changes the
 --- current working directory to the `$HOME` directory like in Unix.
 --- When off, those commands just print the current directory name.
---- On Unix this option has no effect.
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
 --- security reasons.
 ---
 --- @type boolean
-vim.o.cdhome = false
+vim.o.cdhome = true
 vim.o.cdh = vim.o.cdhome
 vim.go.cdhome = vim.o.cdhome
 vim.go.cdh = vim.go.cdhome
@@ -1033,18 +1049,15 @@ vim.bo.cms = vim.bo.commentstring
 --- 	name of a function or a `Funcref`.  For `Funcref` values,
 --- 	spaces must be escaped with a backslash ('\'), and commas with
 --- 	double backslashes ('\\') (see `option-backslash`).
+--- 	Unlike other sources, functions can provide completions starting
+--- 	from a non-keyword character before the cursor, and their
+--- 	start position for replacing text may differ from other sources.
 --- 	If the Dict returned by the {func} includes {"refresh": "always"},
 --- 	the function will be invoked again whenever the leading text
 --- 	changes.
---- 	Completion matches are always inserted at the keyword
---- 	boundary, regardless of the column returned by {func} when
---- 	a:findstart is 1.  This ensures compatibility with other
---- 	completion sources.
---- 	To make further modifications to the inserted text, {func}
---- 	can make use of `CompleteDonePre`.
---- 	If generating matches is potentially slow, `complete_check()`
---- 	should be used to avoid blocking and preserve editor
---- 	responsiveness.
+--- 	If generating matches is potentially slow, call
+--- 	`complete_check()` periodically to keep Vim responsive. This
+--- 	is especially important for `ins-autocompletion`.
 --- F	equivalent to using "F{func}", where the function is taken from
 --- 	the 'completefunc' option.
 --- o	equivalent to using "F{func}", where the function is taken from
@@ -1183,6 +1196,9 @@ vim.go.cia = vim.go.completeitemalign
 ---    preview  Show extra information about the currently selected
 --- 	    completion in the preview window.  Only works in
 --- 	    combination with "menu" or "menuone".
+---
+--- Only "fuzzy", "popup" and "preview" have an effect when 'autocomplete'
+--- is enabled.
 ---
 --- This option does not apply to `cmdline-completion`. See 'wildoptions'
 --- for that.
@@ -1515,6 +1531,13 @@ vim.bo.ci = vim.bo.copyindent
 --- 		character, the cursor won't move. When not included,
 --- 		the cursor would skip over it and jump to the
 --- 		following occurrence.
+--- 							*cpo-~*
+--- 	~	When included, don't resolve symbolic links when
+--- 		changing directory with `:cd`, `:lcd`, or `:tcd`.
+--- 		This preserves the symbolic link path in buffer names
+--- 		and when displaying the current directory.  When
+--- 		excluded (default), symbolic links are resolved to
+--- 		their target paths.
 --- 							*cpo-_*
 --- 	_	When using `cw` on a word, do not include the
 --- 		whitespace following the word in the motion.
@@ -1696,6 +1719,32 @@ vim.go.dict = vim.go.dictionary
 vim.o.diff = false
 vim.wo.diff = vim.o.diff
 
+--- List of {address} in each buffer, separated by commas, that are
+--- considered anchors when used for diffing.  It's valid to specify "$+1"
+--- for 1 past the last line.  "%" cannot be used for this option.  There
+--- can be at most 20 anchors set for each buffer.
+---
+--- Each anchor line splits the buffer (the split happens above the
+--- anchor), with each part being diff'ed separately before the final
+--- result is joined.  When more than one {address} are provided, the
+--- anchors will be sorted interally by line number.  If using buffer
+--- local options, each buffer should have the same number of anchors
+--- (extra anchors will be ignored).  This option is only used when
+--- 'diffopt' has "anchor" set.  See `diff-anchors` for more details and
+--- examples.
+--- 							*E1550*
+--- If some of the {address} do not resolve to a line in each buffer (e.g.
+--- a pattern search that does not match anything), none of the anchors
+--- will be used.
+---
+--- @type string
+vim.o.diffanchors = ""
+vim.o.dia = vim.o.diffanchors
+vim.bo.diffanchors = vim.o.diffanchors
+vim.bo.dia = vim.bo.diffanchors
+vim.go.diffanchors = vim.o.diffanchors
+vim.go.dia = vim.go.diffanchors
+
 --- Expression which is evaluated to obtain a diff file (either ed-style
 --- or unified-style) from two versions of a file.  See `diff-diffexpr`.
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
@@ -1718,6 +1767,10 @@ vim.go.dex = vim.go.diffexpr
 --- 				   smallest possible diff
 --- 			patience   patience diff algorithm
 --- 			histogram  histogram diff algorithm
+---
+--- 	anchor		Anchor specific lines in each buffer to be
+--- 			aligned with each other if 'diffanchors' is
+--- 			set.  See `diff-anchors`.
 ---
 --- 	closeoff	When a window is closed where 'diff' is set
 --- 			and there is only one window remaining in the
@@ -1821,6 +1874,7 @@ vim.go.dex = vim.go.diffexpr
 --- 			"linematch:60", as this will enable alignment
 --- 			for a 2 buffer diff hunk of 30 lines each,
 --- 			or a 3 buffer diff hunk of 20 lines each.
+--- 			Implicitly sets "filler" when this is set.
 ---
 --- 	vertical	Start diff mode with vertical splits (unless
 --- 			explicitly specified otherwise).
@@ -2130,6 +2184,8 @@ vim.go.ei = vim.go.eventignore
 --- 	`MenuPopup`,
 --- 	`ModeChanged`,
 --- 	`OptionSet`,
+--- 	`PackChanged`,
+--- 	`PackChangedPre`,
 --- 	`QuickFixCmdPost`,
 --- 	`QuickFixCmdPre`,
 --- 	`QuitPre`,
@@ -2194,7 +2250,8 @@ vim.bo.et = vim.bo.expandtab
 --- Unset 'exrc' to stop further searching of 'exrc' files in parent
 --- directories, similar to `editorconfig.root`.
 ---
---- To get its own location, Lua exrc files can use `debug.getinfo()`.
+--- To get its own location, a Lua exrc file can use `debug.getinfo()`.
+--- See `lua-script-location`.
 ---
 --- Compare 'exrc' to `editorconfig`:
 --- - 'exrc' can execute any code; editorconfig only specifies settings.
@@ -2206,7 +2263,7 @@ vim.bo.et = vim.bo.expandtab
 --- 3. Create ".nvim.lua" in your project root directory with this line:
 ---
 --- ```lua
----      vim.cmd[[set runtimepath+=.nvim]]
+---     vim.cmd[[set runtimepath+=.nvim]]
 --- ```
 ---
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
@@ -4337,6 +4394,18 @@ vim.o.mmp = vim.o.maxmempattern
 vim.go.maxmempattern = vim.o.maxmempattern
 vim.go.mmp = vim.go.maxmempattern
 
+--- Maximum number of matches shown for the search count status `shm-S`
+--- When the number of matches exceeds this value, Vim shows ">" instead
+--- of the exact count to keep searching fast.
+--- Note: larger values may impact performance.
+--- The value must be between 1 and 9999.
+---
+--- @type integer
+vim.o.maxsearchcount = 999
+vim.o.msc = vim.o.maxsearchcount
+vim.go.maxsearchcount = vim.o.maxsearchcount
+vim.go.msc = vim.go.maxsearchcount
+
 --- Maximum number of items to use in a menu.  Used for menus that are
 --- generated from a list of items, e.g., the Buffers menu.  Changing this
 --- option has no direct effect, the menu must be refreshed first.
@@ -5369,7 +5438,7 @@ vim.wo.scr = vim.wo.scroll
 
 --- Maximum number of lines kept beyond the visible screen. Lines at the
 --- top are deleted if new lines exceed this limit.
---- Minimum is 1, maximum is 100000.
+--- Minimum is 1, maximum is 1000000.
 --- Only in `terminal` buffers.
 ---
 --- Note: Lines that are not visible and kept in scrollback are not
@@ -5802,6 +5871,9 @@ vim.go.shcf = vim.go.shellcmdflag
 --- Don't forget to precede the space with a backslash: ":set sp=\ ".
 --- In the future pipes may be used for filtering and this option will
 --- become obsolete (at least for Unix).
+--- Note: When using a pipe like "| tee", you'll lose the exit code of the
+--- shell command.  This might be configurable by your shell, look for
+--- the pipefail option (for bash and zsh, use ":set -o pipefail").
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
 --- security reasons.
 ---
@@ -5990,7 +6062,8 @@ vim.bo.sw = vim.bo.shiftwidth
 --- 	is shown), the "search hit BOTTOM, continuing at TOP" and
 --- 	"search hit TOP, continuing at BOTTOM" messages are only
 --- 	indicated by a "W" (Mnemonic: Wrapped) letter before the
---- 	search count statistics.
+--- 	search count statistics.  The maximum limit can be set with
+--- 	the 'maxsearchcount' option.
 ---
 --- This gives you the opportunity to avoid that a change between buffers
 --- requires you to hit <Enter>, but still gives as useful a message as
@@ -6847,7 +6920,7 @@ vim.wo.stc = vim.wo.statuscolumn
 ---
 ---
 --- @type string
-vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
+vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &busy > 0 ? '◐ ' : '' %}%(%{luaeval('(package.loaded[''vim.diagnostic''] and vim.diagnostic.status()) or '''' ')} %)%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
 vim.o.stl = vim.o.statusline
 vim.wo.statusline = vim.o.statusline
 vim.wo.stl = vim.wo.statusline
@@ -7801,7 +7874,10 @@ vim.go.ww = vim.go.whichwrap
 --- 	:set wc=^I
 --- 	set wc=<Tab>
 --- ```
----
+--- 'wildchar' also enables completion in search pattern contexts such as
+--- `/`, `?`, `:s`, `:g`, `:v`, and `:vim`.  To insert a literal <Tab>
+--- instead of triggering completion, type <C-V><Tab> or "\t".
+--- See also 'wildoptions' and `wildtrigger()`.
 ---
 --- @type integer
 vim.o.wildchar = 9
@@ -7996,6 +8072,20 @@ vim.go.wim = vim.go.wildmode
 
 --- A list of words that change how `cmdline-completion` is done.
 --- The following values are supported:
+---   exacttext	When this flag is present, search pattern completion
+--- 		(e.g., in `/`, `?`, `:s`, `:g`, `:v`, and `:vim`)
+--- 		shows exact buffer text as menu items, without
+--- 		preserving regex artifacts like position
+--- 		anchors (e.g., `/\\<`).  This provides more intuitive
+--- 		menu items that match the actual buffer text.
+--- 		However, searches may be less accurate since the
+--- 		pattern is not preserved exactly.
+--- 		By default, Vim preserves the typed pattern (with
+--- 		anchors) and appends the matched word.  This preserves
+--- 		search correctness, especially when using regular
+--- 		expressions or with 'smartcase' enabled.  However, the
+--- 		case of the appended matched word may not exactly
+--- 		match the case of the word in the buffer.
 ---   fuzzy		Use `fuzzy-matching` to find completion matches. When
 --- 		this value is specified, wildcard expansion will not
 --- 		be used for completion.  The matches will be sorted by
@@ -8086,8 +8176,15 @@ vim.wo.winbl = vim.wo.winblend
 --- - "shadow": Drop shadow effect, by blending with the background.
 --- - "single": Single-line box.
 --- - "solid": Adds padding by a single whitespace cell.
+--- - custom: comma-separated list of exactly 8 characters in clockwise
+---   order starting from topleft. Example:
 ---
---- @type ''|'double'|'single'|'shadow'|'rounded'|'solid'|'bold'|'none'
+--- ```lua
+---      vim.o.winborder='+,-,+,`,+,-,+,`'
+--- ```
+---
+---
+--- @type string
 vim.o.winborder = ""
 vim.go.winborder = vim.o.winborder
 

@@ -229,6 +229,19 @@ local options = {
       varname = 'p_acd',
     },
     {
+      abbreviation = 'ac',
+      defaults = false,
+      desc = [=[
+        When on, Vim shows a completion menu as you type, similar to using
+        |i_CTRL-N|, but triggered automatically.  See |ins-autocompletion|.
+      ]=],
+      full_name = 'autocomplete',
+      scope = { 'global' },
+      short_desc = N_('automatic completion in insert mode'),
+      type = 'boolean',
+      varname = 'p_ac',
+    },
+    {
       abbreviation = 'ai',
       defaults = true,
       desc = [=[
@@ -903,10 +916,10 @@ local options = {
           help		help buffer (do not set this manually)
           nofile	buffer is not related to a file, will not be written
           nowrite	buffer will not be written
+          prompt	buffer where only the last section can be edited, for
+        		use by plugins. |prompt-buffer|
           quickfix	list of errors |:cwindow| or locations |:lwindow|
           terminal	|terminal-emulator| buffer
-          prompt	buffer where only the last line can be edited, meant
-        		to be used by a plugin, see |prompt-buffer|
 
         This option is used together with 'bufhidden' and 'swapfile' to
         specify special kinds of buffers.   See |special-buffers|.
@@ -951,6 +964,21 @@ local options = {
       varname = 'p_bt',
     },
     {
+      defaults = 0,
+      desc = [=[
+        Sets a buffer "busy" status. Indicated in the default statusline.
+        When busy status is larger then 0 busy flag is shown in statusline.
+        The semantics of "busy" are arbitrary, typically decided by the plugin that owns the buffer.
+      ]=],
+      full_name = 'busy',
+      redraw = { 'statuslines' },
+      noglob = true,
+      scope = { 'buf' },
+      short_desc = N_('buffer is busy'),
+      type = 'number',
+      varname = 'p_busy',
+    },
+    {
       abbreviation = 'cmp',
       defaults = 'internal,keepascii',
       values = { 'internal', 'keepascii' },
@@ -977,12 +1005,16 @@ local options = {
     },
     {
       abbreviation = 'cdh',
-      defaults = false,
+      defaults = {
+        condition = 'MSWIN',
+        if_false = true,
+        if_true = false,
+        doc = [[on on Unix, off on Windows]],
+      },
       desc = [=[
         When on, |:cd|, |:tcd| and |:lcd| without an argument changes the
         current working directory to the |$HOME| directory like in Unix.
         When off, those commands just print the current directory name.
-        On Unix this option has no effect.
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
@@ -1444,18 +1476,15 @@ local options = {
         	name of a function or a |Funcref|.  For |Funcref| values,
         	spaces must be escaped with a backslash ('\'), and commas with
         	double backslashes ('\\') (see |option-backslash|).
+        	Unlike other sources, functions can provide completions starting
+        	from a non-keyword character before the cursor, and their
+        	start position for replacing text may differ from other sources.
         	If the Dict returned by the {func} includes {"refresh": "always"},
         	the function will be invoked again whenever the leading text
         	changes.
-        	Completion matches are always inserted at the keyword
-        	boundary, regardless of the column returned by {func} when
-        	a:findstart is 1.  This ensures compatibility with other
-        	completion sources.
-        	To make further modifications to the inserted text, {func}
-        	can make use of |CompleteDonePre|.
-        	If generating matches is potentially slow, |complete_check()|
-        	should be used to avoid blocking and preserve editor
-        	responsiveness.
+        	If generating matches is potentially slow, call
+        	|complete_check()| periodically to keep Vim responsive. This
+        	is especially important for |ins-autocompletion|.
         F	equivalent to using "F{func}", where the function is taken from
         	the 'completefunc' option.
         o	equivalent to using "F{func}", where the function is taken from
@@ -1640,6 +1669,9 @@ local options = {
            preview  Show extra information about the currently selected
         	    completion in the preview window.  Only works in
         	    combination with "menu" or "menuone".
+
+        Only "fuzzy", "popup" and "preview" have an effect when 'autocomplete'
+        is enabled.
 
         This option does not apply to |cmdline-completion|. See 'wildoptions'
         for that.
@@ -2002,6 +2034,13 @@ local options = {
         		character, the cursor won't move. When not included,
         		the cursor would skip over it and jump to the
         		following occurrence.
+        							*cpo-~*
+        	~	When included, don't resolve symbolic links when
+        		changing directory with |:cd|, |:lcd|, or |:tcd|.
+        		This preserves the symbolic link path in buffer names
+        		and when displaying the current directory.  When
+        		excluded (default), symbolic links are resolved to
+        		their target paths.
         							*cpo-_*
         	_	When using |cw| on a word, do not include the
         		whitespace following the word in the motion.
@@ -2226,6 +2265,36 @@ local options = {
       type = 'boolean',
     },
     {
+      abbreviation = 'dia',
+      cb = 'did_set_diffanchors',
+      defaults = '',
+      desc = [=[
+        List of {address} in each buffer, separated by commas, that are
+        considered anchors when used for diffing.  It's valid to specify "$+1"
+        for 1 past the last line.  "%" cannot be used for this option.  There
+        can be at most 20 anchors set for each buffer.
+
+        Each anchor line splits the buffer (the split happens above the
+        anchor), with each part being diff'ed separately before the final
+        result is joined.  When more than one {address} are provided, the
+        anchors will be sorted interally by line number.  If using buffer
+        local options, each buffer should have the same number of anchors
+        (extra anchors will be ignored).  This option is only used when
+        'diffopt' has "anchor" set.  See |diff-anchors| for more details and
+        examples.
+        							*E1550*
+        If some of the {address} do not resolve to a line in each buffer (e.g.
+        a pattern search that does not match anything), none of the anchors
+        will be used.
+      ]=],
+      full_name = 'diffanchors',
+      list = 'onecomma',
+      scope = { 'global', 'buf' },
+      short_desc = N_('list of addresses for anchoring a diff'),
+      type = 'string',
+      varname = 'p_dia',
+    },
+    {
       abbreviation = 'dex',
       cb = 'did_set_optexpr',
       defaults = '',
@@ -2250,6 +2319,7 @@ local options = {
       -- Keep this in sync with diffopt_changed().
       values = {
         'filler',
+        'anchor',
         'context:',
         'iblank',
         'icase',
@@ -2281,6 +2351,10 @@ local options = {
         				   smallest possible diff
         			patience   patience diff algorithm
         			histogram  histogram diff algorithm
+
+        	anchor		Anchor specific lines in each buffer to be
+        			aligned with each other if 'diffanchors' is
+        			set.  See |diff-anchors|.
 
         	closeoff	When a window is closed where 'diff' is set
         			and there is only one window remaining in the
@@ -2384,6 +2458,7 @@ local options = {
         			"linematch:60", as this will enable alignment
         			for a 2 buffer diff hunk of 30 lines each,
         			or a 3 buffer diff hunk of 20 lines each.
+        			Implicitly sets "filler" when this is set.
 
         	vertical	Start diff mode with vertical splits (unless
         			explicitly specified otherwise).
@@ -2792,7 +2867,8 @@ local options = {
         Unset 'exrc' to stop further searching of 'exrc' files in parent
         directories, similar to |editorconfig.root|.
 
-        To get its own location, Lua exrc files can use |debug.getinfo()|.
+        To get its own location, a Lua exrc file can use |debug.getinfo()|.
+        See |lua-script-location|.
 
         Compare 'exrc' to |editorconfig|:
         - 'exrc' can execute any code; editorconfig only specifies settings.
@@ -2802,7 +2878,7 @@ local options = {
         1. Enable 'exrc'.
         2. Place LSP configs at ".nvim/lsp/*.lua" in your project root.
         3. Create ".nvim.lua" in your project root directory with this line: >lua
-             vim.cmd[[set runtimepath+=.nvim]]
+            vim.cmd[[set runtimepath+=.nvim]]
         <
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
@@ -5637,6 +5713,22 @@ local options = {
       varname = 'p_mmp',
     },
     {
+      abbreviation = 'msc',
+      defaults = 999,
+      desc = [=[
+        Maximum number of matches shown for the search count status |shm-S|
+        When the number of matches exceeds this value, Vim shows ">" instead
+        of the exact count to keep searching fast.
+        Note: larger values may impact performance.
+        The value must be between 1 and 9999.
+      ]=],
+      full_name = 'maxsearchcount',
+      scope = { 'global' },
+      short_desc = N_('maximum number for the search count feature'),
+      type = 'number',
+      varname = 'p_msc',
+    },
+    {
       abbreviation = 'mis',
       defaults = 25,
       desc = [=[
@@ -7067,7 +7159,7 @@ local options = {
       desc = [=[
         Maximum number of lines kept beyond the visible screen. Lines at the
         top are deleted if new lines exceed this limit.
-        Minimum is 1, maximum is 100000.
+        Minimum is 1, maximum is 1000000.
         Only in |terminal| buffers.
 
         Note: Lines that are not visible and kept in scrollback are not
@@ -7616,6 +7708,9 @@ local options = {
         Don't forget to precede the space with a backslash: ":set sp=\ ".
         In the future pipes may be used for filtering and this option will
         become obsolete (at least for Unix).
+        Note: When using a pipe like "| tee", you'll lose the exit code of the
+        shell command.  This might be configurable by your shell, look for
+        the pipefail option (for bash and zsh, use ":set -o pipefail").
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
@@ -7865,7 +7960,8 @@ local options = {
         	is shown), the "search hit BOTTOM, continuing at TOP" and
         	"search hit TOP, continuing at BOTTOM" messages are only
         	indicated by a "W" (Mnemonic: Wrapped) letter before the
-        	search count statistics.
+        	search count statistics.  The maximum limit can be set with
+        	the 'maxsearchcount' option.
 
         This gives you the opportunity to avoid that a change between buffers
         requires you to hit <Enter>, but still gives as useful a message as
@@ -8630,14 +8726,19 @@ local options = {
     {
       abbreviation = 'stl',
       cb = 'did_set_statusline',
-      defaults = table.concat({
-        '%<',
-        '%f %h%w%m%r ',
-        '%=',
-        "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
-        "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
-        "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
-      }),
+      defaults = {
+        if_true = table.concat({
+          '%<',
+          '%f %h%w%m%r ',
+          '%=',
+          "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
+          "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
+          "%{% &busy > 0 ? '◐ ' : '' %}",
+          "%(%{luaeval('(package.loaded[''vim.diagnostic''] and vim.diagnostic.status()) or '''' ')} %)",
+          "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
+        }),
+        doc = 'is very long',
+      },
       desc = [=[
         Sets the |status-line|.
 
@@ -10094,7 +10195,10 @@ local options = {
         	:set wc=X
         	:set wc=^I
         	set wc=<Tab>
-        <
+        <	'wildchar' also enables completion in search pattern contexts such as
+        |/|, |?|, |:s|, |:g|, |:v|, and |:vim|.  To insert a literal <Tab>
+        instead of triggering completion, type <C-V><Tab> or "\t".
+        See also 'wildoptions' and |wildtrigger()|.
       ]=],
       full_name = 'wildchar',
       scope = { 'global' },
@@ -10289,12 +10393,26 @@ local options = {
     {
       abbreviation = 'wop',
       defaults = 'pum,tagfile',
-      values = { 'fuzzy', 'tagfile', 'pum' },
+      values = { 'fuzzy', 'tagfile', 'pum', 'exacttext' },
       flags = true,
       deny_duplicates = true,
       desc = [=[
         A list of words that change how |cmdline-completion| is done.
         The following values are supported:
+          exacttext	When this flag is present, search pattern completion
+        		(e.g., in |/|, |?|, |:s|, |:g|, |:v|, and |:vim|)
+        		shows exact buffer text as menu items, without
+        		preserving regex artifacts like position
+        		anchors (e.g., |/\\<|).  This provides more intuitive
+        		menu items that match the actual buffer text.
+        		However, searches may be less accurate since the
+        		pattern is not preserved exactly.
+        		By default, Vim preserves the typed pattern (with
+        		anchors) and appends the matched word.  This preserves
+        		search correctness, especially when using regular
+        		expressions or with 'smartcase' enabled.  However, the
+        		case of the appended matched word may not exactly
+        		match the case of the word in the buffer.
           fuzzy		Use |fuzzy-matching| to find completion matches. When
         		this value is specified, wildcard expansion will not
         		be used for completion.  The matches will be sorted by
@@ -10394,6 +10512,9 @@ local options = {
       type = 'number',
     },
     {
+      full_name = 'winborder',
+      scope = { 'global' },
+      cb = 'did_set_winborder',
       defaults = { if_true = '' },
       values = { '', 'double', 'single', 'shadow', 'rounded', 'solid', 'bold', 'none' },
       desc = [=[
@@ -10406,11 +10527,14 @@ local options = {
         - "shadow": Drop shadow effect, by blending with the background.
         - "single": Single-line box.
         - "solid": Adds padding by a single whitespace cell.
+        - custom: comma-separated list of exactly 8 characters in clockwise
+          order starting from topleft. Example: >lua
+             vim.o.winborder='+,-,+,|,+,-,+,|'
+        <
       ]=],
-      full_name = 'winborder',
-      scope = { 'global' },
       short_desc = N_('border of floating window'),
       type = 'string',
+      list = 'onecomma',
       varname = 'p_winborder',
     },
     {

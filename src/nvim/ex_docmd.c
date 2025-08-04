@@ -15,6 +15,7 @@
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/ui.h"
+#include "nvim/api/vimscript.h"
 #include "nvim/arglist.h"
 #include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
@@ -3368,9 +3369,9 @@ static const char *addr_error(cmd_addr_T addr_type)
 /// @param errormsg       Error message, if any
 ///
 /// @return               MAXLNUM when no Ex address was found.
-static linenr_T get_address(exarg_T *eap, char **ptr, cmd_addr_T addr_type, bool skip, bool silent,
-                            int to_other_file, int address_count, const char **errormsg)
-  FUNC_ATTR_NONNULL_ALL
+linenr_T get_address(exarg_T *eap, char **ptr, cmd_addr_T addr_type, bool skip, bool silent,
+                     int to_other_file, int address_count, const char **errormsg)
+  FUNC_ATTR_NONNULL_ARG(2, 8)
 {
   int c;
   int i;
@@ -3535,7 +3536,7 @@ static linenr_T get_address(exarg_T *eap, char **ptr, cmd_addr_T addr_type, bool
         // next/previous line.
         curwin->w_cursor.col = (c == '/' && curwin->w_cursor.lnum > 0) ? MAXCOL : 0;
         searchcmdlen = 0;
-        flags = silent ? 0 : SEARCH_HIS | SEARCH_MSG;
+        flags = silent ? SEARCH_KEEP : SEARCH_HIS | SEARCH_MSG;
         if (!do_search(NULL, c, c, cmd, strlen(cmd), 1, flags, NULL)) {
           curwin->w_cursor = pos;
           cmd = NULL;
@@ -4700,6 +4701,13 @@ void not_exiting(void)
   exiting = false;
 }
 
+/// Call this function if we thought we were going to restart, but we won't
+/// (because of an error).
+void not_restarting(void)
+{
+  restarting = false;
+}
+
 bool before_quit_autocmds(win_T *wp, bool quit_all, bool forceit)
 {
   apply_autocmds(EVENT_QUITPRE, NULL, NULL, false, wp->w_buffer);
@@ -4829,22 +4837,61 @@ int before_quit_all(exarg_T *eap)
 }
 
 /// ":qall": try to quit all windows
-/// ":restart": restart the Nvim server
-static void ex_quitall_or_restart(exarg_T *eap)
+static void ex_quitall(exarg_T *eap)
 {
   if (before_quit_all(eap) == FAIL) {
     return;
   }
   exiting = true;
-  Error err = ERROR_INIT;
-  if ((eap->forceit || !check_changed_any(false, false))
-      && (eap->cmdidx != CMD_restart || remote_ui_restart(current_ui, &err))) {
-    getout(0);
+  if (!eap->forceit && check_changed_any(false, false)) {
+    not_exiting();
+    return;
   }
-  not_exiting();
+  getout(0);
+}
+
+/// ":restart": restart the Nvim server (using ":qall!").
+/// ":restart +cmd": restart the Nvim server using ":cmd".
+/// ":restart +cmd <command>": restart the Nvim server using ":cmd" and add -c <command> to the new server.
+static void ex_restart(exarg_T *eap)
+{
+  // Patch v:argv to include "-c <arg>" when it restarts.
+  if (eap->arg != NULL) {
+    const list_T *l = get_vim_var_list(VV_ARGV);
+    int argc = tv_list_len(l);
+    list_T *argv_cpy = tv_list_alloc(argc + 2);
+    bool added_startup_arg = false;
+    TV_LIST_ITER_CONST(l, li, {
+      const char *arg = tv_get_string(TV_LIST_ITEM_TV(li));
+      size_t arg_size = strlen(arg);
+      assert(arg_size <= (size_t)SSIZE_MAX);
+      tv_list_append_string(argv_cpy, arg, (ssize_t)arg_size);
+      if (!added_startup_arg) {
+        tv_list_append_string(argv_cpy, "-c", 2);
+        size_t cmd_size = strlen(eap->arg);
+        assert(cmd_size <= (size_t)SSIZE_MAX);
+        tv_list_append_string(argv_cpy, eap->arg, (ssize_t)cmd_size);
+        added_startup_arg = true;
+      }
+    });
+    set_vim_var_list(VV_ARGV, argv_cpy);
+  }
+  char *quit_cmd = (eap->do_ecmd_cmd) ? eap->do_ecmd_cmd : "qall!";
+  Error err = ERROR_INIT;
+  if ((cmdmod.cmod_flags & CMOD_CONFIRM) && check_changed_any(false, false)) {
+    return;
+  }
+  restarting = true;
+  nvim_command(cstr_as_string(quit_cmd), &err);
   if (ERROR_SET(&err)) {
-    emsg(err.msg);  // UI disappeared already?
+    emsg(err.msg);  // Could not exit
     api_clear_error(&err);
+    not_restarting();
+    return;
+  }
+  if (!exiting) {
+    emsg("restart failed: +cmd did not quit the server");
+    not_restarting();
   }
 }
 
@@ -4919,7 +4966,7 @@ void ex_win_close(int forceit, win_T *win, tabpage_T *tp)
   if (tp == NULL) {
     win_close(win, !need_hide && !buf_hide(buf), forceit);
   } else {
-    win_close_othertab(win, !need_hide && !buf_hide(buf), tp);
+    win_close_othertab(win, !need_hide && !buf_hide(buf), tp, forceit);
   }
 }
 
@@ -5693,6 +5740,12 @@ static void ex_edit(exarg_T *eap)
     return;
   }
 
+  // prevent use of :edit on prompt-buffers
+  if (bt_prompt(curbuf) && eap->cmdidx == CMD_edit && *eap->arg == NUL) {
+    emsg("cannot :edit a prompt buffer");
+    return;
+  }
+
   do_exedit(eap, NULL);
 }
 
@@ -6016,7 +6069,7 @@ static void post_chdir(CdScope scope, bool trigger_dirchanged)
   }
 
   last_chdir_reason = NULL;
-  shorten_fnames(true);
+  shorten_fnames(vim_strchr(p_cpo, CPO_NOSYMLINKS) == NULL);
 
   if (trigger_dirchanged) {
     do_autocmd_dirchanged(cwd, scope, kCdCauseManual, false);
@@ -6052,11 +6105,7 @@ bool changedir_func(char *new_dir, CdScope scope)
 
   // For UNIX ":cd" means: go to home directory.
   // On other systems too if 'cdhome' is set.
-#if defined(UNIX)
-  if (*new_dir == NUL) {
-#else
   if (*new_dir == NUL && p_cdh) {
-#endif
     // Use NameBuff for home directory name.
     expand_env("$HOME", NameBuff, MAXPATHL);
     new_dir = NameBuff;
@@ -6095,13 +6144,11 @@ bool changedir_func(char *new_dir, CdScope scope)
 void ex_cd(exarg_T *eap)
 {
   char *new_dir = eap->arg;
-#if !defined(UNIX)
   // for non-UNIX ":cd" means: print current directory unless 'cdhome' is set
   if (*new_dir == NUL && !p_cdh) {
     ex_pwd(NULL);
     return;
   }
-#endif
 
   CdScope scope = kCdScopeGlobal;
   switch (eap->cmdidx) {

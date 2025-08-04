@@ -31,7 +31,7 @@ script.  There are a lot of them, thus this is a long chapter.
 Table of contents: |usr_toc.txt|
 
 ==============================================================================
-*41.1*	Introduction				*vim-script-intro* *script*
+*41.1*	Introduction				*vimscript-intro*
 
 Your first experience with Vim scripts is the vimrc file.  Vim reads it when
 it starts up and executes the commands.  You can set options to values you
@@ -588,7 +588,7 @@ after the substitute() call.
 FUNCTIONS						*function-list*
 
 There are many functions.  We will mention them here, grouped by what they are
-used for.  You can find an alphabetical list here: |builtin-function-details|.
+used for.  You can find an alphabetical list here: |vimscript-functions|.
 Use CTRL-] on the function name to jump to detailed help on it.
 
 String manipulation:					*string-functions*
@@ -920,6 +920,8 @@ Command line:					*command-line-functions*
 	getcmdtype()		return the current command-line type
 	getcmdwintype()		return the current command-line window type
 	getcompletion()		list of command-line completion matches
+	getcompletiontype()	get the type of the command-line completion
+				for specified string
 	fullcommand()		get full command name
 	cmdcomplete_info()	get command-line completion information
 
@@ -1034,6 +1036,7 @@ Mappings and Menus:			    *mapping-functions*
 	mapset()		restore a mapping
 	menu_info()		get information about a menu item
 	wildmenumode()		check if the wildmode is active
+	wildtrigger()		start wildcard expansion
 
 Signs:						*sign-functions*
 	sign_define()		define or update a sign

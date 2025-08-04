@@ -72,6 +72,7 @@ EVENTS
   emitted after the screen is cleared. These events arbitrarily assumed a
   message UI that mimicks the legacy message grid. Benefit: reduced UI event
   traffic and more flexibility for UIs.
+  The `msg_history_show` event has an additional "prev_cmd" argument.
 • A new `empty` message kind is emitted for an empty (e.g. `:echo ""`) message.
 
 HIGHLIGHTS
@@ -83,10 +84,14 @@ LSP
 • `root_markers` in |vim.lsp.Config| can now be ordered by priority.
 • The function set with |vim.lsp.log.set_format_func()| is now given all
   arguments corresponding to a log entry instead of the individual arguments.
+• `vim.lsp.semantic_tokens.start/stop` now renamed to
+  `vim.lsp.semantic_tokens.enable`
+• Missing fields in LSP messages are now represented using |vim.NIL| instead of nil.
 
 LUA
 
-• todo
+• Renamed `vim.diff` to `vim.text.diff`.
+• |vim.net.request()| adds a minimal HTTP GET API using curl.
 
 OPTIONS
 
@@ -119,6 +124,8 @@ The following new features were added.
 
 API
 
+• |api-contract| allows existing functions to change return-type from `void =>
+  non-void`.
 • |nvim_win_text_height()| can limit the lines checked when a certain
   `max_height` is reached, and returns the `end_row` and `end_vcol` for which
   `max_height` or the calculated height is reached.
@@ -139,6 +146,7 @@ DEFAULTS
 
 • 'statusline' default is exposed as a statusline expression (previously it
   was implemented as an internal C routine).
+• 'statusline' includes |vim.diagnostic.status()|
 • Project-local configuration ('exrc') is also loaded from parent directories.
   Unset 'exrc' to stop further search.
 • Mappings:
@@ -151,15 +159,24 @@ DIAGNOSTICS
   location/quickfix list.
 • |vim.diagnostic.get()| now accepts an `enabled` filter to only return
   enabled or disabled diagnostics.
+• |vim.diagnostic.status()| returns a formatted string with current buffer
+  diagnostics
 
 EDITOR
 
 • |:iput| works like |:put| but adjusts indent.
+• |:retab| accepts new optional parameter -indentonly to only change leading
+  whitespace in indented lines.
+• |:uniq| deduplicates text in the current buffer.
 • |omnicompletion| in `help` buffer. |ft-help-omni|
 • Setting "'0" in 'shada' prevents storing the jumplist in the shada file.
 • 'shada' now correctly respects "/0" and "f0".
 • |prompt-buffer| supports multiline input/paste, undo/redo, and o/O normal
   commands.
+• 'wildchar' now enables completion in search contexts using |/|, |?|, |:g|, |:v|
+   and |:vimgrep| commands.
+• For security, 'exrc' no longer shows an "(a)llow" choice. Instead you must
+  "(v)iew" then run `:trust`.
 
 EVENTS
 
@@ -177,6 +194,8 @@ LSP
 • You can control priority of |vim.lsp.Config| `root_markers`.
 • Support for `textDocument/documentColor`: |lsp-document_color|
   https://microsoft.github.io/language-server-protocol/specification/#textDocument_documentColor
+• Support for `textDocument/colorPresentation |lsp-document_color|
+  https://microsoft.github.io/language-server-protocol/specification/#textDocument_colorPresentation
 • The `textDocument/diagnostic` request now includes the previous id in its
   parameters.
 • |vim.lsp.enable()| start/stops clients as necessary. And detaches
@@ -192,6 +211,17 @@ LSP
 • The function form of `cmd` in a vim.lsp.Config or vim.lsp.ClientConfig
   receives the resolved config as the second arg: `cmd(dispatchers, config)`.
 • Support for annotated text edits.
+• `:checkhealth vim.lsp` is now available to check which buffers the active LSP features are attached to.
+• LSP `DiagnosticRelatedInformation` is now shown in
+  |vim.diagnostic.open_float()|. It is read from the LSP diagnostic object
+  stored in the `user_data` field.
+• When inside the float created by |vim.diagnostic.open_float()| and the
+  cursor is on a line with `DiagnosticRelatedInformation`, |gf| can be used to
+  jump to the problematic location.
+• Support for `textDocument/linkedEditingRange`: |lsp-linked_editing_range|
+  https://microsoft.github.io/language-server-protocol/specification/#textDocument_linkedEditingRange
+• Support for related documents in pull diagnostics:
+  https://microsoft.github.io/language-server-protocol/specifications/specification-current/#relatedFullDocumentDiagnosticReport
 
 LUA
 
@@ -202,9 +232,13 @@ LUA
 • |vim.version.range()| output can be converted to human-readable string with |tostring()|.
 • |vim.version.intersect()| computes intersection of two version ranges.
 • |Iter:take()| and |Iter:skip()| now optionally accept predicates.
+• Built-in plugin manager |vim.pack|
+• |vim.list.unique()| to deduplicate lists.
+• |vim.list.bisect()| for binary search.
 
 OPTIONS
 
+• 'autocomplete' enables |ins-autocompletion|.
 • 'autowriteall' writes all buffers upon receiving `SIGHUP`, `SIGQUIT` or `SIGTSTP`.
 • 'chistory' and 'lhistory' set size of the |quickfix-stack|.
 • 'completefuzzycollect' enables fuzzy collection of candidates for (some)
@@ -215,11 +249,14 @@ OPTIONS
   • "o"         complete using 'omnifunc'
 • 'complete' allows limiting matches for sources using "{flag}^<limit>".
 • 'completeopt' flag "nearset" sorts completion results by distance to cursor.
+• 'diffanchors' specifies addresses to anchor a diff.
 • 'diffopt' `inline:` configures diff highlighting for changes within a line.
 • 'grepformat' is now a |global-local| option.
+• 'maxsearchcount' sets maximum value for |searchcount()| and defaults to 999.
 • 'pummaxwidth' sets maximum width for the completion popup menu.
-• 'winborder' "bold" style.
+• 'winborder' "bold" style, custom border style.
 • |g:clipboard| accepts a string name to force any builtin clipboard tool.
+• 'busy' sets a buffer "busy" status. Indicated in the default statusline.
 
 PERFORMANCE
 
@@ -245,11 +282,11 @@ TERMINAL
 
 TREESITTER
 
-• todo
+• |:EditQuery| command gained tab-completion, works with injected languages.
 
 TUI
 
-• |TermResponse| now supports APC query responses.
+• |TermResponse| now supports DA1 and APC query responses.
 
 UI
 
@@ -261,11 +298,14 @@ UI
 • Error messages are more concise:
   • "Error detected while processing:" changed to "Error in:".
   • "Error executing Lua:" changed to "Lua:".
+• 'busy' status is shown in default statusline with symbol ◐
 
 VIMSCRIPT
 
 • |cmdcomplete_info()| gets current cmdline completion info.
+• |getcompletiontype()| gets command-line completion type for any string.
 • |prompt_getinput()| gets current user-input in prompt-buffer.
+• |wildtrigger()| triggers command-line expansion.
 
 ==============================================================================
 CHANGED FEATURES                                                 *news-changed*
@@ -277,7 +317,9 @@ These existing features changed their behavior.
 • 'spellfile' location defaults to `stdpath("data").."/site/spell/"` instead of
   the first writable directory in 'runtimepath'.
 • |vim.version.range()| doesn't exclude `to` if it is equal to `from`.
-• |searchcount()|'s maximal value is raised from 99 to 999.
+• |$VIM| and |$VIMRUNTIME| no longer check for Vim version-specific runtime
+  directory `vim{number}` (e.g. `vim82`).
+• 'scrollback' maximum value increased from 100000 to 1000000
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*

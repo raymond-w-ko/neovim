@@ -1091,15 +1091,47 @@ ERLANG						*erlang.vim* *ft-erlang-syntax*
 Erlang is a functional programming language developed by Ericsson.  Files with
 the following extensions are recognized as Erlang files: erl, hrl, yaws.
 
-The BIFs (built-in functions) are highlighted by default. To disable this,
-put the following line in your vimrc: >
+Vim highlights triple-quoted docstrings as comments by default.
 
-      :let g:erlang_highlight_bifs = 0
+If you want triple-quoted docstrings highlighted as Markdown, add the
+following line to your |vimrc|: >
 
-To enable highlighting some special atoms, put this in your vimrc: >
+	:let g:erlang_use_markdown_for_docs = 1
 
-      :let g:erlang_highlight_special_atoms = 1
+The plain text inside the docstrings (that is, the characters that are not
+highlighted by the Markdown syntax) is still highlighted as a comment.
 
+If you want to highlight the plain text inside the docstrings using a
+different highlight group, add the following line to your |vimrc| (the
+example highlights plain text using the String highlight group): >
+
+	:let g:erlang_docstring_default_highlight = 'String'
+
+If you don't enable Markdown, this line highlights the full docstrings
+according to the specified highlight group.
+
+Use the following line to disable highlighting for the plain text: >
+
+	:let g:erlang_docstring_default_highlight = ''
+
+Configuration examples: >
+
+	" Highlight docstrings as Markdown.
+	:let g:erlang_use_markdown_for_docs = 1
+
+	" 1. Highlight Markdown elements in docstrings as Markdown.
+	" 2. Highlight the plain text in docstrings as String.
+	:let g:erlang_use_markdown_for_docs = 1
+	:let g:erlang_docstring_default_highlight = 'String'
+
+	" Highlight docstrings as strings (no Markdown).
+	:let g:erlang_docstring_default_highlight = 'String'
+
+	" 1. Highlight Markdown elements in docstrings as Markdown.
+	" 2. Don't highlight the plain text in docstrings.
+	:let g:erlang_use_markdown_for_docs = 1
+	:let g:erlang_docstring_default_highlight = ''
+<
 
 ELIXIR						*elixir.vim* *ft-elixir-syntax*
 
@@ -3793,13 +3825,13 @@ SYNTAX ISKEYWORD SETTING				*:syn-iskeyword*
 
 DEFINING KEYWORDS					*:syn-keyword*
 
-:sy[ntax] keyword {group-name} [{options}] {keyword} .. [{options}]
+:sy[ntax] keyword {group-name} [{options}] {keyword} ... [{options}]
 
 	This defines a number of keywords.
 
 	{group-name}	Is a syntax group name such as "Comment".
 	[{options}]	See |:syn-arguments| below.
-	{keyword} ..	Is a list of keywords which are part of this group.
+	{keyword} ...	Is a list of keywords which are part of this group.
 
 	Example: >
   :syntax keyword   Type   int long char
@@ -5505,38 +5537,7 @@ And put these lines in your vimrc: >
    autocmd BufRead,BufNewFile *.[ch] endif
 
 ==============================================================================
-17. Window-local syntax				*:ownsyntax*
-
-Normally all windows on a buffer share the same syntax settings. It is
-possible, however, to set a particular window on a file to have its own
-private syntax setting. A possible example would be to edit LaTeX source
-with conventional highlighting in one window, while seeing the same source
-highlighted differently (so as to hide control sequences and indicate bold,
-italic etc regions) in another. The 'scrollbind' option is useful here.
-
-To set the current window to have the syntax "foo", separately from all other
-windows on the buffer: >
-   :ownsyntax foo
-<						*w:current_syntax*
-This will set the "w:current_syntax" variable to "foo".  The value of
-"b:current_syntax" does not change.  This is implemented by saving and
-restoring "b:current_syntax", since the syntax files do set
-"b:current_syntax".  The value set by the syntax file is assigned to
-"w:current_syntax".
-Note: This resets the 'spell', 'spellcapcheck', 'spellfile' and 'spelloptions'
-options.
-
-Once a window has its own syntax, syntax commands executed from other windows
-on the same buffer (including :syntax clear) have no effect. Conversely,
-syntax commands executed from that window do not affect other windows on the
-same buffer.
-
-A window with its own syntax reverts to normal behavior when another buffer
-is loaded into that window or the file is reloaded.
-When splitting the window, the new window will use the original syntax.
-
-==============================================================================
-18. Color xterms				*xterm-color* *color-xterm*
+17. Color xterms				*xterm-color* *color-xterm*
 
 							*colortest.vim*
 To test your color setup, a file has been included in the Vim distribution.
@@ -5546,7 +5547,7 @@ To use it, execute this command: >
 Nvim uses 256-color and |true-color| terminal capabilities wherever possible.
 
 ==============================================================================
-19. When syntax is slow						*:syntime*
+18. When syntax is slow						*:syntime*
 
 This is aimed at authors of a syntax file.
 

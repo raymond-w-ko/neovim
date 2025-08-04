@@ -121,10 +121,11 @@
 #define CPO_REGAPPEND   '>'     // insert NL when appending to a register
 #define CPO_SCOLON      ';'     // using "," and ";" will skip over char if
                                 // cursor would not move
+#define CPO_NOSYMLINKS  '~'     // don't resolve symlinks when changing directory
 #define CPO_CHANGEW     '_'     // "cw" special-case
 // default values for Vim and Vi
 #define CPO_VIM         "aABceFs_"
-#define CPO_VI          "aAbBcCdDeEfFiIJKlLmMnoOpPqrRsStuvWxXyZ$!%+>;_"
+#define CPO_VI          "aAbBcCdDeEfFiIJKlLmMnoOpPqrRsStuvWxXyZ$!%+>;~_"
 
 // characters for p_ww option:
 #define WW_ALL          "bshl<>[]~"
@@ -279,6 +280,7 @@ EXTERN char *p_bsk;             ///< 'backupskip'
 EXTERN char *p_breakat;         ///< 'breakat'
 EXTERN char *p_bh;              ///< 'bufhidden'
 EXTERN char *p_bt;              ///< 'buftype'
+EXTERN OptInt p_busy;           ///< 'busy'
 EXTERN char *p_cmp;             ///< 'casemap'
 EXTERN unsigned cmp_flags;
 EXTERN char *p_enc;             ///< 'encoding'
@@ -300,6 +302,7 @@ EXTERN char *p_cia;             ///< 'completeitemalign'
 EXTERN unsigned cia_flags;      ///< order flags of 'completeitemalign'
 EXTERN char *p_cot;             ///< 'completeopt'
 EXTERN unsigned cot_flags;      ///< flags from 'completeopt'
+EXTERN int p_ac;                ///< 'autocomplete'
 #ifdef BACKSLASH_IN_FILENAME
 EXTERN char *p_csl;             ///< 'completeslash'
 #endif
@@ -312,6 +315,7 @@ EXTERN char *p_cpo;             ///< 'cpoptions'
 EXTERN char *p_debug;           ///< 'debug'
 EXTERN char *p_def;             ///< 'define'
 EXTERN char *p_inc;
+EXTERN char *p_dia;             ///< 'diffanchors'
 EXTERN char *p_dip;             ///< 'diffopt'
 EXTERN char *p_dex;             ///< 'diffexpr'
 EXTERN char *p_dict;            ///< 'dictionary'
@@ -411,6 +415,7 @@ EXTERN OptInt p_mmd;            ///< 'maxmapdepth'
 EXTERN OptInt p_mmp;            ///< 'maxmempattern'
 EXTERN OptInt p_mis;            ///< 'menuitems'
 EXTERN char *p_mopt;            ///< 'messagesopt'
+EXTERN OptInt p_msc;            ///< 'maxsearchcount'
 EXTERN char *p_msm;             ///< 'mkspellmem'
 EXTERN int p_ml;                ///< 'modeline'
 EXTERN int p_mle;               ///< 'modelineexpr'
@@ -589,7 +594,7 @@ EXTERN int p_cdh;               ///< 'cdhome'
 
 #define ERR_BUFLEN 80
 
-#define SB_MAX 100000  // Maximum 'scrollback' value.
+#define SB_MAX 1000000  // Maximum 'scrollback' value.
 
 #define MAX_NUMBERWIDTH 20      // used for 'numberwidth'
 
