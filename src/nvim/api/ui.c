@@ -42,10 +42,8 @@
 
 #define BUF_POS(ui) ((size_t)((ui)->packer.ptr - (ui)->packer.startptr))
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "api/ui.c.generated.h"
-# include "ui_events_remote.generated.h"  // IWYU pragma: export
-#endif
+#include "api/ui.c.generated.h"
+#include "ui_events_remote.generated.h"  // IWYU pragma: export
 
 // TODO(bfredl): just make UI:s owned by their channels instead
 static PMap(uint64_t) connected_uis = MAP_INIT;
@@ -319,6 +317,20 @@ bool remote_ui_restart(uint64_t channel_id, Error *err)
   push_call(ui, "restart", args);
   arena_mem_free(arena_finish(&arena));
   return true;
+}
+
+// Send a connect UI event to the UI on the given channel
+void remote_ui_connect(uint64_t channel_id, char *server_addr, Error *err)
+{
+  RemoteUI *ui = get_ui_or_err(channel_id, err);
+  if (!ui) {
+    return;
+  }
+
+  MAXSIZE_TEMP_ARRAY(args, 1);
+  ADD_C(args, CSTR_AS_OBJ(server_addr));
+
+  push_call(ui, "connect", args);
 }
 
 // TODO(bfredl): use me to detach a specific ui from the server
@@ -989,6 +1001,17 @@ void remote_ui_flush(RemoteUI *ui)
   }
 }
 
+void remote_ui_ui_send(RemoteUI *ui, String content)
+{
+  if (!ui->stdout_tty) {
+    return;
+  }
+
+  MAXSIZE_TEMP_ARRAY(args, 1);
+  ADD_C(args, STRING_OBJ(content));
+  push_call(ui, "ui_send", args);
+}
+
 void remote_ui_flush_pending_data(RemoteUI *ui)
 {
   ui_flush_buf(ui, false);
@@ -1090,4 +1113,18 @@ void remote_ui_event(RemoteUI *ui, char *name, Array args)
 
 free_ret:
   arena_mem_free(arena_finish(&arena));
+}
+
+/// Sends arbitrary data to a UI.
+///
+/// This sends a "ui_send" event to any UI that has the "stdout_tty" |ui-option| set. UIs are
+/// expected to write the received data to a connected TTY if one exists.
+///
+/// @param channel_id
+/// @param content Content to write to the TTY
+/// @param[out] err Error details, if any
+void nvim_ui_send(uint64_t channel_id, String content, Error *err)
+  FUNC_API_SINCE(14)
+{
+  ui_call_ui_send(content);
 }

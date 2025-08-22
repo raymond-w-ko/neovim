@@ -315,9 +315,7 @@ typedef enum {
   FILTERMAP_FOREACH,
 } filtermap_T;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "eval.c.generated.h"
-#endif
+#include "eval.c.generated.h"
 
 static uint64_t last_timer_id = 1;
 static PMap(uint64_t) timers = MAP_INIT;
@@ -2657,6 +2655,8 @@ int eval0_simple_funccal(char *arg, typval_T *rettv, exarg_T *eap, evalarg_T *co
 /// @return  OK or FAIL.
 int eval1(char **arg, typval_T *rettv, evalarg_T *const evalarg)
 {
+  CLEAR_POINTER(rettv);
+
   // Get the first variable.
   if (eval2(arg, rettv, evalarg) == FAIL) {
     return FAIL;
@@ -4795,6 +4795,9 @@ bool garbage_collect(bool testing)
     ABORTING(set_ref_in_callback)(&buf->b_tsrfu_cb, copyID, NULL, NULL);
     ABORTING(set_ref_in_callback)(&buf->b_tfu_cb, copyID, NULL, NULL);
     ABORTING(set_ref_in_callback)(&buf->b_ffu_cb, copyID, NULL, NULL);
+    if (!abort && buf->b_p_cpt_cb != NULL) {
+      ABORTING(set_ref_in_cpt_callbacks)(buf->b_p_cpt_cb, buf->b_p_cpt_count, copyID);
+    }
   }
 
   // 'completefunc', 'omnifunc' and 'thesaurusfunc' callbacks

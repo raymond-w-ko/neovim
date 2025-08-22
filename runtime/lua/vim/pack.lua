@@ -4,7 +4,9 @@
 ---is appreciated, but expect breaking changes without notice.
 ---
 ---Manages plugins only in a dedicated [vim.pack-directory]() (see |packages|):
----`$XDG_DATA_HOME/nvim/site/pack/core/opt`.
+---`$XDG_DATA_HOME/nvim/site/pack/core/opt`. `$XDG_DATA_HOME/nvim/site` needs to
+---be part of 'packpath'. It usually is, but might not be in cases like |--clean| or
+---setting |$XDG_DATA_HOME| during startup.
 ---Plugin's subdirectory name matches plugin's name in specification.
 ---It is assumed that all plugins in the directory are managed exclusively by `vim.pack`.
 ---
@@ -234,8 +236,10 @@ end
 --- - Output of |vim.version.range()| to install the greatest/last semver tag
 ---   inside the version constraint.
 --- @field version? string|vim.VersionRange
+---
+--- @field data? any Arbitrary data associated with a plugin.
 
---- @alias vim.pack.SpecResolved { src: string, name: string, version: nil|string|vim.VersionRange }
+--- @alias vim.pack.SpecResolved { src: string, name: string, version: nil|string|vim.VersionRange, data: any|nil }
 
 --- @param spec string|vim.pack.Spec
 --- @return vim.pack.SpecResolved
@@ -247,7 +251,7 @@ local function normalize_spec(spec)
   name = (type(name) == 'string' and name or ''):match('[^/]+$') or ''
   vim.validate('spec.name', name, is_nonempty_string, true, 'non-empty string')
   vim.validate('spec.version', spec.version, is_version, true, 'string or vim.VersionRange')
-  return { src = spec.src, name = name, version = spec.version }
+  return { src = spec.src, name = name, version = spec.version, data = spec.data }
 end
 
 --- @class (private) vim.pack.PlugInfo
@@ -268,10 +272,11 @@ end
 --- @field info vim.pack.PlugInfo Gathered information about plugin.
 
 --- @param spec string|vim.pack.Spec
+--- @param plug_dir string?
 --- @return vim.pack.Plug
-local function new_plug(spec)
+local function new_plug(spec, plug_dir)
   local spec_resolved = normalize_spec(spec)
-  local path = vim.fs.joinpath(get_plug_dir(), spec_resolved.name)
+  local path = vim.fs.joinpath(plug_dir or get_plug_dir(), spec_resolved.name)
   local info = { err = '', installed = uv.fs_stat(path) ~= nil }
   return { spec = spec_resolved, path = path, info = info }
 end
@@ -322,6 +327,7 @@ end
 --- @return vim.pack.Plug[]
 local function plug_list_from_names(names)
   local all_plugins = M.get()
+  local plug_dir = get_plug_dir()
   local plugs = {} --- @type vim.pack.Plug[]
   local used_names = {} --- @type table<string,boolean>
   -- Preserve plugin order; might be important during checkout or event trigger
@@ -332,7 +338,7 @@ local function plug_list_from_names(names)
     -- TODO(echasnovski): Consider changing this if/when there is lockfile.
     --- @cast names string[]
     if (not names and p_data.active) or vim.tbl_contains(names or {}, p_data.spec.name) then
-      plugs[#plugs + 1] = new_plug(p_data.spec)
+      plugs[#plugs + 1] = new_plug(p_data.spec, plug_dir)
       used_names[p_data.spec.name] = true
     end
   end
@@ -352,7 +358,13 @@ end
 --- @param event_name 'PackChangedPre'|'PackChanged'
 --- @param kind 'install'|'update'|'delete'
 local function trigger_event(p, event_name, kind)
-  local data = { kind = kind, spec = vim.deepcopy(p.spec), path = p.path }
+  local spec = vim.deepcopy(p.spec)
+  -- Infer default branch for fuller `event-data` (if possible)
+  -- Doing it only on event trigger level allows keeping `spec` close to what
+  -- user supplied without performance issues during startup.
+  spec.version = spec.version or (uv.fs_stat(p.path) and git_get_default_branch(p.path))
+
+  local data = { kind = kind, spec = spec, path = p.path }
   vim.api.nvim_exec_autocmds(event_name, { pattern = p.path, data = data })
 end
 
@@ -556,9 +568,9 @@ local function checkout(p, timestamp, skip_same_sha)
 end
 
 --- @param plug_list vim.pack.Plug[]
-local function install_list(plug_list)
+local function install_list(plug_list, confirm)
   -- Get user confirmation to install plugins
-  if not confirm_install(plug_list) then
+  if confirm and not confirm_install(plug_list) then
     for _, p in ipairs(plug_list) do
       p.info.err = 'Installation was not confirmed'
     end
@@ -573,9 +585,6 @@ local function install_list(plug_list)
 
     git_clone(p.spec.src, p.path)
     p.info.installed = true
-
-    -- Infer default branch for fuller `event-data`
-    p.spec.version = p.spec.version or git_get_default_branch(p.path)
 
     -- Do not skip checkout even if HEAD and target have same commit hash to
     -- have new repo in expected detached HEAD state and generated help files.
@@ -640,7 +649,7 @@ local active_plugins = {}
 local n_active_plugins = 0
 
 --- @param plug vim.pack.Plug
---- @param load boolean
+--- @param load boolean|fun(plug_data: {spec: vim.pack.Spec, path: string})
 local function pack_add(plug, load)
   -- Add plugin only once, i.e. no overriding of spec. This allows users to put
   -- plugin first to fully control its spec.
@@ -650,6 +659,11 @@ local function pack_add(plug, load)
 
   n_active_plugins = n_active_plugins + 1
   active_plugins[plug.path] = { plug = plug, id = n_active_plugins }
+
+  if vim.is_callable(load) then
+    load({ spec = vim.deepcopy(plug.spec), path = plug.path })
+    return
+  end
 
   -- NOTE: The `:packadd` specifically seems to not handle spaces in dir name
   vim.cmd.packadd({ vim.fn.escape(plug.spec.name, ' '), bang = not load, magic = { file = false } })
@@ -669,15 +683,21 @@ end
 
 --- @class vim.pack.keyset.add
 --- @inlinedoc
---- @field load? boolean Load `plugin/` files and `ftdetect/` scripts. If `false`, works like `:packadd!`. Default `true`.
+--- Load `plugin/` files and `ftdetect/` scripts. If `false`, works like `:packadd!`.
+--- If function, called with plugin data and is fully responsible for loading plugin.
+--- Default `false` during startup and `true` afterwards.
+--- @field load? boolean|fun(plug_data: {spec: vim.pack.Spec, path: string})
+---
+--- @field confirm? boolean Whether to ask user to confirm initial install. Default `true`.
 
 --- Add plugin to current session
 ---
 --- - For each specification check that plugin exists on disk in |vim.pack-directory|:
----     - If exists, do nothin in this step.
+---     - If exists, do nothing in this step.
 ---     - If doesn't exist, install it by downloading from `src` into `name`
 ---       subdirectory (via `git clone`) and update state to match `version` (via `git checkout`).
---- - For each plugin execute |:packadd| making them reachable by Nvim.
+--- - For each plugin execute |:packadd| (or customizable `load` function) making
+---   it reachable by Nvim.
 ---
 --- Notes:
 --- - Installation is done in parallel, but waits for all to finish before
@@ -693,11 +713,14 @@ end
 --- @param opts? vim.pack.keyset.add
 function M.add(specs, opts)
   vim.validate('specs', specs, vim.islist, false, 'list')
-  opts = vim.tbl_extend('force', { load = true }, opts or {})
+  opts = vim.tbl_extend('force', { load = vim.v.vim_did_enter == 1, confirm = true }, opts or {})
   vim.validate('opts', opts, 'table')
 
-  --- @type vim.pack.Plug[]
-  local plugs = vim.tbl_map(new_plug, specs)
+  local plug_dir = get_plug_dir()
+  local plugs = {} --- @type vim.pack.Plug[]
+  for i = 1, #specs do
+    plugs[i] = new_plug(specs[i], plug_dir)
+  end
   plugs = normalize_plugs(plugs)
 
   -- Install
@@ -708,7 +731,7 @@ function M.add(specs, opts)
 
   if #plugs_to_install > 0 then
     git_ensure_exec()
-    install_list(plugs_to_install)
+    install_list(plugs_to_install, opts.confirm)
   end
 
   -- Register and load those actually on disk while collecting errors

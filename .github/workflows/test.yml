@@ -33,7 +33,7 @@ jobs:
     env:
       CC: clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
 
       - name: Install stylua
@@ -87,7 +87,7 @@ jobs:
     env:
       CC: clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
       - name: Build third-party deps
         run: |
@@ -134,7 +134,7 @@ jobs:
       CC: ${{ matrix.build.cc }}
       NVIM_TEST_INTEG: ${{ matrix.build.flavor == 'release' && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
         with:
           install_flags: "--test"
@@ -209,17 +209,21 @@ jobs:
   zig-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    name: build using zig build
+    name: build using zig build (linux)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mlugg/setup-zig@v2
         with:
          version: 0.14.1
       - run: sudo apt-get install -y inotify-tools
       - run: zig build test_nlua0
-      - run: zig build nvim_bin && ./zig-out/bin/nvim --version
+      - run: zig build nvim && ./zig-out/bin/nvim --version
       - run: zig build unittest
       - run: zig build functionaltest
+      # `zig build nvim` uses a lua script for doctags in order to support cross-compiling
+      # compare with the builtin generator that they match
+      - run: cd runtime; ../zig-out/bin/nvim -u NONE -i NONE -e --headless -c "helptags ++t doc" -c quit
+      - run: diff -u runtime/doc/tags zig-out/runtime/doc/tags
 
   windows:
     uses: ./.github/workflows/test_windows.yml
@@ -230,7 +234,7 @@ jobs:
     env:
       CC: gcc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
 
       - name: Install dependencies

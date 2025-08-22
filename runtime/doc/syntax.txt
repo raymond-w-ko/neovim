@@ -634,6 +634,23 @@ in the "after" directory in 'runtimepath'.  For Unix this would be
     syn sync fromstart
     set foldmethod=syntax
 
+CANGJIE					*cangjie.vim* *ft-cangjie-syntax*
+
+This file provides syntax highlighting for the Cangjie programming language, a
+new-generation language oriented to full-scenario intelligence.
+
+All highlighting is enabled by default.  To disable highlighting for a
+specific group, set the corresponding variable to 0 in your |vimrc|.
+All options to disable highlighting are: >
+	:let g:cangjie_comment_color = 0
+	:let g:cangjie_identifier_color = 0
+	:let g:cangjie_keyword_color = 0
+	:let g:cangjie_macro_color = 0
+	:let g:cangjie_number_color = 0
+	:let g:cangjie_operator_color = 0
+	:let g:cangjie_string_color = 0
+	:let g:cangjie_type_color = 0
+
 CH						*ch.vim* *ft-ch-syntax*
 
 C/C++ interpreter.  Ch has similar syntax highlighting to C and builds upon
@@ -1152,7 +1169,7 @@ Elixir.
 FLEXWIKI				*flexwiki.vim* *ft-flexwiki-syntax*
 
 FlexWiki is an ASP.NET-based wiki package available at
-https://www.flexwiki.com
+www.flexwiki.com
 NOTE: This site currently doesn't work, on Wikipedia is mentioned that
 development stopped in 2009.
 
@@ -1741,6 +1758,15 @@ Certain modifiers are incompatible with each other, e.g. `abstract` and
 	:syn list javaConceptKind
 and can be differently highlighted as a group than other modifiers with >
 	:hi link javaConceptKind NonText
+
+All instances of variable-width lookbehind assertions (|/\@<!| and |/\@<=|),
+resorted to in syntax item definitions, are confined to arbitrary byte counts.
+Another arbitrary value can be selected for a related group of definitions.
+For example: >
+	:let g:java_lookbehind_byte_counts = {'javaMarkdownCommentTitle': 240}
+Where each key name of this dictionary is the name of a syntax item.  The use
+of these assertions in syntax items may vary among revisions, so no definitive
+set of supported key names is committed to.
 
 If you notice highlighting errors while scrolling backwards, which are fixed
 when redrawing with CTRL-L, try setting the "g:java_minlines" variable to
@@ -3555,8 +3581,8 @@ improve screen updating rates (see |:syn-sync| for more on this). >
 The g:vimsyn_embed option allows users to select what, if any, types of
 embedded script highlighting they wish to have. >
 
-   g:vimsyn_embed == 0      : disable (don't embed any scripts)
-   g:vimsyn_embed == 'lpPr' : support embedded Lua, Perl, Python and Ruby
+   g:vimsyn_embed == 0       : disable (don't embed any scripts)
+   g:vimsyn_embed ==# 'lpPr' : support embedded Lua, Perl, Python and Ruby
 <
 By default, g:vimsyn_embed is unset, and embedded Lua scripts are supported.
 
@@ -3564,13 +3590,13 @@ By default, g:vimsyn_embed is unset, and embedded Lua scripts are supported.
 Some folding is now supported with when 'foldmethod' is set to "syntax": >
 
    g:vimsyn_folding == 0 or doesn't exist: no syntax-based folding
-   g:vimsyn_folding =~ 'a' : fold augroups
-   g:vimsyn_folding =~ 'f' : fold functions
-   g:vimsyn_folding =~ 'h' : fold let heredocs
-   g:vimsyn_folding =~ 'l' : fold Lua      heredocs
-   g:vimsyn_folding =~ 'p' : fold Perl     heredocs
-   g:vimsyn_folding =~ 'P' : fold Python   heredocs
-   g:vimsyn_folding =~ 'r' : fold Ruby     heredocs
+   g:vimsyn_folding =~# 'a' : fold augroups
+   g:vimsyn_folding =~# 'f' : fold functions
+   g:vimsyn_folding =~# 'h' : fold let heredocs
+   g:vimsyn_folding =~# 'l' : fold Lua      heredocs
+   g:vimsyn_folding =~# 'p' : fold Perl     heredocs
+   g:vimsyn_folding =~# 'P' : fold Python   heredocs
+   g:vimsyn_folding =~# 'r' : fold Ruby     heredocs
 <
 
 By default, g:vimsyn_folding is unset.  Concatenate the indicated characters
@@ -5334,6 +5360,9 @@ Search		Last search pattern highlighting (see 'hlsearch').
 		Also used for similar items that need to stand out.
 							*hl-SnippetTabstop*
 SnippetTabstop	Tabstops in snippets. |vim.snippet|
+							*hl-SnippetTabstopActive*
+SnippetTabstopActive
+		The currently active tabstop. |vim.snippet|
 							*hl-SpecialKey*
 SpecialKey	Unprintable characters: Text displayed differently from what
 		it really is. But not 'listchars' whitespace. |hl-Whitespace|

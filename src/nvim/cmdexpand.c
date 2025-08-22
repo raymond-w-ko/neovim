@@ -29,6 +29,7 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_getln.h"
+#include "nvim/fuzzy.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
@@ -80,9 +81,7 @@
 /// Type used by call_user_expand_func
 typedef void *(*user_expand_func_T)(const char *, int, typval_T *);
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "cmdexpand.c.generated.h"
-#endif
+#include "cmdexpand.c.generated.h"
 
 static bool cmd_showtail;  ///< Only show path tail in lists ?
 static bool may_expand_pattern = false;
@@ -2014,12 +2013,14 @@ static const char *set_context_by_cmdname(const char *cmd, cmdidx_T cmdidx, expa
   case CMD_lockmarks:
   case CMD_noautocmd:
   case CMD_noswapfile:
+  case CMD_restart:
   case CMD_rightbelow:
   case CMD_sandbox:
   case CMD_silent:
   case CMD_tab:
   case CMD_tabdo:
   case CMD_topleft:
+  case CMD_unsilent:
   case CMD_verbose:
   case CMD_vertical:
   case CMD_windo:
@@ -3094,7 +3095,7 @@ void ExpandGeneric(const char *const pat, expand_T *xp, regmatch_T *regmatch, ch
         match = vim_regexec(regmatch, str, 0);
       } else {
         score = fuzzy_match_str(str, pat);
-        match = (score != 0);
+        match = (score != FUZZY_SCORE_NONE);
       }
     } else {
       match = true;
@@ -3406,7 +3407,7 @@ static int ExpandUserDefined(const char *const pat, expand_T *xp, regmatch_T *re
         match = vim_regexec(regmatch, s, 0);
       } else {
         score = fuzzy_match_str(s, pat);
-        match = (score != 0);
+        match = (score != FUZZY_SCORE_NONE);
       }
     } else {
       match = true;               // match everything

@@ -1190,18 +1190,25 @@ M.funcs = {
     signature = 'charidx({string}, {idx} [, {countcc} [, {utf16}]])',
   },
   chdir = {
-    args = 1,
+    args = { 1, 2 },
     base = 1,
     desc = [=[
-      Change the current working directory to {dir}.  The scope of
-      the directory change depends on the directory of the current
-      window:
-      	- If the current window has a window-local directory
-      	  (|:lcd|), then changes the window local directory.
-      	- Otherwise, if the current tabpage has a local
-      	  directory (|:tcd|) then changes the tabpage local
-      	  directory.
-      	- Otherwise, changes the global directory.
+      Changes the current working directory to {dir}.  The scope of
+      the change is determined as follows:
+      If {scope} is not present, the current working directory is
+      changed to the scope of the current directory:
+          - If the window local directory (|:lcd|) is set, it
+            changes the current working directory for that scope.
+          - Otherwise, if the tab page local directory (|:tcd|) is
+            set, it changes the current directory for that scope.
+          - Otherwise, changes the global directory for that scope.
+
+      If {scope} is present, changes the current working directory
+      for the specified scope:
+          "window"	Changes the window local directory.  |:lcd|
+          "tabpage"	Changes the tab page local directory.  |:tcd|
+          "global"	Changes the global directory.  |:cd|
+
       {dir} must be a String.
       If successful, returns the previous working directory.  Pass
       this to another chdir() to restore the directory.
@@ -1217,9 +1224,9 @@ M.funcs = {
 
     ]=],
     name = 'chdir',
-    params = { { 'dir', 'string' } },
+    params = { { 'dir', 'string' }, { 'scope', 'string' } },
     returns = 'string',
-    signature = 'chdir({dir})',
+    signature = 'chdir({dir} [, {scope}])',
   },
   cindent = {
     args = 1,
@@ -6050,22 +6057,27 @@ M.funcs = {
     args = 1,
     base = 1,
     desc = [=[
-      Return a |List| with all the key-value pairs of {dict}.  Each
-      |List| item is a list with two items: the key of a {dict}
-      entry and the value of this entry.  The |List| is in arbitrary
-      order.  Also see |keys()| and |values()|.
+      Return a |List| with all key/index and value pairs of {expr}.
+      Each |List| item is a list with two items:
+      - for a |Dict|: the key and the value
+      - for a |List| or |String|: the index and the value
+      The returned |List| is in arbitrary order for a |Dict|,
+      otherwise it's in ascending order of the index.
+
+      Also see |keys()| and |values()|.
+
       Example: >vim
+      	let mydict = #{a: 'red', b: 'blue'}
       	for [key, value] in items(mydict)
-      	   echo key .. ': ' .. value
+      	   echo $"{key} = {value}"
       	endfor
+      	echo items([1, 2, 3])
+      	echo items("foobar")
       <
-      A List or a String argument is also supported.  In these
-      cases, items() returns a List with the index and the value at
-      the index.
     ]=],
     name = 'items',
-    params = { { 'dict', 'table' } },
-    signature = 'items({dict})',
+    params = { { 'expr', 'table|string' } },
+    signature = 'items({expr})',
   },
   jobclose = {
     args = { 1, 2 },
@@ -7265,9 +7277,6 @@ M.funcs = {
       		given sequence.
           limit	Maximum number of matches in {list} to be
       		returned.  Zero means no limit.
-          camelcase	Use enhanced camel case scoring making results
-      		better suited for completion related to
-      		programming languages.  Defaults to v:true.
 
       If {list} is a list of dictionaries, then the optional {dict}
       argument supports the following additional items:
@@ -11388,8 +11397,8 @@ M.funcs = {
       log          String  Logs directory (for use by plugins too).
       run          String  Run directory: temporary, local storage
       		     for sockets, named pipes, etc.
-      state        String  Session state directory: storage for file
-      		     drafts, swap, undo, |shada|.
+      state        String  Session state: storage for backupdir,
+      		     file drafts, |shada|, swap, undo, 'viewdir'.
 
       Example: >vim
       	echo stdpath("config")
@@ -13101,6 +13110,11 @@ M.funcs = {
       To retain normal history navigation (up/down keys): >vim
       	cnoremap <Up>   <C-U><Up>
       	cnoremap <Down> <C-U><Down>
+      <
+      To set an option specifically when performing a search, e.g.
+      to set 'pumheight': >vim
+      	autocmd CmdlineEnter [/\?] set pumheight=8
+      	autocmd CmdlineLeave [/\?] set pumheight&
       <
       Return value is always 0.
     ]==],

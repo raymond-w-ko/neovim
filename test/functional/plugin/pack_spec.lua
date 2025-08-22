@@ -137,10 +137,12 @@ function repos_setup.plugindirs()
 
   repo_write_file('plugindirs', 'lua/plugindirs.lua', 'return "plugindirs main"')
   repo_write_file('plugindirs', 'plugin/dirs.lua', 'vim.g._plugin = true')
+  repo_write_file('plugindirs', 'plugin/dirs_log.lua', '_G.DL = _G.DL or {}; DL[#DL+1] = "p"')
   repo_write_file('plugindirs', 'plugin/dirs.vim', 'let g:_plugin_vim=v:true')
   repo_write_file('plugindirs', 'plugin/sub/dirs.lua', 'vim.g._plugin_sub = true')
   repo_write_file('plugindirs', 'plugin/bad % name.lua', 'vim.g._plugin_bad = true')
   repo_write_file('plugindirs', 'after/plugin/dirs.lua', 'vim.g._after_plugin = true')
+  repo_write_file('plugindirs', 'after/plugin/dirs_log.lua', '_G.DL = _G.DL or {}; DL[#DL+1] = "a"')
   repo_write_file('plugindirs', 'after/plugin/dirs.vim', 'let g:_after_plugin_vim=v:true')
   repo_write_file('plugindirs', 'after/plugin/sub/dirs.lua', 'vim.g._after_plugin_sub = true')
   repo_write_file('plugindirs', 'after/plugin/bad % name.lua', 'vim.g._after_plugin_bad = true')
@@ -309,6 +311,22 @@ describe('vim.pack', function()
       eq(exec_lua('return #_G.event_log'), 0)
     end)
 
+    it('passes `data` field through to `opts.load`', function()
+      local out = exec_lua(function()
+        local map = {} ---@type table<string,boolean>
+        local load = function(p)
+          local name = p.spec.name ---@type string
+          map[name] = name == 'basic' and (p.spec.data.test == 'value') or (p.spec.data == 'value')
+        end
+        vim.pack.add({
+          { src = repos_src.basic, data = { test = 'value' } },
+          { src = repos_src.defbranch, data = 'value' },
+        }, { load = load })
+        return map
+      end)
+      eq({ basic = true, defbranch = true }, out)
+    end)
+
     it('asks for installation confirmation', function()
       exec_lua(function()
         ---@diagnostic disable-next-line: duplicate-set-field
@@ -328,6 +346,22 @@ describe('vim.pack', function()
 
       local confirm_msg = 'These plugins will be installed:\n\n' .. repos_src.basic .. '\n'
       eq({ confirm_msg, 'Proceed? &Yes\n&No', 1, 'Question' }, exec_lua('return _G.confirm_args'))
+    end)
+
+    it('respects `opts.confirm`', function()
+      exec_lua(function()
+        _G.confirm_used = false
+        ---@diagnostic disable-next-line: duplicate-set-field
+        vim.fn.confirm = function()
+          _G.confirm_used = true
+          return 1
+        end
+
+        vim.pack.add({ repos_src.basic }, { confirm = false })
+      end)
+
+      eq(false, exec_lua('return _G.confirm_used'))
+      eq('basic main', exec_lua('return require("basic")'))
     end)
 
     it('installs at proper version', function()
@@ -355,6 +389,45 @@ describe('vim.pack', function()
         vim.pack.add({ 'https://github.com/neovim/nvim-lspconfig' })
       end)
       eq(true, exec_lua('return pcall(require, "lspconfig")'))
+    end)
+
+    describe('startup', function()
+      local init_lua = ''
+      before_each(function()
+        init_lua = vim.fs.joinpath(fn.stdpath('config'), 'init.lua')
+        fn.mkdir(vim.fs.dirname(init_lua), 'p')
+      end)
+      after_each(function()
+        pcall(vim.fs.rm, init_lua, { force = true })
+      end)
+
+      it('works in init.lua', function()
+        local pack_add_cmd = ('vim.pack.add({ %s })'):format(vim.inspect(repos_src.plugindirs))
+        fn.writefile({ pack_add_cmd, '_G.done = true' }, init_lua)
+
+        local validate_loaded = function()
+          eq('plugindirs main', exec_lua('return require("plugindirs")'))
+
+          -- Should source 'plugin/' and 'after/plugin/' exactly once
+          eq({ true, true }, n.exec_lua('return { vim.g._plugin, vim.g._after_plugin }'))
+          eq({ 'p', 'a' }, n.exec_lua('return _G.DL'))
+        end
+
+        -- Should auto-install but wait before executing code after it
+        n.clear({ args_rm = { '-u' } })
+        n.exec_lua('vim.wait(500, function() return _G.done end, 50)')
+        validate_loaded()
+
+        -- Should only `:packadd!` already installed plugin
+        n.clear({ args_rm = { '-u' } })
+        validate_loaded()
+
+        -- Should not load plugins if `--noplugin`, only adjust 'runtimepath'
+        n.clear({ args = { '--noplugin' }, args_rm = { '-u' } })
+        eq('plugindirs main', exec_lua('return require("plugindirs")'))
+        eq({}, n.exec_lua('return { vim.g._plugin, vim.g._after_plugin }'))
+        eq(vim.NIL, n.exec_lua('return _G.DL'))
+      end)
     end)
 
     it('shows progress report during installation', function()
@@ -441,6 +514,52 @@ describe('vim.pack', function()
 
       n.clear()
       validate(false, {})
+    end)
+
+    it('can use function `opts.load`', function()
+      local validate = function()
+        n.exec_lua(function()
+          _G.load_log = {}
+          local load = function(...)
+            table.insert(_G.load_log, { ... })
+          end
+          vim.pack.add({ repos_src.plugindirs, repos_src.basic }, { load = load })
+        end)
+
+        -- Order of execution should be the same as supplied in `add()`
+        local plugindirs_data = {
+          spec = { src = repos_src.plugindirs, name = 'plugindirs' },
+          path = pack_get_plug_path('plugindirs'),
+        }
+        local basic_data = {
+          spec = { src = repos_src.basic, name = 'basic' },
+          path = pack_get_plug_path('basic'),
+        }
+        -- - Only single table argument should be supplied to `load`
+        local ref_log = { { plugindirs_data }, { basic_data } }
+        eq(ref_log, n.exec_lua('return _G.load_log'))
+
+        -- Should not add plugin to the session in any way
+        eq(false, exec_lua('return pcall(require, "plugindirs")'))
+        eq(false, exec_lua('return pcall(require, "basic")'))
+
+        -- Should not source 'plugin/'
+        eq({}, n.exec_lua('return { vim.g._plugin, vim.g._after_plugin }'))
+
+        -- Plugins should still be marked as "active", since they were added
+        plugindirs_data.spec.version = 'main'
+        plugindirs_data.active = true
+        basic_data.spec.version = 'main'
+        basic_data.active = true
+        eq({ plugindirs_data, basic_data }, n.exec_lua('return vim.pack.get()'))
+      end
+
+      -- Works on initial install
+      validate()
+
+      -- Works when loading already installed plugin
+      n.clear()
+      validate()
     end)
 
     it('generates help tags', function()
@@ -1074,6 +1193,19 @@ describe('vim.pack', function()
         { active = true, path = basic_path, spec = basic_spec },
         { active = false, path = defbranch_path, spec = defbranch_spec },
       }, exec_lua('return vim.pack.get()'))
+    end)
+
+    it('respects `data` field', function()
+      local out = exec_lua(function()
+        vim.pack.add({
+          { src = repos_src.basic, data = { test = 'value' } },
+          { src = repos_src.defbranch, data = 'value' },
+        })
+        local plugs = vim.pack.get()
+        ---@type table<string,string>
+        return { basic = plugs[1].spec.data.test, defbranch = plugs[2].spec.data }
+      end)
+      eq({ basic = 'value', defbranch = 'value' }, out)
     end)
 
     it('works with `del()`', function()

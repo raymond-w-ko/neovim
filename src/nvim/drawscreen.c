@@ -128,9 +128,7 @@ typedef enum {
   WC_BOTTOM_RIGHT,
 } WindowCorner;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "drawscreen.c.generated.h"
-#endif
+#include "drawscreen.c.generated.h"
 
 static bool redraw_popupmenu = false;
 static bool msg_grid_invalid = false;
@@ -270,7 +268,7 @@ void screenclear(void)
 /// to be re-emitted: avoid clearing the prompt from the message grid.
 static bool cmdline_number_prompt(void)
 {
-  return !ui_has(kUIMessages) && State == MODE_CMDLINE && get_cmdline_info()->mouse_used != NULL;
+  return !ui_has(kUIMessages) && (State & MODE_CMDLINE) && get_cmdline_info()->mouse_used != NULL;
 }
 
 /// Set dimensions of the Nvim application "screen".
@@ -372,8 +370,8 @@ void screen_resize(int width, int height)
     // - in Ex mode, don't redraw anything.
     // - Otherwise, redraw right now, and position the cursor.
     if (State == MODE_ASKMORE || State == MODE_EXTERNCMD || exmode_active
-        || (State == MODE_CMDLINE && get_cmdline_info()->one_key)) {
-      if (State == MODE_CMDLINE) {
+        || ((State & MODE_CMDLINE) && get_cmdline_info()->one_key)) {
+      if (State & MODE_CMDLINE) {
         update_screen();
       }
       if (msg_grid.chars) {

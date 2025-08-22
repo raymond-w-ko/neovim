@@ -113,9 +113,7 @@ typedef struct {
   bool cursor_visible;  ///< cursor's current visibility; ensures matched busy_start/stop UI events
 } TerminalState;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "terminal.c.generated.h"
-#endif
+#include "terminal.c.generated.h"
 
 // Delay for refreshing the terminal buffer after receiving updates from
 // libvterm. Improves performance when receiving large bursts of data.
@@ -2135,7 +2133,7 @@ static void adjust_scrollback(Terminal *term, buf_T *buf)
   if (scbk < term->sb_current) {
     size_t diff = term->sb_current - scbk;
     for (size_t i = 0; i < diff; i++) {
-      ml_delete(1, false);
+      ml_delete(1);
       term->sb_current--;
       xfree(term->sb_buffer[term->sb_current]);
     }

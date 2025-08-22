@@ -1244,6 +1244,10 @@ func Test_cmdline_complete_various()
   call feedkeys(":ka\<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal("\"ka\<C-A>", @:)
 
+  " completion for :keepmarks command
+  call feedkeys(":kee edi\<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"kee edit", @:)
+
   " completion for short version of the :s command
   call feedkeys(":sI \<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal("\"sI \<C-A>", @:)
@@ -3095,6 +3099,14 @@ func Test_wildmenu_pum_rightleft()
   call term_sendkeys(buf, ":sign \<Tab>")
   call VerifyScreenDump(buf, 'Test_wildmenu_pum_rl', {})
 
+  " Behavior is the same when using 'keymap'.
+  call term_sendkeys(buf, "\<Esc>:set keymap=dvorak\<CR>")
+  call TermWait(buf)
+  " ";gul" -> "sign" when using Dvorak keymap.
+  call term_sendkeys(buf, ":\<C-^>;gul \<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_rl', {})
+  call term_sendkeys(buf, "\<Esc>:set keymap&\<CR>")
+
   call StopVimInTerminal(buf)
 endfunc
 
@@ -3250,17 +3262,16 @@ endfunc
 func Test_fuzzy_completion_bufname_fullpath()
   CheckUnix
   set wildoptions&
-  call mkdir('Xcmd/Xstate/Xfile.js', 'p')
+  call mkdir('Xcmd/Xstate/Xfile.js', 'pR')
   edit Xcmd/Xstate/Xfile.js
   cd Xcmd/Xstate
   enew
-  call feedkeys(":b CmdStateFile\<Tab>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"b CmdStateFile', @:)
+  call feedkeys(":b cmdstatefile\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"b cmdstatefile', @:)
   set wildoptions=fuzzy
-  call feedkeys(":b CmdStateFile\<Tab>\<C-B>\"\<CR>", 'tx')
+  call feedkeys(":b cmdstatefile\<Tab>\<C-B>\"\<CR>", 'tx')
   call assert_match('Xcmd/Xstate/Xfile.js$', @:)
   cd -
-  call delete('Xcmd', 'rf')
   set wildoptions&
 endfunc
 
@@ -3539,7 +3550,7 @@ func Test_fuzzy_completion_mapname()
   nmap <Plug>state :
   nmap <Plug>FendingOff :
   call feedkeys(":nmap <Plug>fo\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal("\"nmap <Plug>format <Plug>TestFOrmat <Plug>FendingOff <Plug>goformat <Plug>fendoff", @:)
+  call assert_equal("\"nmap <Plug>format <Plug>TestFOrmat <Plug>FendingOff <Plug>fendoff <Plug>goformat", @:)
   nunmap <Plug>format
   nunmap <Plug>goformat
   nunmap <Plug>TestFOrmat
@@ -3661,9 +3672,7 @@ func Test_fuzzy_completion_syntax_group()
   call assert_equal('"syntax list mpar', @:)
   set wildoptions=fuzzy
   call feedkeys(":syntax list mpar\<Tab>\<C-B>\"\<CR>", 'tx')
-  " Fuzzy match prefers NvimParenthesis over MatchParen
-  " call assert_equal('"syntax list MatchParen', @:)
-  call assert_equal('"syntax list NvimParenthesis', @:)
+  call assert_equal('"syntax list MatchParen', @:)
   set wildoptions&
 endfunc
 
@@ -3714,7 +3723,7 @@ func Test_fuzzy_completion_cmd_sort_results()
   command T123FendingOff :
   set wildoptions=fuzzy
   call feedkeys(":T123fo\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"T123format T123TestFOrmat T123FendingOff T123goformat T123fendoff', @:)
+  call assert_equal('"T123format T123TestFOrmat T123FendingOff T123fendoff T123goformat', @:)
   delcommand T123format
   delcommand T123goformat
   delcommand T123TestFOrmat
@@ -4342,6 +4351,28 @@ func Test_term_option()
   let &cpo = _cpo
 endfunc
 
+func Test_ex_command_completion()
+  " required for :*
+  " set cpo+=*
+  let list = filter(getcompletion('', 'command'), 'exists(":" . v:val) == 0')
+  " :++ and :-- are only valid in Vim9 script context, so they can be ignored
+  " call assert_equal(['++', '--'], sort(list))
+  call assert_equal([], sort(list))
+  call assert_equal(2, exists(':k'))
+  call assert_equal(0, exists(':ke'))
+  call assert_equal(1, exists(':kee'))
+  call assert_equal(1, exists(':keep'))
+  call assert_equal(1, exists(':keepm'))
+  call assert_equal(1, exists(':keepma'))
+  call assert_equal(1, exists(':keepmar'))
+  call assert_equal(1, exists(':keepmark'))
+  call assert_equal(2, exists(':keepmarks'))
+  call assert_equal(2, exists(':keepalt'))
+  call assert_equal(2, exists(':keepjumps'))
+  call assert_equal(2, exists(':keeppatterns'))
+  set cpo-=*
+endfunc
+
 func Test_cd_bslash_completion_windows()
   CheckMSWindows
   let save_shellslash = &shellslash
@@ -4651,6 +4682,12 @@ func Test_search_wildmenu_screendump()
   call term_sendkeys(buf, "\<c-n>\<c-y>")
   call VerifyScreenDump(buf, 'Test_search_wildmenu_8', {})
 
+  " 'incsearch' highlight is restored after dismissing popup (Ctrl_E)
+  call term_sendkeys(buf, "\<esc>:set wop=pum is hls&\<cr>")
+  call term_sendkeys(buf, "gg/th\<tab>\<c-e>")
+  call TermWait(buf, 50)
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_9', {})
+
   call term_sendkeys(buf, "\<esc>")
   call StopVimInTerminal(buf)
 endfunc
@@ -4661,10 +4698,15 @@ func Test_search_wildmenu_iminsert()
 
   let lines =<< trim [SCRIPT]
     set wop=pum imi=1
-    h wildoptions
+    setlocal iskeyword=!-~,192-255
+    call setline(1, [
+          \ "global toggle global-local global/local glyphs toggles English",
+          \ "accordingly. toggled accordingly single-byte",
+          \ ])
+    call cursor(2, 42)
   [SCRIPT]
   call writefile(lines, 'XTest_search_wildmenu', 'D')
-  let buf = RunVimInTerminal('-S XTest_search_wildmenu', {'rows': 20})
+  let buf = RunVimInTerminal('-S XTest_search_wildmenu', {'rows': 12})
 
   call term_sendkeys(buf, "/gl\<Tab>")
   call TermWait(buf, 50)

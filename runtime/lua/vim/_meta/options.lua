@@ -1736,6 +1736,8 @@ vim.wo.diff = vim.o.diff
 --- If some of the {address} do not resolve to a line in each buffer (e.g.
 --- a pattern search that does not match anything), none of the anchors
 --- will be used.
+--- 							*E1562*
+--- Diff anchors can only be used when there are no hidden diff buffers.
 ---
 --- @type string
 vim.o.diffanchors = ""
@@ -5381,12 +5383,9 @@ vim.go.ruf = vim.go.rulerformat
 ---    but are not part of the Nvim distribution. XDG_DATA_DIRS defaults
 ---    to /usr/local/share/:/usr/share/, so system administrators are
 ---    expected to install site plugins to /usr/share/nvim/site.
---- 5. Session state directory, for state data such as swap, backupdir,
----    viewdir, undodir, etc.
----    Given by `stdpath("state")`.  `$XDG_STATE_HOME`
---- 6. $VIMRUNTIME, for files distributed with Nvim.
+--- 5. $VIMRUNTIME, for files distributed with Nvim.
 --- 						*after-directory*
---- 7, 8, 9, 10. In after/ subdirectories of 1, 2, 3 and 4, with reverse
+--- 6, 7, 8, 9. In after/ subdirectories of 1, 2, 3 and 4, with reverse
 ---    ordering.  This is for preferences to overrule or add to the
 ---    distributed defaults or system-wide settings (rarely needed).
 ---

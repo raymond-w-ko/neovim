@@ -70,8 +70,10 @@ function M.hover(config)
       elseif result and result.contents then
         -- Make sure the response is not empty
         if
-          (type(result.contents) == 'table' and #(vim.tbl_get(result.contents, 'value') or '') > 0)
-          or type(result.contents == 'string') and #result.contents > 0
+          (
+            type(result.contents) == 'table'
+            and #(vim.tbl_get(result.contents, 'value') or result.contents[1] or '') > 0
+          ) or (type(result.contents) == 'string' and #result.contents > 0)
         then
           results1[client_id] = result
         else
@@ -330,8 +332,8 @@ local function process_signature_help_results(results)
       )
       api.nvim_command('redraw')
     else
-      local result = r.result --- @type lsp.SignatureHelp
-      if result and result.signatures and result.signatures[1] then
+      local result = r.result
+      if result and result.signatures then
         for i, sig in ipairs(result.signatures) do
           sig.activeParameter = sig.activeParameter or result.activeParameter
           local idx = #signatures + 1
@@ -370,6 +372,7 @@ function M.signature_help(config)
 
   config = config and vim.deepcopy(config) or {}
   config.focus_id = method
+  local user_title = config.title
 
   lsp.buf_request_all(0, method, client_positional_params(), function(results, ctx)
     if api.nvim_get_current_buf() ~= ctx.bufnr then
@@ -404,15 +407,19 @@ function M.signature_help(config)
         return
       end
 
-      local sfx = total > 1
-          and string.format(' (%d/%d)%s', idx, total, can_cycle and ' (<C-s> to cycle)' or '')
-        or ''
-      config.title = config.title or string.format('Signature Help: %s%s', client.name, sfx)
-      if not config.border then
-        table.insert(lines, 1, '# ' .. config.title)
-        if hl then
-          hl[1] = hl[1] + 1
-          hl[3] = hl[3] + 1
+      -- Show title only if there are multiple clients or multiple signatures.
+      if total > 1 then
+        local sfx = total > 1
+            and string.format(' (%d/%d)%s', idx, total, can_cycle and ' (<C-s> to cycle)' or '')
+          or ''
+        config.title = user_title or string.format('Signature Help: %s%s', client.name, sfx)
+        -- If no border is set, render title inside the window.
+        if not (config.border or vim.o.winborder ~= '') then
+          table.insert(lines, 1, '# ' .. config.title)
+          if hl then
+            hl[1] = hl[1] + 1
+            hl[3] = hl[3] + 1
+          end
         end
       end
 
@@ -512,7 +519,7 @@ end
 --- Can be used to specify FormattingOptions. Some unspecified options will be
 --- automatically derived from the current Nvim options.
 --- See https://microsoft.github.io/language-server-protocol/specification/#formattingOptions
---- @field formatting_options? table
+--- @field formatting_options? lsp.FormattingOptions
 ---
 --- Time in milliseconds to block for formatting requests. No effect if async=true.
 --- (default: `1000`)

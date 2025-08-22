@@ -672,23 +672,23 @@ LspProgress                                                       *LspProgress*
     Redraw the statusline whenever an LSP progress message arrives: >vim
         autocmd LspProgress * redrawstatus
 <
-
     Tell the parent terminal to indicate progress using a native progress
     indicator (requires a supporting terminal): >lua
-
         vim.api.nvim_create_autocmd('LspProgress', {
           callback = function(ev)
             local value = ev.data.params.value
             if value.kind == 'begin' then
-              io.stdout:write('\027]9;4;1;0\027\\')
+              vim.api.nvim_ui_send('\027]9;4;1;0\027\\')
             elseif value.kind == 'end' then
-              io.stdout:write('\027]9;4;0\027\\')
+              vim.api.nvim_ui_send('\027]9;4;0\027\\')
             elseif value.kind == 'report' then
-              io.stdout:write(string.format('\027]9;4;1;%d\027\\', value.percentage))
+              vim.api.nvim_ui_send(string.format('\027]9;4;1;%d\027\\', value.percentage or 0))
             end
           end,
         })
 <
+    See also: ~
+      • https://github.com/MicrosoftDocs/terminal/blob/main/TerminalDocs/tutorials/progress-bar-sequences.md
 
 LspRequest                                                        *LspRequest*
     For each request sent to an LSP server, this event is triggered for
@@ -1133,12 +1133,6 @@ get_clients({filter})                                  *vim.lsp.get_clients()*
     Return: ~
         (`vim.lsp.Client[]`) List of |vim.lsp.Client| objects
 
-get_log_path()                                        *vim.lsp.get_log_path()*
-    Gets the path of the logfile used by the LSP client.
-
-    Return: ~
-        (`string`) path to log file
-
 is_enabled({name})                                      *vim.lsp.is_enabled()*
     Checks if the given LSP config is enabled (globally, not per-buffer).
 
@@ -1167,21 +1161,6 @@ omnifunc({findstart}, {base})                             *vim.lsp.omnifunc()*
       • |complete-functions|
       • |complete-items|
       • |CompleteDone|
-
-set_log_level({level})                               *vim.lsp.set_log_level()*
-    Sets the global log level for LSP logging.
-
-    Levels by name: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "OFF"
-
-    Level numbers begin with "TRACE" at 0
-
-    Use `lsp.log_levels` for reverse lookup.
-
-    Parameters: ~
-      • {level}  (`integer|string`) the case insensitive level name or number
-
-    See also: ~
-      • |vim.lsp.log_levels|
 
 start({config}, {opts})                                      *vim.lsp.start()*
     Create a new LSP client and start a language server or reuses an already
@@ -1425,9 +1404,9 @@ format({opts})                                          *vim.lsp.buf.format()*
 
     Parameters: ~
       • {opts}  (`table?`) A table with the following fields:
-                • {formatting_options}? (`table`) Can be used to specify
-                  FormattingOptions. Some unspecified options will be
-                  automatically derived from the current Nvim options. See
+                • {formatting_options}? (`lsp.FormattingOptions`) Can be used
+                  to specify FormattingOptions. Some unspecified options will
+                  be automatically derived from the current Nvim options. See
                   https://microsoft.github.io/language-server-protocol/specification/#formattingOptions
                 • {timeout_ms}? (`integer`, default: `1000`) Time in
                   milliseconds to block for formatting requests. No effect if
@@ -1982,7 +1961,7 @@ refresh({opts})                                   *vim.lsp.codelens.refresh()*
                   for current buffer
 
 run()                                                 *vim.lsp.codelens.run()*
-    Run the code lens in the current line
+    Run the code lens available in the current line.
 
 save({lenses}, {bufnr}, {client_id})                 *vim.lsp.codelens.save()*
     Store lenses for a specific buffer and client
@@ -2279,12 +2258,12 @@ The `vim.lsp.log` module provides logging for the Nvim LSP client.
 
 When debugging language servers, it is helpful to enable extra-verbose logging
 of the LSP client RPC events. Example: >lua
-    vim.lsp.set_log_level 'trace'
+    vim.lsp.log.set_level 'trace'
     require('vim.lsp.log').set_format_func(vim.inspect)
 <
 
 Then try to run the language server, and open the log with: >vim
-    :lua vim.cmd('tabnew ' .. vim.lsp.get_log_path())
+    :lua vim.cmd('tabnew ' .. vim.lsp.log.get_filename())
 <
 
 (Or use `:LspLog` if you have nvim-lspconfig installed.)
@@ -2452,10 +2431,11 @@ enable({enable}, {filter})                  *vim.lsp.semantic_tokens.enable()*
 
     Parameters: ~
       • {enable}  (`boolean?`) true/nil to enable, false to disable
-      • {filter}  (`table?`) A table with the following fields:
-                  • {bufnr}? (`integer`) Buffer number, or 0 for current
-                    buffer, or nil for all.
-                  • {client_id}? (`integer`) Client ID, or nil for all
+      • {filter}  (`table?`) Optional filters |kwargs|,
+                  • {bufnr}? (`integer`, default: all) Buffer number, or 0 for
+                    current buffer, or nil for all.
+                  • {client_id}? (`integer`, default: all) Client ID, or nil
+                    for all.
 
 force_refresh({bufnr})               *vim.lsp.semantic_tokens.force_refresh()*
     Force a refresh of all semantic tokens
@@ -2514,10 +2494,11 @@ is_enabled({filter})                    *vim.lsp.semantic_tokens.is_enabled()*
     Query whether semantic tokens is enabled in the {filter}ed scope
 
     Parameters: ~
-      • {filter}  (`table?`) A table with the following fields:
-                  • {bufnr}? (`integer`) Buffer number, or 0 for current
-                    buffer, or nil for all.
-                  • {client_id}? (`integer`) Client ID, or nil for all
+      • {filter}  (`table?`) Optional filters |kwargs|,
+                  • {bufnr}? (`integer`, default: all) Buffer number, or 0 for
+                    current buffer, or nil for all.
+                  • {client_id}? (`integer`, default: all) Client ID, or nil
+                    for all.
 
 
 ==============================================================================

@@ -89,9 +89,7 @@ enum {
 };
 
 static int confirm_msg_used = false;            // displaying confirm_msg
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "message.c.generated.h"
-#endif
+#include "message.c.generated.h"
 static char *confirm_msg = NULL;            // ":confirm" message
 static char *confirm_buttons;               // ":confirm" buttons sent to cmdline as prompt
 
@@ -3069,7 +3067,7 @@ void repeat_message(void)
   if (State == MODE_ASKMORE) {
     msg_moremsg(true);          // display --more-- message again
     msg_row = Rows - 1;
-  } else if (State == MODE_CMDLINE && confirm_msg != NULL) {
+  } else if ((State & MODE_CMDLINE) && confirm_msg != NULL) {
     display_confirm_msg();      // display ":confirm" message again
     msg_row = Rows - 1;
   } else if (State == MODE_EXTERNCMD) {
