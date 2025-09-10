@@ -567,37 +567,6 @@ void nvim_ui_pum_set_bounds(uint64_t channel_id, Float width, Float height, Floa
   ui->pum_pos = true;
 }
 
-/// Tells Nvim when a terminal event has occurred
-///
-/// The following terminal events are supported:
-///
-///   - "termresponse": The terminal sent a DA1, OSC, DCS, or APC response sequence to
-///                     Nvim. The payload is the received response. Sets
-///                     |v:termresponse| and fires |TermResponse|.
-///
-/// @param channel_id
-/// @param event Event name
-/// @param value Event payload
-/// @param[out] err Error details, if any.
-void nvim_ui_term_event(uint64_t channel_id, String event, Object value, Error *err)
-  FUNC_API_SINCE(12) FUNC_API_REMOTE_ONLY
-{
-  if (strequal("termresponse", event.data)) {
-    if (value.type != kObjectTypeString) {
-      api_set_error(err, kErrorTypeValidation, "termresponse must be a string");
-      return;
-    }
-
-    const String termresponse = value.data.string;
-    set_vim_var_string(VV_TERMRESPONSE, termresponse.data, (ptrdiff_t)termresponse.size);
-
-    MAXSIZE_TEMP_DICT(data, 1);
-    PUT_C(data, "sequence", value);
-    apply_autocmds_group(EVENT_TERMRESPONSE, NULL, NULL, true, AUGROUP_ALL, NULL, NULL,
-                         &DICT_OBJ(data));
-  }
-}
-
 static void flush_event(RemoteUI *ui)
 {
   if (ui->cur_event) {
@@ -1115,10 +1084,11 @@ free_ret:
   arena_mem_free(arena_finish(&arena));
 }
 
-/// Sends arbitrary data to a UI.
+/// Sends arbitrary data to a UI. Use this instead of |nvim_chan_send()| or `io.stdout:write()`, if
+/// you really want to write to the |TUI| host terminal.
 ///
-/// This sends a "ui_send" event to any UI that has the "stdout_tty" |ui-option| set. UIs are
-/// expected to write the received data to a connected TTY if one exists.
+/// Emits a "ui_send" event to all UIs with the "stdout_tty" |ui-option| set. UIs are expected to
+/// write the received data to a connected TTY if one exists.
 ///
 /// @param channel_id
 /// @param content Content to write to the TTY

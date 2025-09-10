@@ -120,6 +120,33 @@ vim.o.ac = vim.o.autocomplete
 vim.go.autocomplete = vim.o.autocomplete
 vim.go.ac = vim.go.autocomplete
 
+--- Delay in milliseconds before the autocomplete menu appears after
+--- typing.  If you prefer it not to open too quickly, set this value
+--- slightly above your typing speed.  See `ins-autocompletion`.
+---
+--- @type integer
+vim.o.autocompletedelay = 0
+vim.o.acl = vim.o.autocompletedelay
+vim.go.autocompletedelay = vim.o.autocompletedelay
+vim.go.acl = vim.go.autocompletedelay
+
+--- Initial timeout (in milliseconds) for the decaying time-sliced
+--- completion algorithm.  Starts at this value, halves for each slower
+--- source until a minimum is reached.  All sources run, but slower ones
+--- are quickly de-prioritized.  The default is tuned so the popup menu
+--- opens within ~200ms even with multiple slow sources on a slow system.
+--- Changing this value is rarely needed.  Only 80 or higher is valid.
+--- Special case: when 'complete' contains "F" or "o" (function sources),
+--- a longer timeout is used, allowing up to ~1s for sources such as LSP
+--- servers that may sometimes take longer (e.g., while loading modules).
+--- See `ins-autocompletion`.
+---
+--- @type integer
+vim.o.autocompletetimeout = 80
+vim.o.act = vim.o.autocompletetimeout
+vim.go.autocompletetimeout = vim.o.autocompletetimeout
+vim.go.act = vim.go.autocompletetimeout
+
 --- Copy indent from current line when starting a new line (typing <CR>
 --- in Insert mode or when using the "o" or "O" command).  If you do not
 --- type anything on the new line except <BS> or CTRL-D and then type
@@ -1017,10 +1044,11 @@ vim.o.cms = vim.o.commentstring
 vim.bo.commentstring = vim.o.commentstring
 vim.bo.cms = vim.bo.commentstring
 
---- This option specifies how keyword completion `ins-completion` works
---- when CTRL-P or CTRL-N are used.  It is also used for whole-line
---- completion `i_CTRL-X_CTRL-L`.  It indicates the type of completion
---- and the places to scan.  It is a comma-separated list of flags:
+--- This option controls how completion `ins-completion` behaves when
+--- using CTRL-P, CTRL-N, or `ins-autocompletion`.  It is also used for
+--- whole-line completion `i_CTRL-X_CTRL-L`.  It indicates the type of
+--- completion and the places to scan.  It is a comma-separated list of
+--- flags:
 --- .	scan the current buffer ('wrapscan' is ignored)
 --- w	scan buffers from other windows
 --- b	scan other loaded buffers that are in the buffer list
@@ -1068,9 +1096,11 @@ vim.bo.cms = vim.bo.commentstring
 --- (gzipped files for example).  Unloaded buffers are not scanned for
 --- whole-line completion.
 ---
---- As you can see, CTRL-N and CTRL-P can be used to do any 'iskeyword'-
---- based expansion (e.g., dictionary `i_CTRL-X_CTRL-K`, included patterns
---- `i_CTRL-X_CTRL-I`, tags `i_CTRL-X_CTRL-]` and normal expansions).
+--- CTRL-N, CTRL-P, and `ins-autocompletion` can be used for any
+--- 'iskeyword'-based completion (dictionary `i_CTRL-X_CTRL-K`, included
+--- patterns `i_CTRL-X_CTRL-I`, tags `i_CTRL-X_CTRL-]`, and normal
+--- expansions).  With the "F" and "o" flags in 'complete', non-keywords
+--- can also be completed.
 ---
 --- An optional match limit can be specified for a completion source by
 --- appending a caret ("^") followed by a {count} to the source flag.
@@ -1188,17 +1218,22 @@ vim.go.cia = vim.go.completeitemalign
 --- 	    with "menu" or "menuone".  Overrides "preview".
 ---
 ---    preinsert
---- 	    Preinsert the portion of the first candidate word that is
---- 	    not part of the current completion leader and using the
---- 	    `hl-ComplMatchIns` highlight group.  In order for it to
---- 	    work, "fuzzy" must not be set and "menuone" must be set.
+--- 	    When autocompletion is not enabled, inserts the part of the
+--- 	    first candidate word beyond the current completion leader,
+--- 	    highlighted with `hl-ComplMatchIns`.  The cursor does not
+--- 	    move.  Requires "fuzzy" unset and "menuone" in 'completeopt'.
+---
+--- 	    When 'autocomplete' is enabled, inserts the longest common
+--- 	    prefix of matches (from all shown items or buffer-specific
+--- 	    matches), highlighted with `hl-PreInsert`.  This occurs only
+--- 	    when no menu item is selected.  Press CTRL-Y to accept.
 ---
 ---    preview  Show extra information about the currently selected
 --- 	    completion in the preview window.  Only works in
 --- 	    combination with "menu" or "menuone".
 ---
---- Only "fuzzy", "popup" and "preview" have an effect when 'autocomplete'
---- is enabled.
+--- Only "fuzzy", "popup", "preinsert" and "preview" have an effect when
+--- 'autocomplete' is enabled.
 ---
 --- This option does not apply to `cmdline-completion`. See 'wildoptions'
 --- for that.
@@ -1228,6 +1263,15 @@ vim.o.completeslash = ""
 vim.o.csl = vim.o.completeslash
 vim.bo.completeslash = vim.o.completeslash
 vim.bo.csl = vim.bo.completeslash
+
+--- Like 'autocompletetimeout', but applies to `i_CTRL-N` and `i_CTRL-P`
+--- completion.  Value of 0 disables the timeout; positive values allowed.
+---
+--- @type integer
+vim.o.completetimeout = 0
+vim.o.cto = vim.o.completetimeout
+vim.go.completetimeout = vim.o.completetimeout
+vim.go.cto = vim.go.completetimeout
 
 --- Sets the modes in which text in the cursor line can also be concealed.
 --- When the current mode is listed then concealing happens just like in
@@ -2188,6 +2232,7 @@ vim.go.ei = vim.go.eventignore
 --- 	`OptionSet`,
 --- 	`PackChanged`,
 --- 	`PackChangedPre`,
+--- 	`Progress`,
 --- 	`QuickFixCmdPost`,
 --- 	`QuickFixCmdPre`,
 --- 	`QuitPre`,

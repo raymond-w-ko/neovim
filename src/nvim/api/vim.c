@@ -332,7 +332,7 @@ void nvim_feedkeys(String keys, String mode, Boolean escape_ks)
     if (!dangerous) {
       ex_normal_busy++;
     }
-    exec_normal(true);
+    exec_normal(true, lowlevel);
     if (!dangerous) {
       ex_normal_busy--;
     }
@@ -758,14 +758,31 @@ void nvim_set_vvar(String name, Object value, Error *err)
 ///               the (optional) name or ID `hl_group`.
 /// @param history  if true, add to |message-history|.
 /// @param opts  Optional parameters.
+///          - id: message id for updating existing message.
 ///          - err: Treat the message like `:echoerr`. Sets `hl_group` to |hl-ErrorMsg| by default.
 ///          - kind: Set the |ui-messages| kind with which this message will be emitted.
 ///          - verbose: Message is controlled by the 'verbose' option. Nvim invoked with `-V3log`
 ///            will write the message to the "log" file instead of standard output.
-void nvim_echo(ArrayOf(Tuple(String, *HLGroupID)) chunks, Boolean history, Dict(echo_opts) *opts,
-               Error *err)
+///          - title: The title for |progress-message|.
+///          - status: Current status of the |progress-message|. Can be
+///            one of the following values
+///            - success: The progress item completed successfully
+///            - running: The progress is ongoing
+///            - failed: The progress item failed
+///            - cancel: The progressing process should be canceled.
+///                      note: Cancel needs to be handled by progress
+///                      initiator by listening for the `Progress` event
+///          - percent: How much progress is done on the progress
+///            message
+///          - data: dictionary containing additional information
+/// @return Message id.
+///         - -1 means nvim_echo didn't show a message
+Union(Integer, String) nvim_echo(ArrayOf(Tuple(String, *HLGroupID)) chunks, Boolean history,
+                                 Dict(echo_opts) *opts,
+                                 Error *err)
   FUNC_API_SINCE(7)
 {
+  MsgID id = INTEGER_OBJ(-1);
   HlMessage hl_msg = parse_hl_msg(chunks, opts->err, err);
   if (ERROR_SET(err)) {
     goto error;
@@ -778,20 +795,53 @@ void nvim_echo(ArrayOf(Tuple(String, *HLGroupID)) chunks, Boolean history, Dict(
     kind = opts->err ? "echoerr" : history ? "echomsg" : "echo";
   }
 
-  msg_multihl(hl_msg, kind, history, opts->err);
+  bool is_progress = strequal(kind, "progress");
+  bool needs_clear = !history;
+
+  VALIDATE(is_progress
+           || (opts->status.size == 0 && opts->title.size == 0 && opts->percent == 0
+               && opts->data.size == 0),
+           "%s",
+           "title, status, percent and data fields can only be used with progress messages",
+  {
+    goto error;
+  });
+
+  VALIDATE_EXP((!is_progress || strequal(opts->status.data, "success")
+                || strequal(opts->status.data, "failed")
+                || strequal(opts->status.data, "running")
+                || strequal(opts->status.data, "cancel")),
+               "status", "success|failed|running|cancel", opts->status.data, {
+    goto error;
+  });
+
+  VALIDATE_RANGE(!is_progress || (opts->percent >= 0 && opts->percent <= 100),
+                 "percent", {
+    goto error;
+  });
+
+  MessageData msg_data = { .title = opts->title, .status = opts->status,
+                           .percent = opts->percent, .data = opts->data };
+
+  id = msg_multihl(opts->id, hl_msg, kind, history, opts->err, &msg_data, &needs_clear);
 
   if (opts->verbose) {
     verbose_leave();
     verbose_stop();  // flush now
   }
 
-  if (history) {
-    // history takes ownership
-    return;
+  if (is_progress) {
+    do_autocmd_progress(id, hl_msg, &msg_data);
+  }
+
+  if (!needs_clear) {
+    // history takes ownership of `hl_msg`
+    return id;
   }
 
 error:
   hl_msg_free(hl_msg);
+  return id;
 }
 
 /// Gets the current list of buffers.
@@ -1096,18 +1146,18 @@ static void term_close(void *data)
   channel_decref(chan);
 }
 
-/// Send data to channel `id`. For a job, it writes it to the
-/// stdin of the process. For the stdio channel |channel-stdio|,
-/// it writes to Nvim's stdout.  For an internal terminal instance
-/// (|nvim_open_term()|) it writes directly to terminal output.
-/// See |channel-bytes| for more information.
+/// Sends raw data to channel `chan`. |channel-bytes|
+/// - For a job, it writes it to the stdin of the process.
+/// - For the stdio channel |channel-stdio|, it writes to Nvim's stdout.
+/// - For an internal terminal instance (|nvim_open_term()|) it writes directly to terminal output.
 ///
-/// This function writes raw data, not RPC messages.  If the channel
-/// was created with `rpc=true` then the channel expects RPC
-/// messages, use |vim.rpcnotify()| and |vim.rpcrequest()| instead.
+/// This function writes raw data, not RPC messages. Use |vim.rpcrequest()| and |vim.rpcnotify()| if
+/// the channel expects RPC messages (i.e. it was created with `rpc=true`).
 ///
-/// @param chan id of the channel
-/// @param data data to write. 8-bit clean: can contain NUL bytes.
+/// To write data to the |TUI| host terminal, see |nvim_ui_send()|.
+///
+/// @param chan Channel id
+/// @param data Data to write. 8-bit clean: may contain NUL bytes.
 /// @param[out] err Error details, if any
 void nvim_chan_send(Integer chan, String data, Error *err)
   FUNC_API_SINCE(7) FUNC_API_REMOTE_ONLY FUNC_API_LUA_ONLY
@@ -1508,7 +1558,7 @@ ArrayOf(Object, 2) nvim_get_api_info(uint64_t channel_id, Arena *arena)
 /// orchestration. (Note: Something is better than nothing! Fields are optional, but at least set
 /// `name`.)
 ///
-/// Can be called more than once; the caller should merge old info if appropriate. Example: library
+/// Can be called more than once; caller should merge old info if appropriate. Example: a library
 /// first identifies the channel, then a plugin using that library later identifies itself.
 ///
 /// @param channel_id
@@ -2170,15 +2220,6 @@ DictAs(eval_statusline_ret) nvim_eval_statusline(String str, Dict(eval_statuslin
   PUT_C(result, "str", CSTR_AS_OBJ(buf));
 
   return result;
-}
-
-/// @nodoc
-void nvim_error_event(uint64_t channel_id, Integer lvl, String data)
-  FUNC_API_REMOTE_ONLY
-{
-  // TODO(bfredl): consider printing message to user, as will be relevant
-  // if we fork nvim processes as async workers
-  ELOG("async error on channel %" PRId64 ": %s", channel_id, data.size ? data.data : "");
 }
 
 /// EXPERIMENTAL: this API may change in the future.

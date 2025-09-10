@@ -19,7 +19,7 @@
   "R:SpellRare,L:SpellLocal,+:Pmenu,=:PmenuSel,k:PmenuMatch,<:PmenuMatchSel,[:PmenuKind," \
   "]:PmenuKindSel,{:PmenuExtra,}:PmenuExtraSel,x:PmenuSbar,X:PmenuThumb,*:TabLine,#:TabLineSel," \
   "_:TabLineFill,!:CursorColumn,.:CursorLine,o:ColorColumn,q:QuickFixLine,z:StatusLineTerm," \
-  "Z:StatusLineTermNC,g:MsgArea,h:ComplMatchIns,0:Whitespace,I:NormalNC"
+  "Z:StatusLineTermNC,g:MsgArea,h:ComplMatchIns,0:Whitespace,I:PreInsert"
 
 // Default values for 'errorformat'.
 // The "%f|%l| %m" one is used for when the contents of the quickfix window is
@@ -292,6 +292,7 @@ EXTERN OptInt p_cwh;            ///< 'cmdwinheight'
 EXTERN OptInt p_ch;             ///< 'cmdheight'
 EXTERN char *p_cms;             ///< 'commentstring'
 EXTERN char *p_cpt;             ///< 'complete'
+EXTERN OptInt p_cto;            ///< 'completetimeout'
 EXTERN OptInt p_columns;        ///< 'columns'
 EXTERN int p_confirm;           ///< 'confirm'
 EXTERN char *p_cfc;             ///< 'completefuzzycollect'
@@ -301,6 +302,8 @@ EXTERN unsigned cia_flags;      ///< order flags of 'completeitemalign'
 EXTERN char *p_cot;             ///< 'completeopt'
 EXTERN unsigned cot_flags;      ///< flags from 'completeopt'
 EXTERN int p_ac;                ///< 'autocomplete'
+EXTERN OptInt p_act;            ///< 'autocompletetimeout'
+EXTERN OptInt p_acl;            ///< 'autocompletedelay'
 #ifdef BACKSLASH_IN_FILENAME
 EXTERN char *p_csl;             ///< 'completeslash'
 #endif
