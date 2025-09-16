@@ -1095,10 +1095,14 @@ static void ins_compl_insert_bytes(char *p, int len)
 /// -1 means normal item.
 int ins_compl_col_range_attr(linenr_T lnum, int col)
 {
+  const bool has_preinsert = ins_compl_has_preinsert();
+
   int attr;
   if ((get_cot_flags() & kOptCotFlagFuzzy)
-      || (!compl_autocomplete
+      || (!has_preinsert
           && (attr = syn_name2attr("ComplMatchIns")) == 0)
+      || (!compl_autocomplete && has_preinsert
+          && (attr = syn_name2attr("PreInsert")) == 0)
       || (compl_autocomplete
           && (!compl_autocomplete_preinsert
               || (attr = syn_name2attr("PreInsert")) == 0))) {
@@ -2193,6 +2197,11 @@ int ins_compl_bs(void)
   compl_leader = cbuf_to_string(line + compl_col,
                                 (size_t)(p_off - (ptrdiff_t)compl_col));
 
+  // Clear selection if a menu item is currently selected in autocompletion
+  if (compl_autocomplete && compl_first_match) {
+    compl_shown_match = compl_first_match;
+  }
+
   ins_compl_new_leader();
   if (compl_shown_match != NULL) {
     // Make sure current match is not a hidden item.
@@ -2283,9 +2292,7 @@ static void ins_compl_new_leader(void)
     compl_enter_selects = false;
   } else if (ins_compl_has_preinsert() && compl_leader.size > 0) {
     if (compl_started && compl_autocomplete && !ins_compl_preinsert_effect()) {
-      if (ins_compl_insert(true, true) != OK) {
-        (void)ins_compl_insert(false, false);
-      } else {
+      if (ins_compl_insert(true, true) == OK) {
         compl_autocomplete_preinsert = true;
       }
     } else {
@@ -3024,7 +3031,7 @@ int set_cpt_callbacks(optset_T *args)
     }
   }
 
-  if (!local) {  // ':set' used insted of ':setlocal'
+  if (!local) {  // ':set' used instead of ':setlocal'
     // Cache the callback array
     copy_cpt_callbacks(&cpt_cb, &cpt_cb_count, curbuf->b_p_cpt_cb,
                        curbuf->b_p_cpt_count);

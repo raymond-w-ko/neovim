@@ -1147,8 +1147,9 @@ nvim_input_mouse({button}, {action}, {modifier}, {grid}, {row}, {col})
                     press, except that the "-" separator is optional, so
                     "C-A-", "c-a" and "CA" can all be used to specify
                     Ctrl+Alt+click.
-      • {grid}      (`integer`) Grid number if the client uses |ui-multigrid|,
-                    else 0.
+      • {grid}      (`integer`) Grid number (used by |ui-multigrid| client),
+                    or 0 to let Nvim decide positioning of windows. For more
+                    information, see |dev-ui-multigrid|
       • {row}       (`integer`) Mouse row-position (zero-based, like redraw
                     events)
       • {col}       (`integer`) Mouse column-position (zero-based, like redraw
@@ -2227,7 +2228,7 @@ For more information on buffers, see |buffers|.
 Unloaded Buffers: ~
 
 Buffers may be unloaded by the |:bunload| command or the buffer's
-|'bufhidden'| option. When a buffer is unloaded its file contents are freed
+'bufhidden' option. When a buffer is unloaded its file contents are freed
 from memory and vim cannot operate on the buffer lines until it is reloaded
 (usually by opening the buffer again in a new window). API methods such as
 |nvim_buf_get_lines()| and |nvim_buf_line_count()| will be affected.
@@ -3744,7 +3745,7 @@ nvim_open_win({buffer}, {enter}, {config})                   *nvim_open_win()*
     current window. If -1 is provided, a top-level split will be created.
     `vertical` and `split` are only valid for normal windows, and are used to
     control split direction. For `vertical`, the exact direction is determined
-    by |'splitright'| and |'splitbelow'|. Split windows cannot have
+    by 'splitright' and 'splitbelow'. Split windows cannot have
     `bufpos`/`row`/`col`/`border`/`title`/`footer` properties.
 
     With relative=editor (row=0,col=0) refers to the top-left corner of the
