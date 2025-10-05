@@ -29,6 +29,7 @@
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_eval.h"
 #include "nvim/ex_getln.h"
 #include "nvim/extmark.h"
@@ -887,6 +888,12 @@ static bool is_nearest_active(void)
   unsigned flags = get_cot_flags();
   return (compl_autocomplete || (flags & kOptCotFlagNearest))
          && !(flags & kOptCotFlagFuzzy);
+}
+
+/// True if a match is selected (even if it is not inserted).
+bool ins_compl_is_match_selected(void)
+{
+  return compl_shown_match != NULL && !is_first_match(compl_shown_match);
 }
 
 /// Returns true if autocomplete is active and the pre-insert effect targets the
@@ -6543,16 +6550,29 @@ static void remove_old_matches(void)
 /// 'refresh:always' flag.
 static void get_cpt_func_completion_matches(Callback *cb)
 {
-  int startcol = cpt_sources_array[cpt_sources_index].cs_startcol;
+  cpt_source_T *cpt_src = &cpt_sources_array[cpt_sources_index];
+  int startcol = cpt_src->cs_startcol;
 
   if (startcol == -2 || startcol == -3) {
     return;
   }
 
   set_compl_globals(startcol, curwin->w_cursor.col, true);
+
+  // Insert the leader string (previously removed) before expansion.
+  // This prevents flicker when `func` (e.g. an LSP client) is slow and
+  // calls 'sleep', which triggers ui_flush().
+  if (!cpt_src->cs_refresh_always) {
+    ins_compl_insert_bytes(ins_compl_leader(), -1);
+  }
+
   expand_by_function(0, cpt_compl_pattern.data, cb);
 
-  cpt_sources_array[cpt_sources_index].cs_refresh_always = compl_opt_refresh_always;
+  if (!cpt_src->cs_refresh_always) {
+    ins_compl_delete(false);
+  }
+
+  cpt_src->cs_refresh_always = compl_opt_refresh_always;
   compl_opt_refresh_always = false;
 }
 
