@@ -264,9 +264,11 @@ local function draw(inbuf, outbuf)
   local curseq_line = buf_apply_graph_lines(tree, graph_lines, outbuf, meta, curseq)
   vim.bo[outbuf].modifiable = false
 
-  if vim.api.nvim_win_is_valid(vim.b[outbuf].nvim_is_undotree) then
-    vim.api.nvim_win_set_cursor(vim.b[outbuf].nvim_is_undotree, { curseq_line, 0 })
-  end
+  vim.schedule(function()
+    if vim.api.nvim_win_is_valid(vim.b[outbuf].nvim_is_undotree) then
+      vim.api.nvim_win_set_cursor(vim.b[outbuf].nvim_is_undotree, { curseq_line, 0 })
+    end
+  end)
 
   return meta
 end
@@ -287,7 +289,7 @@ end
 ---
 --- Title of the window. If a function, it accepts the buffer number of the
 --- source buffer as its only argument and should return a string.
---- @field title (string|fun(bufnr:integer):string|nil)
+--- @field title (string|fun(bufnr:integer):string|nil)?
 
 --- Open a window that displays a textual representation of the undotree.
 ---
