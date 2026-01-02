@@ -1473,7 +1473,7 @@ local options = {
       defaults = false,
       full_name = 'compatible',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -2460,9 +2460,10 @@ local options = {
         	internal	Use the internal diff library.  This is
         			ignored when 'diffexpr' is set.  *E960*
         			When running out of memory when writing a
-        			buffer this item will be ignored for diffs
-        			involving that buffer.  Set the 'verbose'
-        			option to see when this happens.
+        			buffer or the diff is larger than 1 GB this
+        			item will be ignored for diffs involving that
+        			buffer.  Set the 'verbose' option to see when
+        			this happens.
 
         	iwhite		Ignore changes in amount of white space.  Adds
         			the "-b" flag to the "diff" command if
@@ -2639,7 +2640,7 @@ local options = {
       defaults = false,
       full_name = 'edcompatible',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -3812,11 +3813,13 @@ local options = {
         - system signals low battery life
         - Nvim exits abnormally
 
+        This is a |global-local| option, so it can be set per buffer, for
+        example when writing to a slow filesystem.
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
       full_name = 'fsync',
-      scope = { 'global' },
+      scope = { 'global', 'buf' },
       secure = true,
       short_desc = N_('whether to invoke fsync() after file write'),
       type = 'boolean',
@@ -3825,24 +3828,9 @@ local options = {
     {
       abbreviation = 'gd',
       defaults = false,
-      desc = [=[
-        When on, the ":substitute" flag 'g' is default on.  This means that
-        all matches in a line are substituted instead of one.  When a 'g' flag
-        is given to a ":substitute" command, this will toggle the substitution
-        of all or one match.  See |complex-change|.
-
-        	command		'gdefault' on	'gdefault' off	~
-        	:s///		  subst. all	  subst. one
-        	:s///g		  subst. one	  subst. all
-        	:s///gg		  subst. all	  subst. one
-
-        NOTE: Setting this option may break plugins that rely on the default
-        behavior of the 'g' flag.  This will also make the 'g' flag have the
-        opposite effect of that documented in |:s_g|.
-      ]=],
       full_name = 'gdefault',
       scope = { 'global' },
-      short_desc = N_('the ":substitute" flag \'g\' is default on'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       varname = 'p_gd',
     },
@@ -4387,7 +4375,7 @@ local options = {
       defaults = false,
       full_name = 'hkmap',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -4396,7 +4384,7 @@ local options = {
       defaults = false,
       full_name = 'hkmapp',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -4795,7 +4783,7 @@ local options = {
       defaults = false,
       full_name = 'insertmode',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -4990,8 +4978,9 @@ local options = {
         		jumping to a location.  |jumplist-stack|
 
           view          When moving through the jumplist, |changelist|,
-        		|alternate-file| or using |mark-motions| try to
-        		restore the |mark-view| in which the action occurred.
+        		|alternate-file|, using |mark-motions| or when popping
+        		the |tagstack| try to restore the |mark-view| in which
+        		the action occurred.
 
           clean         Remove unloaded buffers from the jumplist.
         		EXPERIMENTAL: this flag may change in the future.
@@ -5185,7 +5174,7 @@ local options = {
       ]=],
       full_name = 'langremap',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       varname = 'p_lrm',
     },
@@ -5525,18 +5514,9 @@ local options = {
     },
     {
       defaults = true,
-      desc = [=[
-        Changes the special characters that can be used in search patterns.
-        See |pattern|.
-        WARNING: Switching this option off most likely breaks plugins!  That
-        is because many patterns assume it's on and will fail when it's off.
-        Only switch it off when working with old Vi scripts.  In any other
-        situation write patterns that work when 'magic' is on.  Include "\M"
-        when you want to |/\M|.
-      ]=],
       full_name = 'magic',
       scope = { 'global' },
-      short_desc = N_('special characters in search patterns'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       varname = 'p_magic',
     },
@@ -5715,7 +5695,7 @@ local options = {
         behaves like CTRL-C was typed.
         Running into the limit often means that the pattern is very
         inefficient or too complex.  This may already happen with the pattern
-        "\(.\)*" on a very long line.  ".*" works much better.
+        `\(.\)*` on a very long line.  `.*` works much better.
         Might also happen on redraw, when syntax rules try to match a complex
         text structure.
         Vim may run out of memory before hitting the 'maxmempattern' limit, in
@@ -5735,7 +5715,8 @@ local options = {
         When the number of matches exceeds this value, Vim shows ">" instead
         of the exact count to keep searching fast.
         Note: larger values may impact performance.
-        The value must be between 1 and 9999.
+        The value must be between 1 and 9999.  See also the |searchcount()|
+        function.
       ]=],
       full_name = 'maxsearchcount',
       scope = { 'global' },
@@ -6448,7 +6429,7 @@ local options = {
       full_name = 'paste',
       pri_mkrc = true,
       scope = { 'global' },
-      short_desc = N_('pasting text'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       varname = 'p_paste',
     },
@@ -6457,7 +6438,7 @@ local options = {
       defaults = '',
       full_name = 'pastetoggle',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'string',
       immutable = true,
     },
@@ -6925,7 +6906,7 @@ local options = {
       defaults = true,
       full_name = 'remap',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -7322,7 +7303,7 @@ local options = {
       full_name = 'secure',
       scope = { 'global' },
       secure = true,
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       varname = 'p_secure',
     },
@@ -7660,13 +7641,22 @@ local options = {
         unescaping, so to keep yourself sane use |:let-&| like shown above.
         						*shell-powershell*
         To use PowerShell: >vim
-        	let &shell = executable('pwsh') ? 'pwsh' : 'powershell'
-        	let &shellcmdflag = '-NoLogo -NonInteractive -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';$PSStyle.OutputRendering=''plaintext'';Remove-Alias -Force -ErrorAction SilentlyContinue tee;'
-        	let &shellredir = '2>&1 | %%{ "$_" } | Out-File %s; exit $LastExitCode'
-        	let &shellpipe  = '2>&1 | %%{ "$_" } | tee %s; exit $LastExitCode'
-        	set shellquote= shellxquote=
-
-        <	This option cannot be set from a |modeline| or in the |sandbox|, for
+           set noshelltemp
+           let &shell = 'powershell'
+           let &shellcmdflag = '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command '
+           let &shellcmdflag .= '[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();'
+           let &shellcmdflag .= '$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';'
+           let &shellpipe  = '> %s 2>&1'
+           set shellquote= shellxquote=
+        <
+        						*shell-pwsh*
+        To use pwsh, use the above settings with `let &shell = 'pwsh'`, and
+        add: >vim
+           let &shellcmdflag .= '$PSStyle.OutputRendering = ''PlainText'';'
+           " Workaround (may not be needed in future version of pwsh):
+           let $__SuppressAnsiEscapeSequences = 1
+        <
+        This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
       expand = true,
@@ -7994,7 +7984,8 @@ local options = {
         	"search hit TOP, continuing at BOTTOM" messages are only
         	indicated by a "W" (Mnemonic: Wrapped) letter before the
         	search count statistics.  The maximum limit can be set with
-        	the 'maxsearchcount' option.
+        	the 'maxsearchcount' option, see also |searchcount()|
+        	function.
 
         This gives you the opportunity to avoid that a change between buffers
         requires you to hit <Enter>, but still gives as useful a message as
@@ -8765,7 +8756,7 @@ local options = {
           "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
           "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
           "%{% &busy > 0 ? '◐ ' : '' %}",
-          "%{% luaeval('(package.loaded[''vim.diagnostic''] and vim.diagnostic.status() .. '' '') or '''' ') %}",
+          "%{% luaeval('(package.loaded[''vim.diagnostic''] and #vim.diagnostic.count() ~= 0 and vim.diagnostic.status() .. '' '') or '''' ') %}",
           "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
         }),
         doc = 'is very long',
@@ -9529,7 +9520,7 @@ local options = {
       defaults = false,
       full_name = 'terse',
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },
@@ -9780,7 +9771,7 @@ local options = {
       full_name = 'ttyfast',
       no_mkrc = true,
       scope = { 'global' },
-      short_desc = N_('No description'),
+      short_desc = N_('Deprecated'),
       type = 'boolean',
       immutable = true,
     },

@@ -1279,7 +1279,7 @@ static void do_filter(linenr_T line1, linenr_T line2, exarg_T *eap, char *cmd, b
   curwin->w_cursor.lnum = line1;
   curwin->w_cursor.col = 0;
   changed_line_abv_curs();
-  invalidate_botline(curwin);
+  invalidate_botline_win(curwin);
 
   // When using temp files:
   // 1. * Form temp file names
@@ -4182,7 +4182,8 @@ static int do_sub(exarg_T *eap, const proftime_T timeout, const int cmdpreview_n
           if (nmatch == 1) {
             p1 = sub_firstline;
           } else {
-            p1 = ml_get(sub_firstlnum + (linenr_T)nmatch - 1);
+            linenr_T lastlnum = sub_firstlnum + (linenr_T)nmatch - 1;
+            p1 = ml_get(lastlnum);
             nmatch_tl += nmatch - 1;
           }
           int copy_len = regmatch.startpos[0].col - copycol;

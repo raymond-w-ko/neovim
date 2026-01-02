@@ -5841,6 +5841,11 @@ describe('LSP', function()
                 dynamicRegistration = true,
               },
             },
+            workspace = {
+              didChangeWatchedFiles = {
+                dynamicRegistration = true,
+              },
+            },
           },
         }))
 
@@ -5902,15 +5907,162 @@ describe('LSP', function()
         check('textDocument/rangeFormatting', tmpfile)
         check('textDocument/completion')
 
+        check('workspace/didChangeWatchedFiles')
+        check('workspace/didChangeWatchedFiles', tmpfile)
+
+        vim.lsp.handlers['client/registerCapability'](nil, {
+          registrations = {
+            {
+              id = 'didChangeWatched',
+              method = 'workspace/didChangeWatchedFiles',
+              registerOptions = {
+                watchers = {
+                  {
+                    globPattern = 'something',
+                    kind = 4,
+                  },
+                },
+              },
+            },
+          },
+        }, { client_id = client_id })
+
+        check('workspace/didChangeWatchedFiles')
+        check('workspace/didChangeWatchedFiles', tmpfile)
+
+        -- Initial support false
+        check('workspace/diagnostic')
+
+        vim.lsp.handlers['client/registerCapability'](nil, {
+          registrations = {
+            {
+              id = 'diag1',
+              method = 'textDocument/diagnostic',
+              registerOptions = {
+                -- workspaceDiagnostics field omitted
+              },
+            },
+          },
+        }, { client_id = client_id })
+
+        -- Checks after registering without worspaceDiagnostics support
+        -- Returns false
+        check('workspace/diagnostic')
+
+        vim.lsp.handlers['client/registerCapability'](nil, {
+          registrations = {
+            {
+              id = 'diag2',
+              method = 'textDocument/diagnostic',
+              registerOptions = {
+                workspaceDiagnostics = true,
+              },
+            },
+          },
+        }, { client_id = client_id })
+
+        -- Check after second registration with support
+        -- Returns true
+        check('workspace/diagnostic')
+
+        vim.lsp.handlers['client/unregisterCapability'](nil, {
+          unregisterations = {
+            { id = 'diag2', method = 'textDocument/diagnostic' },
+          },
+        }, { client_id = client_id })
+
+        -- Check after unregistering
+        -- Returns false
+        check('workspace/diagnostic')
+
+        check('textDocument/codeAction')
+        check('codeAction/resolve')
+
+        vim.lsp.handlers['client/registerCapability'](nil, {
+          registrations = {
+            {
+              id = 'codeAction',
+              method = 'textDocument/codeAction',
+              registerOptions = {
+                resolveProvider = true,
+              },
+            },
+          },
+        }, { client_id = client_id })
+
+        check('textDocument/codeAction')
+        check('codeAction/resolve')
+
         return result
       end)
 
-      eq(5, #result)
+      eq(17, #result)
       eq({ method = 'textDocument/formatting', supported = false }, result[1])
       eq({ method = 'textDocument/formatting', supported = true, fname = tmpfile }, result[2])
       eq({ method = 'textDocument/rangeFormatting', supported = true }, result[3])
       eq({ method = 'textDocument/rangeFormatting', supported = true, fname = tmpfile }, result[4])
       eq({ method = 'textDocument/completion', supported = false }, result[5])
+      eq({ method = 'workspace/didChangeWatchedFiles', supported = false }, result[6])
+      eq(
+        { method = 'workspace/didChangeWatchedFiles', supported = false, fname = tmpfile },
+        result[7]
+      )
+      eq({ method = 'workspace/didChangeWatchedFiles', supported = true }, result[8])
+      eq(
+        { method = 'workspace/didChangeWatchedFiles', supported = true, fname = tmpfile },
+        result[9]
+      )
+      eq({ method = 'workspace/diagnostic', supported = false }, result[10])
+      eq({ method = 'workspace/diagnostic', supported = false }, result[11])
+      eq({ method = 'workspace/diagnostic', supported = true }, result[12])
+      eq({ method = 'workspace/diagnostic', supported = false }, result[13])
+      eq({ method = 'textDocument/codeAction', supported = false }, result[14])
+      eq({ method = 'codeAction/resolve', supported = false }, result[15])
+      eq({ method = 'textDocument/codeAction', supported = true }, result[16])
+      eq({ method = 'codeAction/resolve', supported = true }, result[17])
+    end)
+
+    it('identifies client dynamic registration capability', function()
+      exec_lua(create_server_definition)
+      local result = exec_lua(function()
+        local server = _G._create_server()
+        local client_id = assert(vim.lsp.start({
+          name = 'dynamic-test',
+          cmd = server.cmd,
+          capabilities = {
+            textDocument = {
+              formatting = {
+                dynamicRegistration = true,
+              },
+              synchronization = {
+                dynamicRegistration = true,
+              },
+            },
+          },
+        }))
+
+        local result = {}
+        local function check(method)
+          local client = assert(vim.lsp.get_client_by_id(client_id))
+          result[#result + 1] = {
+            method = method,
+            supports_reg = client:_supports_registration(method),
+          }
+        end
+
+        check('textDocument/formatting')
+        check('textDocument/didSave')
+        check('textDocument/didOpen')
+        check('textDocument/codeLens')
+
+        return result
+      end)
+
+      eq(4, #result)
+      eq({ method = 'textDocument/formatting', supports_reg = true }, result[1])
+      eq({ method = 'textDocument/didSave', supports_reg = true }, result[2])
+      eq({ method = 'textDocument/didOpen', supports_reg = true }, result[3])
+      eq({ method = 'textDocument/codeLens', supports_reg = false }, result[4])
     end)
 
     it('supports static registration', function()
@@ -5930,7 +6082,7 @@ describe('LSP', function()
         true,
         exec_lua(function()
           local client = assert(vim.lsp.get_client_by_id(client_id))
-          return client.dynamic_capabilities:get('textDocument/documentColor') ~= nil
+          return client.dynamic_capabilities:get('colorProvider') ~= nil
         end)
       )
     end)

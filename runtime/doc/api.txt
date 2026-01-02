@@ -204,18 +204,17 @@ About the `functions` map:
 External programs (clients) can use the metadata to discover the API, using
 any of these approaches:
 
-  1. Connect to a running Nvim instance and call |nvim_get_api_info()| via
-     msgpack-RPC. This is best for clients written in dynamic languages which
-     can define functions at runtime.
-
-  2. Start Nvim with |--api-info|. Useful for statically-compiled clients.
-     Example (requires Python "pyyaml" and "msgpack-python" modules): >
+1. Connect to a running Nvim instance and call |nvim_get_api_info()| via
+   msgpack-RPC. This is best for clients written in dynamic languages which
+   can define functions at runtime.
+2. Use the |--api-info| startup arg. Useful for statically-compiled clients.
+   Example (requires Python "pyyaml" and "msgpack-python" modules): >
      nvim --api-info | python -c 'import msgpack, sys, yaml; yaml.dump(msgpack.unpackb(sys.stdin.buffer.read()), sys.stdout)'
-<
-  3. Use the |api_info()| Vimscript function. >vim
+3. Use the |api_info()| function. >vim
      :lua vim.print(vim.fn.api_info())
-<     Example using |filter()| to exclude non-deprecated API functions: >vim
+     " Example using filter() to exclude non-deprecated API functions:
      :new|put =map(filter(api_info().functions, '!has_key(v:val,''deprecated_since'')'), 'v:val.name')
+<
 
 ==============================================================================
 API contract                                                     *api-contract*
@@ -282,9 +281,9 @@ nvim_buf_lines_event[{buf}, {changedtick}, {firstline}, {lastline}, {linedata}, 
         part of your request to ensure that no other changes have been made.
 
         {firstline} integer line number of the first line that was replaced.
-        Zero-indexed: if line 1 was replaced then {firstline} will be 0, not
-        1. {firstline} is always less than or equal to the number of lines
-        that were in the buffer before the lines were replaced.
+        Zero-indexed: if line 1 was replaced then {firstline} will be zero,
+        not one. {firstline} is always less than or equal to the number of
+        lines that were in the buffer before the lines were replaced.
 
         {lastline} integer line number of the first line that was not replaced
         (i.e. the range {firstline}, {lastline} is end-exclusive).
@@ -745,22 +744,33 @@ nvim_eval_statusline({str}, {opts})                   *nvim_eval_statusline()*
             priority last).
 
 nvim_exec_lua({code}, {args})                                *nvim_exec_lua()*
-    Execute Lua code. Parameters (if any) are available as `...` inside the
-    chunk. The chunk can return a value.
+    Executes Lua code. Arguments are available as `...` inside the chunk. The
+    chunk can return a value.
 
     Only statements are executed. To evaluate an expression, prefix it with
-    `return`: return my_function(...)
+    "return": `return my_function(...)`
+
+    Example: >lua
+        local peer = vim.fn.jobstart({ vim.v.progpath, '--clean', '--embed' }, { rpc=true })
+        vim.print(vim.rpcrequest(peer, 'nvim_exec_lua', [[
+              local a, b = ...
+              return ('result: %s'):format(a + b)
+            ]],
+            { 1, 3 }
+          )
+        )
+<
 
     Attributes: ~
         |RPC| only
         Since: 0.5.0
 
     Parameters: ~
-      • {code}  (`string`) Lua code to execute
-      • {args}  (`any[]`) Arguments to the code
+      • {code}  (`string`) Lua code to execute.
+      • {args}  (`any[]`) Arguments to the Lua code.
 
     Return: ~
-        (`any`) Return value of Lua code if present or NIL.
+        (`any`) Value returned by the Lua code (if any), or NIL.
 
 nvim_feedkeys({keys}, {mode}, {escape_ks})                   *nvim_feedkeys()*
     Sends input-keys to Nvim, subject to various quirks controlled by `mode`
@@ -1674,6 +1684,30 @@ nvim__complete_set({index}, {opts})                     *nvim__complete_set()*
         • winid: (number) floating window id
         • bufnr: (number) buffer id in floating window
 
+nvim__exec_lua_fast({code}, {args})                    *nvim__exec_lua_fast()*
+    WARNING: This feature is experimental/unstable.
+
+    EXPERIMENTAL: this API may change or be removed in the future.
+
+    Like |nvim_exec_lua()|, but can be called during |api-fast| contexts.
+
+    Execute Lua code. Parameters (if any) are available as `...` inside the
+    chunk. The chunk can return a value.
+
+    Only statements are executed. To evaluate an expression, prefix it with
+    `return`: return my_function(...)
+
+    Attributes: ~
+        |api-fast|
+        |RPC| only
+
+    Parameters: ~
+      • {code}  (`string`) Lua code to execute
+      • {args}  (`any[]`) Arguments to the code
+
+    Return: ~
+        (`any`) Return value of Lua code if present or NIL.
+
 nvim__get_runtime({pat}, {all}, {opts})                  *nvim__get_runtime()*
     Find files in runtime directories
 
@@ -1921,7 +1955,7 @@ nvim_parse_expression({expr}, {flags}, {highlight})
           • "error": Dict with error, present only if parser saw some error.
             Contains the following keys:
             • "message": String, error message in printf format, translated.
-              Must contain exactly one "%.*s".
+              Must contain exactly one `%.*s`.
             • "arg": String, error message argument.
           • "len": Amount of bytes successfully parsed. With flags equal to ""
             that should be equal to the length of expr string. ("Successfully
@@ -3744,8 +3778,8 @@ nvim_open_win({buffer}, {enter}, {config})                   *nvim_open_win()*
     current window. If -1 is provided, a top-level split will be created.
     `vertical` and `split` are only valid for normal windows, and are used to
     control split direction. For `vertical`, the exact direction is determined
-    by 'splitright' and 'splitbelow'. Split windows cannot have
-    `bufpos`/`row`/`col`/`border`/`title`/`footer` properties.
+    by 'splitright' and 'splitbelow'. Split windows cannot have `bufpos`,
+    `row`, `col`, `border`, `title`, `footer` properties.
 
     With relative=editor (row=0,col=0) refers to the top-left corner of the
     screen-grid and (row=Lines-1,col=Columns-1) refers to the bottom-right
@@ -3758,17 +3792,17 @@ nvim_open_win({buffer}, {enter}, {config})                   *nvim_open_win()*
     could let floats hover outside of the main window like a tooltip, but this
     should not be used to specify arbitrary WM screen positions.
 
-    Example: window-relative float >lua
-        vim.api.nvim_open_win(0, false,
-          {relative='win', row=3, col=3, width=12, height=3})
-<
+    Examples: >lua
+        -- Window-relative float with 'statusline' enabled:
+        local w1 = vim.api.nvim_open_win(0, false,
+          {relative='win', row=3, col=3, width=40, height=4})
+        vim.wo[w1].statusline = vim.o.statusline
 
-    Example: buffer-relative float (travels as buffer is scrolled) >lua
+        -- Buffer-relative float (travels as buffer is scrolled):
         vim.api.nvim_open_win(0, false,
-          {relative='win', width=12, height=3, bufpos={100,10}})
-<
+          {relative='win', width=40, height=4, bufpos={100,10}})
 
-    Example: vertical split left of the current window >lua
+        -- Vertical split left of the current window:
         vim.api.nvim_open_win(0, false, { split = 'left', win = 0, })
 <
 

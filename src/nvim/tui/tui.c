@@ -41,6 +41,7 @@
 #include "nvim/ugrid.h"
 #include "nvim/ui_client.h"
 #include "nvim/ui_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef MSWIN
 # include "nvim/os/os_win_console.h"
@@ -220,7 +221,10 @@ void tui_handle_term_mode(TUIData *tui, TermMode mode, TermModeState state)
   case kTermModePermanentlyReset:
     // TODO(bfredl): This is really ILOG but we want it in all builds.
     // add to show_verbose_terminfo() without being too racy ????
-    WLOG("TUI: terminal mode %d unavailable, state %d", mode, state);
+    if (!nvim_testing) {
+      // Very noisy in CI, don't log during tests. #33599
+      WLOG("TUI: terminal mode %d unavailable, state %d", mode, state);
+    }
     // If the mode is not recognized, or if the terminal emulator does not allow it to be changed,
     // then there is nothing to do
     break;
@@ -230,7 +234,10 @@ void tui_handle_term_mode(TUIData *tui, TermMode mode, TermModeState state)
     FALLTHROUGH;
   case kTermModeReset:
     // The terminal supports changing the given mode
-    WLOG("TUI: terminal mode %d detected, state %d", mode, state);
+    if (!nvim_testing) {
+      // Very noisy in CI, don't log during tests. #33599
+      WLOG("TUI: terminal mode %d detected, state %d", mode, state);
+    }
     switch (mode) {
     case kTermModeSynchronizedOutput:
       // Ref: https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036
@@ -330,11 +337,9 @@ static void tui_reset_key_encoding(TUIData *tui)
   }
 }
 
-/// Write the OSC 11 sequence to the terminal emulator to query the current
-/// background color.
+/// Write the OSC 11 sequence to the terminal emulator to query the current background color.
 ///
-/// The response will be handled by the TermResponse autocommand created in
-/// _defaults.lua.
+/// Response will be handled by the TermResponse handler in _core/defaults.lua.
 void tui_query_bg_color(TUIData *tui)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -1977,7 +1982,7 @@ static void terminfo_set_str(TUIData *tui, TerminfoDef str, const char *val)
 /// Determine if the terminal supports truecolor or not.
 ///
 /// note: We get another chance at detecting these in the nvim server process, see
-/// the use of vim.termcap in runtime/lua/vim/_defaults.lua
+/// the use of vim.termcap in runtime/lua/vim/_core/defaults.lua
 ///
 /// If terminfo contains Tc, RGB, or both setrgbf and setrgbb capabilities, return true.
 static bool term_has_truecolor(TUIData *tui, const char *colorterm)

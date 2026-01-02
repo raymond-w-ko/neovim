@@ -25,6 +25,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/move.h"
+#include "nvim/normal.h"
 #include "nvim/option_vars.h"
 #include "nvim/os/fs.h"
 #include "nvim/pos_defs.h"
@@ -327,12 +328,13 @@ static dict_T *get_win_info(win_T *wp, int16_t tpnr, int16_t winnr)
   dict_T *const dict = tv_dict_alloc();
 
   // make sure w_botline is valid
-  validate_botline(wp);
+  validate_botline_win(wp);
 
   tv_dict_add_nr(dict, S_LEN("tabnr"), tpnr);
   tv_dict_add_nr(dict, S_LEN("winnr"), winnr);
   tv_dict_add_nr(dict, S_LEN("winid"), wp->handle);
   tv_dict_add_nr(dict, S_LEN("height"), wp->w_view_height);
+  tv_dict_add_nr(dict, S_LEN("status_height"), wp->w_status_height);
   tv_dict_add_nr(dict, S_LEN("winrow"), wp->w_winrow + 1);
   tv_dict_add_nr(dict, S_LEN("topline"), wp->w_topline);
   tv_dict_add_nr(dict, S_LEN("botline"), wp->w_botline - 1);
@@ -607,6 +609,10 @@ void f_win_gotoid(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
   FOR_ALL_TAB_WINDOWS(tp, wp) {
     if (wp->handle == id) {
+      // When jumping to another buffer stop Visual mode.
+      if (VIsual_active && wp->w_buffer != curbuf) {
+        end_visual_mode();
+      }
       goto_tabpage_win(tp, wp);
       rettv->vval.v_number = 1;
       return;

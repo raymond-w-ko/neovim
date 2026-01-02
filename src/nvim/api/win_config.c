@@ -57,8 +57,7 @@
 /// If -1 is provided, a top-level split will be created. `vertical` and `split` are
 /// only valid for normal windows, and are used to control split direction. For `vertical`,
 /// the exact direction is determined by 'splitright' and 'splitbelow'.
-/// Split windows cannot have `bufpos`/`row`/`col`/`border`/`title`/`footer`
-/// properties.
+/// Split windows cannot have `bufpos`, `row`, `col`, `border`, `title`, `footer` properties.
 ///
 /// With relative=editor (row=0,col=0) refers to the top-left corner of the
 /// screen-grid and (row=Lines-1,col=Columns-1) refers to the bottom-right
@@ -71,23 +70,19 @@
 /// could let floats hover outside of the main window like a tooltip, but
 /// this should not be used to specify arbitrary WM screen positions.
 ///
-/// Example: window-relative float
+/// Examples:
 ///
 /// ```lua
+/// -- Window-relative float with 'statusline' enabled:
+/// local w1 = vim.api.nvim_open_win(0, false,
+///   {relative='win', row=3, col=3, width=40, height=4})
+/// vim.wo[w1].statusline = vim.o.statusline
+///
+/// -- Buffer-relative float (travels as buffer is scrolled):
 /// vim.api.nvim_open_win(0, false,
-///   {relative='win', row=3, col=3, width=12, height=3})
-/// ```
+///   {relative='win', width=40, height=4, bufpos={100,10}})
 ///
-/// Example: buffer-relative float (travels as buffer is scrolled)
-///
-/// ```lua
-/// vim.api.nvim_open_win(0, false,
-///   {relative='win', width=12, height=3, bufpos={100,10}})
-/// ```
-///
-/// Example: vertical split left of the current window
-///
-/// ```lua
+/// -- Vertical split left of the current window:
 /// vim.api.nvim_open_win(0, false, { split = 'left', win = 0, })
 /// ```
 ///
@@ -285,8 +280,12 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(win_config) *config, Err
       }
     }
   } else {
-    if (!check_split_disallowed_err(curwin, err)) {
-      goto cleanup;  // error already set
+    // Unlike check_split_disallowed_err, ignore `split_disallowed`, as opening a float shouldn't
+    // mess with the frame structure. Still check `b_locked_split` to avoid opening more windows
+    // into a closing buffer, though.
+    if (curwin->w_buffer->b_locked_split) {  // Can't instead check `buf` in case win_set_buf fails!
+      api_set_error(err, kErrorTypeException, "E1159: Cannot open a float when closing the buffer");
+      goto cleanup;
     }
     wp = win_new_float(NULL, false, fconfig, err);
   }
@@ -338,6 +337,7 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(win_config) *config, Err
     }
   }
   if (!tp) {
+    api_clear_error(err);  // may have been set by win_set_buf
     api_set_error(err, kErrorTypeException, "Window was closed immediately");
     goto cleanup;
   }

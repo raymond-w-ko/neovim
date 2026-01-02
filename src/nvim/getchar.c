@@ -425,7 +425,7 @@ bool stuff_empty(void)
 }
 
 /// @return  true if readbuf1 is empty.  There may still be redo characters in
-///          redbuf2.
+///          readbuf2.
 bool readbuf1_empty(void)
   FUNC_ATTR_PURE
 {
@@ -3015,7 +3015,7 @@ static int vgetorpeek(bool advance)
 ///  Return -1 when end of input script reached.
 ///
 /// @param wait_time  milliseconds
-int inchar(uint8_t *buf, int maxlen, long wait_time)
+static int inchar(uint8_t *buf, int maxlen, long wait_time)
 {
   int len = 0;  // Init for GCC.
   int retesc = false;  // Return ESC with gotint.
@@ -3192,7 +3192,7 @@ char *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
       emsg(_(e_cmd_mapping_must_end_with_cr_before_second_cmd));
       aborted = true;
     } else if (c1 == K_SNR) {
-      ga_concat(&line_ga, "<SNR>");
+      ga_concat_len(&line_ga, S_LEN("<SNR>"));
     } else {
       if (cmod != 0) {
         ga_append(&line_ga, K_SPECIAL);

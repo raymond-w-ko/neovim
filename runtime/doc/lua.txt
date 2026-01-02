@@ -236,7 +236,7 @@ Note:
 
                                                          *lua-script-location*
 To get its own location, Lua scripts/modules can use |debug.getinfo()|: >
-    debug.getinfo(1, 'S').source:sub(2)
+    debug.getinfo(1, 'S').source:gsub('^@', '')
 <
 
 ==============================================================================
@@ -703,11 +703,12 @@ vim.rpcnotify({channel}, {method}, {...})                    *vim.rpcnotify()*
       • {...}      (`any?`)
 
 vim.rpcrequest({channel}, {method}, {...})                  *vim.rpcrequest()*
-    Sends a request to {channel} to invoke {method} via |RPC| and blocks until
-    a response is received.
+    Invokes |RPC| `method` on `channel` and blocks until a response is
+    received.
 
-    Note: NIL values as part of the return value is represented as |vim.NIL|
-    special value
+    Note: Msgpack NIL values in the response are represented as |vim.NIL|.
+
+    Example: see |nvim_exec_lua()|
 
     Parameters: ~
       • {channel}  (`integer`)
@@ -862,8 +863,8 @@ vim.wait({time}, {callback}, {interval}, {fast_only})             *vim.wait()*
         -- Wait up to 1000 ms or until `vim.g.foo` is true, at intervals of ~500 ms.
         vim.wait(1000, function() return vim.g.foo end, 500)
 
-        -- Wait up to 100 ms or until `vim.g.foo` is true, and get the callback results.
-        local ok, rv1, rv2, rv3 = vim.wait(100, function()
+        -- Wait indefinitely until `vim.g.foo` is true, and get the callback results.
+        local ok, rv1, rv2, rv3 = vim.wait(math.huge, function()
           return vim.g.foo, 'a', 42, { ok = { 'yes' } }
         end)
 
@@ -876,7 +877,8 @@ vim.wait({time}, {callback}, {interval}, {fast_only})             *vim.wait()*
 <
 
     Parameters: ~
-      • {time}       (`integer`) Number of milliseconds to wait
+      • {time}       (`number`) Number of milliseconds to wait. Must be
+                     non-negative number, any fractional part is truncated.
       • {callback}   (`fun(): boolean, ...?`) Optional callback. Waits until
                      {callback} returns true
       • {interval}   (`integer?`) (Approximate) number of milliseconds to wait
@@ -2089,6 +2091,9 @@ vim.tbl_get({o}, {...})                                        *vim.tbl_get()*
 
     Return: ~
         (`any`) Nested value indexed by key (if it exists), else nil
+
+    See also: ~
+      • |unpack()|
 
 vim.tbl_isempty({t})                                       *vim.tbl_isempty()*
     Checks if a table is empty.
@@ -3435,7 +3440,7 @@ vim.keymap.del({modes}, {lhs}, {opts})                      *vim.keymap.del()*
     See also: ~
       • |vim.keymap.set()|
 
-vim.keymap.set({mode}, {lhs}, {rhs}, {opts})                *vim.keymap.set()*
+vim.keymap.set({modes}, {lhs}, {rhs}, {opts})               *vim.keymap.set()*
     Defines a |mapping| of |keycodes| to a function or keycodes.
 
     Examples: >lua
@@ -3464,20 +3469,20 @@ vim.keymap.set({mode}, {lhs}, {rhs}, {opts})                *vim.keymap.set()*
 <
 
     Parameters: ~
-      • {mode}  (`string|string[]`) Mode "short-name" (see
-                |nvim_set_keymap()|), or a list thereof.
-      • {lhs}   (`string`) Left-hand side |{lhs}| of the mapping.
-      • {rhs}   (`string|function`) Right-hand side |{rhs}| of the mapping,
-                can be a Lua function.
-      • {opts}  (`table?`) Table of |:map-arguments|. Same as
-                |nvim_set_keymap()| {opts}, except:
-                • {replace_keycodes} defaults to `true` if "expr" is `true`.
+      • {modes}  (`string|string[]`) Mode "short-name" (see
+                 |nvim_set_keymap()|), or a list thereof.
+      • {lhs}    (`string`) Left-hand side |{lhs}| of the mapping.
+      • {rhs}    (`string|function`) Right-hand side |{rhs}| of the mapping,
+                 can be a Lua function.
+      • {opts}   (`table?`) Table of |:map-arguments|. Same as
+                 |nvim_set_keymap()| {opts}, except:
+                 • {replace_keycodes} defaults to `true` if "expr" is `true`.
 
-                Also accepts:
-                • {buffer}? (`integer|boolean`) Creates buffer-local mapping,
-                  `0` or `true` for current buffer.
-                • {remap}? (`boolean`, default: `false`) Make the mapping
-                  recursive. Inverse of {noremap}.
+                 Also accepts:
+                 • {buffer}? (`integer|boolean`) Creates buffer-local mapping,
+                   `0` or `true` for current buffer.
+                 • {remap}? (`boolean`, default: `false`) Make the mapping
+                   recursive. Inverse of {noremap}.
 
     See also: ~
       • |nvim_set_keymap()|

@@ -479,6 +479,11 @@ static bool can_unload_buffer(buf_T *buf)
       }
     }
   }
+  // Don't unload the buffer while it's still being saved
+  if (can_unload && buf->b_saving) {
+    can_unload = false;
+  }
+
   if (!can_unload) {
     char *fname = buf->b_fname != NULL ? buf->b_fname : buf->b_ffname;
     semsg(_(e_attempt_to_delete_buffer_that_is_in_use_str),
@@ -686,10 +691,14 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
     return false;
   }
 
+  bool clear_w_buf = false;
   if (win != NULL  // Avoid bogus clang warning.
       && win_valid_any_tab(win)
       && win->w_buffer == buf) {
-    win->w_buffer = NULL;  // make sure we don't use the buffer now
+    // Defer clearing w_buffer until after operations that may invoke dict
+    // watchers (e.g., buf_clear_file()), so callers like tabpagebuflist()
+    // never see a window in the winlist with a NULL buffer.
+    clear_w_buf = true;
   }
 
   // Autocommands may have opened or closed windows for this buffer.
@@ -700,6 +709,9 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
 
   // Remove the buffer from the list.
   if (wipe_buf) {
+    if (clear_w_buf) {
+      win->w_buffer = NULL;
+    }
     // Do not wipe out the buffer if it is used in a window.
     if (buf->b_nwindows > 0) {
       return true;
@@ -737,6 +749,9 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
       buf->b_p_initialized = false;
     }
     buf_clear_file(buf);
+    if (clear_w_buf) {
+      win->w_buffer = NULL;
+    }
     if (del_buf) {
       buf->b_p_bl = false;
     }
@@ -1975,9 +1990,8 @@ buf_T *buflist_new(char *ffname_arg, char *sfname_arg, linenr_T lnum, int flags)
     pmap_put(int)(&buffer_handles, buf->b_fnum, buf);
     if (top_file_num < 0) {  // wrap around (may cause duplicates)
       emsg(_("W14: Warning: List of file names overflow"));
-      if (emsg_silent == 0 && !in_assert_fails && !ui_has(kUIMessages)) {
-        ui_flush();
-        os_delay(3001, true);  // make sure it is noticed
+      if (emsg_silent == 0 && !in_assert_fails) {
+        msg_delay(3001, true);  // make sure it is noticed
       }
       top_file_num = 1;
     }
@@ -2131,6 +2145,7 @@ void free_buf_options(buf_T *buf, bool free_p_ff)
   clear_string_option(&buf->b_p_qe);
   buf->b_p_ac = -1;
   buf->b_p_ar = -1;
+  buf->b_p_fs = -1;
   buf->b_p_ul = NO_LOCAL_UNDOLEVEL;
   clear_string_option(&buf->b_p_lw);
   clear_string_option(&buf->b_p_bkc);
@@ -2223,7 +2238,8 @@ int buflist_getfile(int n, linenr_T lnum, int options, int forceit)
 /// Go to the last known line number for the current buffer.
 static void buflist_getfpos(void)
 {
-  pos_T *fpos = &buflist_findfmark(curbuf)->mark;
+  fmark_T *fm = buflist_findfmark(curbuf);
+  const pos_T *fpos = &fm->mark;
 
   curwin->w_cursor.lnum = fpos->lnum;
   check_cursor_lnum(curwin);
@@ -2235,6 +2251,10 @@ static void buflist_getfpos(void)
     check_cursor_col(curwin);
     curwin->w_cursor.coladd = 0;
     curwin->w_set_curswant = true;
+  }
+
+  if (jop_flags & kOptJopFlagView) {
+    mark_view_restore(fm);
   }
 }
 
@@ -2816,7 +2836,7 @@ void get_winopts(buf_T *buf)
 fmark_T *buflist_findfmark(buf_T *buf)
   FUNC_ATTR_PURE
 {
-  static fmark_T no_position = { { 1, 0, 0 }, 0, 0, { 0 }, NULL };
+  static fmark_T no_position = { { 1, 0, 0 }, 0, 0, INIT_FMARKV, NULL };
 
   WinInfo *const wip = find_wininfo(buf, false, false);
   return (wip == NULL) ? &no_position : &(wip->wi_mark);
@@ -3768,6 +3788,7 @@ static int chk_modeline(linenr_T lnum, int flags)
 {
   char *e;
   int retval = OK;
+  ESTACK_CHECK_DECLARATION;
 
   int prev = -1;
   char *s = ml_get(lnum);
@@ -3790,14 +3811,15 @@ static int chk_modeline(linenr_T lnum, int flags)
           continue;
         }
 
+        const int vim_version = min_vim_version();
         if (*e == ':'
             && (s[0] != 'V'
                 || strncmp(skipwhite(e + 1), "set", 3) == 0)
             && (s[3] == ':'
-                || (VIM_VERSION_100 >= vers && isdigit((uint8_t)s[3]))
-                || (VIM_VERSION_100 < vers && s[3] == '<')
-                || (VIM_VERSION_100 > vers && s[3] == '>')
-                || (VIM_VERSION_100 == vers && s[3] == '='))) {
+                || (vim_version >= vers && isdigit((uint8_t)s[3]))
+                || (vim_version < vers && s[3] == '<')
+                || (vim_version > vers && s[3] == '>')
+                || (vim_version == vers && s[3] == '='))) {
           break;
         }
       }
@@ -3822,6 +3844,7 @@ static int chk_modeline(linenr_T lnum, int flags)
 
   // prepare for emsg()
   estack_push(ETYPE_MODELINE, "modelines", lnum);
+  ESTACK_CHECK_SETUP;
 
   bool end = false;
   while (end == false) {
@@ -3878,6 +3901,7 @@ static int chk_modeline(linenr_T lnum, int flags)
                                       // careful not to go off the end
   }
 
+  ESTACK_CHECK_NOW;
   estack_pop();
   xfree(linecopy);
 
@@ -4178,10 +4202,12 @@ void buf_set_changedtick(buf_T *const buf, const varnumber_T changedtick)
   buf->changedtick_di.di_tv.vval.v_number = changedtick;
 
   if (tv_dict_is_watched(buf->b_vars)) {
+    buf->b_locked++;
     tv_dict_watcher_notify(buf->b_vars,
                            (char *)buf->changedtick_di.di_key,
                            &buf->changedtick_di.di_tv,
                            &old_val);
+    buf->b_locked--;
   }
 }
 

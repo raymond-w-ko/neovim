@@ -92,7 +92,6 @@ Examples:
 1. In the Vim source code, clipboard logic accounts for more than 1k lines of
    C source code (ui.c), to perform two tasks that are now accomplished with
    shell commands such as xclip or pbcopy/pbpaste.
-
 2. Python scripting support: Vim has three files dedicated to embedding the
    Python interpreter: if_python.c, if_python3.c and if_py_both.h. Together
    these files sum about 9.5k lines of C source code. In contrast, Nvim Python
@@ -278,7 +277,7 @@ Docstring format:
 - Files declared as `@meta` are only used for typing and documentation (similar to "*.d.ts" typescript files).
 
 Example: the help for |vim.paste()| is generated from a docstring decorating
-vim.paste in runtime/lua/vim/_editor.lua like this: >
+vim.paste in runtime/lua/vim/_core/editor.lua like this: >
 
     --- Paste handler, invoked by |nvim_paste()| when a conforming UI
     --- (such as the |TUI|) pastes text into the editor.
@@ -340,7 +339,7 @@ preference):
 4. `on_error` callback
   - For async and "visitors" traversing a graph, where many errors may be
     collected while work continues.
-5. `vim.notify` (sometimes with optional `opts.silent` (async, visitors ^))
+5. `vim.notify` (sometimes with optional `opts.silent` (async, visitors))
   - High-level / application-level messages. End-user invokes these directly.
 
                                                         *dev-patterns*

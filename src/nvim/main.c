@@ -154,8 +154,10 @@ static const char *err_extra_cmd =
 void event_init(void)
 {
   loop_init(&main_loop, NULL);
+  env_init();
   resize_events = multiqueue_new_child(main_loop.events);
 
+  autocmd_init();
   signal_init();
   // mspgack-rpc initialization
   channel_init();
@@ -927,7 +929,7 @@ static uint64_t server_connect(char *server_addr, const char **errmsg)
   const char *error = NULL;
   bool is_tcp = strrchr(server_addr, ':') ? true : false;
   // connected to channel
-  uint64_t chan = channel_connect(is_tcp, server_addr, true, on_data, 50, &error);
+  uint64_t chan = channel_connect(is_tcp, server_addr, true, on_data, 500, &error);
   if (error) {
     *errmsg = error;
     return 0;
@@ -1916,6 +1918,7 @@ static void exe_pre_commands(mparm_T *parmp)
 {
   char **cmds = parmp->pre_commands;
   int cnt = parmp->n_pre_commands;
+  ESTACK_CHECK_DECLARATION;
 
   if (cnt <= 0) {
     return;
@@ -1923,10 +1926,12 @@ static void exe_pre_commands(mparm_T *parmp)
 
   curwin->w_cursor.lnum = 0;     // just in case..
   estack_push(ETYPE_ARGS, _("pre-vimrc command line"), 0);
+  ESTACK_CHECK_SETUP;
   current_sctx.sc_sid = SID_CMDARG;
   for (int i = 0; i < cnt; i++) {
     do_cmdline_cmd(cmds[i]);
   }
+  ESTACK_CHECK_NOW;
   estack_pop();
   current_sctx.sc_sid = 0;
   TIME_MSG("--cmd commands");
@@ -1935,6 +1940,8 @@ static void exe_pre_commands(mparm_T *parmp)
 // Execute "+", "-c" and "-S" arguments.
 static void exe_commands(mparm_T *parmp)
 {
+  ESTACK_CHECK_DECLARATION;
+
   // We start commands on line 0, make "vim +/pat file" match a
   // pattern on line 1.  But don't move the cursor when an autocommand
   // with g`" was used.
@@ -1943,6 +1950,7 @@ static void exe_commands(mparm_T *parmp)
     curwin->w_cursor.lnum = 0;
   }
   estack_push(ETYPE_ARGS, "command line", 0);
+  ESTACK_CHECK_SETUP;
   current_sctx.sc_sid = SID_CARG;
   current_sctx.sc_seq = 0;
   for (int i = 0; i < parmp->n_commands; i++) {
@@ -1951,6 +1959,7 @@ static void exe_commands(mparm_T *parmp)
       xfree(parmp->commands[i]);
     }
   }
+  ESTACK_CHECK_NOW;
   estack_pop();
   current_sctx.sc_sid = 0;
   if (curwin->w_cursor.lnum == 0) {
@@ -2100,38 +2109,18 @@ static bool do_user_initialization(void)
 }
 
 // Read initialization commands from ".nvim.lua", ".nvimrc", or ".exrc" in
-// current directory.  This is only done if the 'exrc' option is set.
-// Only do this if VIMRC_FILE is not the same as vimrc file sourced in
-// do_user_initialization.
+// current directory and all parent directories.  This is only done if the 'exrc'
+// option is set. Only do this if VIMRC_FILE is not the same as vimrc file
+// sourced in do_user_initialization.
 static void do_exrc_initialization(void)
 {
-  char *str;
+  lua_State *const L = get_global_lstate();
+  assert(L);
 
-  if (os_path_exists(VIMRC_LUA_FILE)) {
-    str = nlua_read_secure(VIMRC_LUA_FILE);
-    if (str != NULL) {
-      Error err = ERROR_INIT;
-      nlua_exec(cstr_as_string(str), "@"VIMRC_LUA_FILE, (Array)ARRAY_DICT_INIT, kRetNilBool, NULL,
-                &err);
-      xfree(str);
-      if (ERROR_SET(&err)) {
-        semsg("Error in %s:", VIMRC_LUA_FILE);
-        semsg_multiline("emsg", err.msg);
-        api_clear_error(&err);
-      }
-    }
-  } else if (os_path_exists(VIMRC_FILE)) {
-    str = nlua_read_secure(VIMRC_FILE);
-    if (str != NULL) {
-      do_source_str(str, VIMRC_FILE);
-      xfree(str);
-    }
-  } else if (os_path_exists(EXRC_FILE)) {
-    str = nlua_read_secure(EXRC_FILE);
-    if (str != NULL) {
-      do_source_str(str, EXRC_FILE);
-      xfree(str);
-    }
+  lua_getglobal(L, "require");
+  lua_pushstring(L, "vim._core.exrc");
+  if (nlua_pcall(L, 1, 0)) {
+    fprintf(stderr, "%s\n", lua_tostring(L, -1));
   }
 }
 
@@ -2167,18 +2156,21 @@ static void source_startup_scripts(const mparm_T *const parmp)
 static int execute_env(char *env)
   FUNC_ATTR_NONNULL_ALL
 {
+  ESTACK_CHECK_DECLARATION;
   char *initstr = os_getenv(env);
   if (initstr == NULL) {
     return FAIL;
   }
 
   estack_push(ETYPE_ENV, env, 0);
+  ESTACK_CHECK_SETUP;
   const sctx_T save_current_sctx = current_sctx;
   current_sctx.sc_sid = SID_ENV;
   current_sctx.sc_seq = 0;
   current_sctx.sc_lnum = 0;
   do_cmdline_cmd(initstr);
 
+  ESTACK_CHECK_NOW;
   estack_pop();
   current_sctx = save_current_sctx;
 

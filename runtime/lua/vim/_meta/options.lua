@@ -1874,9 +1874,10 @@ vim.go.dex = vim.go.diffexpr
 --- 	internal	Use the internal diff library.  This is
 --- 			ignored when 'diffexpr' is set.  *E960*
 --- 			When running out of memory when writing a
---- 			buffer this item will be ignored for diffs
---- 			involving that buffer.  Set the 'verbose'
---- 			option to see when this happens.
+--- 			buffer or the diff is larger than 1 GB this
+--- 			item will be ignored for diffs involving that
+--- 			buffer.  Set the 'verbose' option to see when
+--- 			this happens.
 ---
 --- 	iwhite		Ignore changes in amount of white space.  Adds
 --- 			the "-b" flag to the "diff" command if
@@ -2213,6 +2214,7 @@ vim.go.ei = vim.go.eventignore
 --- 	`LspProgress`,
 --- 	`LspRequest`,
 --- 	`LspTokenUpdate`,
+--- 	`MarkSet`,
 --- 	`MenuPopup`,
 --- 	`ModeChanged`,
 --- 	`OptionSet`,
@@ -3000,34 +3002,18 @@ vim.go.fp = vim.go.formatprg
 --- - system signals low battery life
 --- - Nvim exits abnormally
 ---
+--- This is a `global-local` option, so it can be set per buffer, for
+--- example when writing to a slow filesystem.
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
 --- security reasons.
 ---
 --- @type boolean
 vim.o.fsync = true
 vim.o.fs = vim.o.fsync
+vim.bo.fsync = vim.o.fsync
+vim.bo.fs = vim.bo.fsync
 vim.go.fsync = vim.o.fsync
 vim.go.fs = vim.go.fsync
-
---- When on, the ":substitute" flag 'g' is default on.  This means that
---- all matches in a line are substituted instead of one.  When a 'g' flag
---- is given to a ":substitute" command, this will toggle the substitution
---- of all or one match.  See `complex-change`.
----
---- 	command		'gdefault' on	'gdefault' off	~
---- 	:s///		  subst. all	  subst. one
---- 	:s///g		  subst. one	  subst. all
---- 	:s///gg		  subst. all	  subst. one
----
---- NOTE: Setting this option may break plugins that rely on the default
---- behavior of the 'g' flag.  This will also make the 'g' flag have the
---- opposite effect of that documented in `:s_g`.
----
---- @type boolean
-vim.o.gdefault = false
-vim.o.gd = vim.o.gdefault
-vim.go.gdefault = vim.o.gdefault
-vim.go.gd = vim.go.gdefault
 
 --- Format to recognize for the ":grep" command output.
 --- This is a scanf-like string that uses the same format as the
@@ -3793,8 +3779,9 @@ vim.go.js = vim.go.joinspaces
 --- 		jumping to a location.  `jumplist-stack`
 ---
 ---   view          When moving through the jumplist, `changelist`,
---- 		`alternate-file` or using `mark-motions` try to
---- 		restore the `mark-view` in which the action occurred.
+--- 		`alternate-file`, using `mark-motions` or when popping
+--- 		the `tagstack` try to restore the `mark-view` in which
+--- 		the action occurred.
 ---
 ---   clean         Remove unloaded buffers from the jumplist.
 --- 		EXPERIMENTAL: this flag may change in the future.
@@ -4245,18 +4232,6 @@ vim.o.lpl = vim.o.loadplugins
 vim.go.loadplugins = vim.o.loadplugins
 vim.go.lpl = vim.go.loadplugins
 
---- Changes the special characters that can be used in search patterns.
---- See `pattern`.
---- WARNING: Switching this option off most likely breaks plugins!  That
---- is because many patterns assume it's on and will fail when it's off.
---- Only switch it off when working with old Vi scripts.  In any other
---- situation write patterns that work when 'magic' is on.  Include "\M"
---- when you want to `/\M`.
----
---- @type boolean
-vim.o.magic = true
-vim.go.magic = vim.o.magic
-
 --- Name of the errorfile for the `:make` command (see `:make_makeprg`)
 --- and the `:grep` command.
 --- When it is empty, an internally generated temp file will be used.
@@ -4398,7 +4373,7 @@ vim.go.mmd = vim.go.maxmapdepth
 --- behaves like CTRL-C was typed.
 --- Running into the limit often means that the pattern is very
 --- inefficient or too complex.  This may already happen with the pattern
---- "\(.\)*" on a very long line.  ".*" works much better.
+--- `\(.\)*` on a very long line.  `.*` works much better.
 --- Might also happen on redraw, when syntax rules try to match a complex
 --- text structure.
 --- Vim may run out of memory before hitting the 'maxmempattern' limit, in
@@ -4414,7 +4389,8 @@ vim.go.mmp = vim.go.maxmempattern
 --- When the number of matches exceeds this value, Vim shows ">" instead
 --- of the exact count to keep searching fast.
 --- Note: larger values may impact performance.
---- The value must be between 1 and 9999.
+--- The value must be between 1 and 9999.  See also the `searchcount()`
+--- function.
 ---
 --- @type integer
 vim.o.maxsearchcount = 999
@@ -5838,12 +5814,25 @@ vim.go.sdf = vim.go.shadafile
 --- To use PowerShell:
 ---
 --- ```vim
---- 	let &shell = executable('pwsh') ? 'pwsh' : 'powershell'
---- 	let &shellcmdflag = '-NoLogo -NonInteractive -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';$PSStyle.OutputRendering=''plaintext'';Remove-Alias -Force -ErrorAction SilentlyContinue tee;'
---- 	let &shellredir = '2>&1 | %%{ "$_" } | Out-File %s; exit $LastExitCode'
---- 	let &shellpipe  = '2>&1 | %%{ "$_" } | tee %s; exit $LastExitCode'
---- 	set shellquote= shellxquote=
+---    set noshelltemp
+---    let &shell = 'powershell'
+---    let &shellcmdflag = '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command '
+---    let &shellcmdflag .= '[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();'
+---    let &shellcmdflag .= '$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';'
+---    let &shellpipe  = '> %s 2>&1'
+---    set shellquote= shellxquote=
 --- ```
+---
+--- 						*shell-pwsh*
+--- To use pwsh, use the above settings with `let &shell = 'pwsh'`, and
+--- add:
+---
+--- ```vim
+---    let &shellcmdflag .= '$PSStyle.OutputRendering = ''PlainText'';'
+---    " Workaround (may not be needed in future version of pwsh):
+---    let $__SuppressAnsiEscapeSequences = 1
+--- ```
+---
 --- This option cannot be set from a `modeline` or in the `sandbox`, for
 --- security reasons.
 ---
@@ -6089,7 +6078,8 @@ vim.bo.sw = vim.bo.shiftwidth
 --- 	"search hit TOP, continuing at BOTTOM" messages are only
 --- 	indicated by a "W" (Mnemonic: Wrapped) letter before the
 --- 	search count statistics.  The maximum limit can be set with
---- 	the 'maxsearchcount' option.
+--- 	the 'maxsearchcount' option, see also `searchcount()`
+--- 	function.
 ---
 --- This gives you the opportunity to avoid that a change between buffers
 --- requires you to hit <Enter>, but still gives as useful a message as
@@ -6944,7 +6934,7 @@ vim.wo.stc = vim.wo.statuscolumn
 ---
 ---
 --- @type string
-vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &busy > 0 ? '◐ ' : '' %}%{% luaeval('(package.loaded[''vim.diagnostic''] and vim.diagnostic.status() .. '' '') or '''' ') %}%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
+vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &busy > 0 ? '◐ ' : '' %}%{% luaeval('(package.loaded[''vim.diagnostic''] and #vim.diagnostic.count() ~= 0 and vim.diagnostic.status() .. '' '') or '''' ') %}%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
 vim.o.stl = vim.o.statusline
 vim.wo.statusline = vim.o.statusline
 vim.wo.stl = vim.wo.statusline

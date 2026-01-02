@@ -586,6 +586,7 @@ struct file_buffer {
   char *b_p_fp;                 ///< 'formatprg'
   char *b_p_fex;                ///< 'formatexpr'
   uint32_t b_p_fex_flags;       ///< flags for 'formatexpr'
+  int b_p_fs;                   ///< 'fsync'
   char *b_p_kp;                 ///< 'keywordprg'
   int b_p_lisp;                 ///< 'lisp'
   char *b_p_lop;                ///< 'lispoptions'
@@ -821,9 +822,10 @@ struct diffline_S {
   int lineoff;
 };
 
-#define SNAP_HELP_IDX   0
-#define SNAP_AUCMD_IDX 1
-#define SNAP_COUNT     2
+#define SNAP_HELP_IDX       0
+#define SNAP_AUCMD_IDX      1
+#define SNAP_QUICKFIX_IDX   2
+#define SNAP_COUNT          3
 
 /// Tab pages point to the top frame of each tab page.
 /// Note: Most values are NOT valid for the current tab page!  Use "curwin",

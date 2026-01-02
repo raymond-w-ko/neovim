@@ -1057,6 +1057,12 @@ int win_split(int size, int flags)
     clear_snapshot(curtab, SNAP_HELP_IDX);
   }
 
+  if (flags & WSP_QUICKFIX) {
+    make_snapshot(SNAP_QUICKFIX_IDX);
+  } else {
+    clear_snapshot(curtab, SNAP_QUICKFIX_IDX);
+  }
+
   return win_split_ins(size, flags, NULL, 0, NULL) == NULL ? FAIL : OK;
 }
 
@@ -2086,10 +2092,10 @@ void win_move_after(win_T *win1, win_T *win2)
     win_comp_pos();  // recompute w_winrow for all windows
     redraw_later(curwin, UPD_NOT_VALID);
   }
-  win_enter(win1, false);
-
   win1->w_pos_changed = true;
   win2->w_pos_changed = true;
+
+  win_enter(win1, false);
 }
 
 /// Compute maximum number of windows that can fit within "height" in frame "fr".
@@ -2747,6 +2753,7 @@ int win_close(win_T *win, bool free_buf, bool force)
   }
 
   bool help_window = false;
+  bool quickfix_window = false;
 
   // When closing the help window, try restoring a snapshot after closing
   // the window.  Otherwise clear the snapshot, it's now invalid.
@@ -2754,6 +2761,12 @@ int win_close(win_T *win, bool free_buf, bool force)
     help_window = true;
   } else {
     clear_snapshot(curtab, SNAP_HELP_IDX);
+  }
+
+  if (bt_quickfix(win->w_buffer)) {
+    quickfix_window = true;
+  } else {
+    clear_snapshot(curtab, SNAP_QUICKFIX_IDX);
   }
 
   win_T *wp;
@@ -2861,10 +2874,10 @@ int win_close(win_T *win, bool free_buf, bool force)
   int dir;
   wp = win_free_mem(win, &dir, NULL);
 
-  if (help_window) {
+  if (help_window || quickfix_window) {
     // Closing the help window moves the cursor back to the current window
     // of the snapshot.
-    win_T *prev_win = get_snapshot_curwin(SNAP_HELP_IDX);
+    win_T *prev_win = get_snapshot_curwin(help_window ? SNAP_HELP_IDX : SNAP_QUICKFIX_IDX);
     if (win_valid(prev_win)) {
       wp = prev_win;
     }
@@ -2939,10 +2952,10 @@ int win_close(win_T *win, bool free_buf, bool force)
 
   split_disallowed--;
 
-  // After closing the help window, try restoring the window layout from
-  // before it was opened.
-  if (help_window) {
-    restore_snapshot(SNAP_HELP_IDX, close_curwin);
+  // After closing the help or quickfix window, try restoring the window
+  // layout from before it was opened.
+  if (help_window || quickfix_window) {
+    restore_snapshot(help_window ? SNAP_HELP_IDX : SNAP_QUICKFIX_IDX, close_curwin);
   }
 
   // If the window had 'diff' set and now there is only one window left in
@@ -4441,6 +4454,10 @@ tabpage_T *find_tabpage(int n)
 {
   tabpage_T *tp;
   int i = 1;
+
+  if (n == 0) {
+    return curtab;
+  }
 
   for (tp = first_tabpage; tp != NULL && i != n; tp = tp->tp_next) {
     i++;
@@ -6559,8 +6576,8 @@ void win_fix_scroll(bool resize)
         wp->w_valid &= ~VALID_CROW;
       }
 
-      invalidate_botline(wp);
-      validate_botline(wp);
+      invalidate_botline_win(wp);
+      validate_botline_win(wp);
     }
     wp->w_prev_height = wp->w_height;
     wp->w_prev_winrow = wp->w_winrow;
@@ -6617,7 +6634,7 @@ static void win_fix_cursor(bool normal)
     } else {         // Scroll instead when not in normal mode.
       wp->w_fraction = (nlnum == bot) ? FRACTION_MULT : 0;
       scroll_to_fraction(wp, wp->w_prev_height);
-      validate_botline(curwin);
+      validate_botline_win(curwin);
     }
   }
 }
@@ -6729,7 +6746,7 @@ void scroll_to_fraction(win_T *wp, int prev_height)
   }
 
   redraw_later(wp, UPD_SOME_VALID);
-  invalidate_botline(wp);
+  invalidate_botline_win(wp);
 }
 
 void win_set_inner_size(win_T *wp, bool valid_cursor)
@@ -6776,7 +6793,7 @@ void win_set_inner_size(win_T *wp, bool valid_cursor)
     wp->w_lines_valid = 0;
     if (valid_cursor) {
       changed_line_abv_curs_win(wp);
-      invalidate_botline(wp);
+      invalidate_botline_win(wp);
       if (wp == curwin && (*p_spk == 'c' || wp->w_floating)) {
         curs_columns(wp, true);  // validate w_wrow
       }

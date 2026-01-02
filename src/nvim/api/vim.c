@@ -497,6 +497,41 @@ String nvim_replace_termcodes(String str, Boolean from_part, Boolean do_lt, Bool
   return cstr_as_string(ptr);
 }
 
+/// Executes Lua code. Arguments are available as `...` inside the chunk. The chunk can return
+/// a value.
+///
+/// Only statements are executed. To evaluate an expression, prefix it with "return": `return
+/// my_function(...)`
+///
+/// Example:
+/// ```lua
+/// local peer = vim.fn.jobstart({ vim.v.progpath, '--clean', '--embed' }, { rpc=true })
+/// vim.print(vim.rpcrequest(peer, 'nvim_exec_lua', [[
+///       local a, b = ...
+///       return ('result: %s'):format(a + b)
+///     ]],
+///     { 1, 3 }
+///   )
+/// )
+/// ```
+///
+/// @param code       Lua code to execute.
+/// @param args       Arguments to the Lua code.
+/// @param[out] err   Lua error raised while parsing or executing the Lua code.
+///
+/// @return           Value returned by the Lua code (if any), or NIL.
+Object nvim_exec_lua(String code, Array args, Arena *arena, Error *err)
+  FUNC_API_SINCE(7)
+  FUNC_API_REMOTE_ONLY
+{
+  // TODO(bfredl): convert directly from msgpack to lua and then back again
+  return nlua_exec(code, NULL, args, kRetObject, arena, err);
+}
+
+/// EXPERIMENTAL: this API may change or be removed in the future.
+///
+/// Like |nvim_exec_lua()|, but can be called during |api-fast| contexts.
+///
 /// Execute Lua code. Parameters (if any) are available as `...` inside the
 /// chunk. The chunk can return a value.
 ///
@@ -509,12 +544,12 @@ String nvim_replace_termcodes(String str, Boolean from_part, Boolean do_lt, Bool
 ///                   or executing the Lua code.
 ///
 /// @return           Return value of Lua code if present or NIL.
-Object nvim_exec_lua(String code, Array args, Arena *arena, Error *err)
-  FUNC_API_SINCE(7)
+Object nvim__exec_lua_fast(String code, Array args, Arena *arena, Error *err)
+  FUNC_API_SINCE(14)
   FUNC_API_REMOTE_ONLY
+  FUNC_API_FAST
 {
-  // TODO(bfredl): convert directly from msgpack to lua and then back again
-  return nlua_exec(code, NULL, args, kRetObject, arena, err);
+  return nvim_exec_lua(code, args, arena, err);
 }
 
 /// Calculates the number of display cells occupied by `text`.

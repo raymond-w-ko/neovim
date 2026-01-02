@@ -117,7 +117,6 @@ describe('ui/ext_messages', function()
         { content = { { '/i ' } }, kind = 'search_cmd' },
         {
           content = { { 'search hit BOTTOM, continuing at TOP', 19, 'WarningMsg' } },
-          history = true,
           kind = 'wmsg',
         },
       },
@@ -2054,6 +2053,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
   end)
 
   it('no wait return before delayed exception error message', function()
+    screen:try_resize(70, 7)
     feed('ia<esc>:lua vim.cmd.quit()<CR>')
     screen:expect({
       any = {

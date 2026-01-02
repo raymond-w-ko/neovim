@@ -44,6 +44,9 @@ func Test_has()
   " Will we ever have patch 9999?
   let ver = 'patch-' .. v:version / 100 .. '.' .. v:version % 100 .. '.9999'
   call assert_equal(0, has(ver))
+
+  " There actually isn't a patch 9.0.0, but this is more consistent.
+  call assert_equal(1, has('patch-9.0.0'))
 endfunc
 
 func Test_empty()
@@ -3714,6 +3717,11 @@ func Test_builtin_check()
   call extend(l:, #{bar: function("extend")}, "keep")
   call assert_fails('call extend(l:, #{bar: function("extend")}, "force")', 'E704:')
   unlet bar
+endfunc
+
+func Test_funcref_to_string()
+  let Fn = funcref('g:Test_funcref_to_string')
+  call assert_equal("function('g:Test_funcref_to_string')", string(Fn))
 endfunc
 
 " Test for isabsolutepath()

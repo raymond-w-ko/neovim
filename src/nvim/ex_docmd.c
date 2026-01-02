@@ -964,6 +964,7 @@ void handle_did_throw(void)
   assert(current_exception != NULL);
   char *p = NULL;
   msglist_T *messages = NULL;
+  ESTACK_CHECK_DECLARATION;
 
   // If the uncaught exception is a user exception, report it as an
   // error.  If it is an error exception, display the saved error
@@ -985,6 +986,7 @@ void handle_did_throw(void)
   }
 
   estack_push(ETYPE_EXCEPT, current_exception->throw_name, current_exception->throw_lnum);
+  ESTACK_CHECK_SETUP;
   current_exception->throw_name = NULL;
 
   discard_current_exception();              // uses IObuff if 'verbose'
@@ -1009,6 +1011,7 @@ void handle_did_throw(void)
     xfree(p);
   }
   xfree(SOURCING_NAME);
+  ESTACK_CHECK_NOW;
   estack_pop();
 }
 
@@ -1488,9 +1491,6 @@ static char *find_excmd_after_range(exarg_T *eap)
   // Save location after command modifiers.
   char *cmd = eap->cmd;
   eap->cmd = skip_range(eap->cmd, NULL);
-  if (*eap->cmd == '*') {
-    eap->cmd = skipwhite(eap->cmd + 1);
-  }
   char *p = find_ex_command(eap, NULL);
   eap->cmd = cmd;  // Restore original position for address parsing
   return p;
@@ -2511,7 +2511,21 @@ static char *ex_range_without_command(exarg_T *eap)
 /// @return  FAIL when the command is not to be executed.
 int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod, bool skip_only)
 {
+  char *orig_cmd = eap->cmd;
+  char *cmd_start = NULL;
+  bool use_plus_cmd = false;
+  bool has_visual_range = false;
   CLEAR_POINTER(cmod);
+
+  if (strncmp(eap->cmd, "'<,'>", 5) == 0) {
+    // The automatically inserted Visual area range is skipped, so that
+    // typing ":cmdmod cmd" in Visual mode works without having to move the
+    // range to after the modifiers. The command will be "'<,'>cmdmod cmd",
+    // parse "cmdmod cmd" and then put back "'<,'>" before "cmd" below.
+    eap->cmd += 5;
+    cmd_start = eap->cmd;
+    has_visual_range = true;
+  }
 
   // Repeat until no more command modifiers are found.
   while (true) {
@@ -2521,14 +2535,16 @@ int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod,
       eap->cmd++;
     }
 
-    // in ex mode, an empty line works like :+
+    // in ex mode, an empty command (after modifiers) works like :+
     if (*eap->cmd == NUL && exmode_active
         && getline_equal(eap->ea_getline, eap->cookie, getexline)
         && curwin->w_cursor.lnum < curbuf->b_ml.ml_line_count) {
       eap->cmd = exmode_plus;
+      use_plus_cmd = true;
       if (!skip_only) {
         ex_pressedreturn = true;
       }
+      break;  // no modifiers following
     }
 
     // ignore comment and empty lines
@@ -2748,6 +2764,39 @@ int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod,
       continue;
     }
     break;
+  }
+
+  if (has_visual_range) {
+    if (eap->cmd > cmd_start) {
+      // Move the '<,'> range to after the modifiers and insert a colon.
+      // Since the modifiers have been parsed put the colon on top of the
+      // space: "'<,'>mod cmd" -> "mod:'<,'>cmd
+      // Put eap->cmd after the colon.
+      if (use_plus_cmd) {
+        size_t len = strlen(cmd_start);
+
+        // Special case: empty command uses "+":
+        //  "'<,'>mods" -> "mods *+
+        //  Use "*" instead of "'<,'>" to avoid the command getting
+        //  longer, in case is was allocated.
+        memmove(orig_cmd, cmd_start, len);
+        xmemcpyz(orig_cmd + len, S_LEN(" *+"));
+      } else {
+        memmove(cmd_start - 5, cmd_start, (size_t)(eap->cmd - cmd_start));
+        eap->cmd -= 5;
+        memmove(eap->cmd - 1, ":'<,'>", 6);
+      }
+    } else {
+      // No modifiers, move the pointer back.
+      // Special case: change empty command to "+".
+      if (use_plus_cmd) {
+        eap->cmd = "'<,'>+";
+      } else {
+        eap->cmd = orig_cmd;
+      }
+    }
+  } else if (use_plus_cmd) {
+    eap->cmd = exmode_plus;
   }
 
   return OK;
@@ -3372,6 +3421,11 @@ char *skip_range(const char *cmd, int *ctx)
 
   // Skip ":" and white space.
   cmd = skip_colon_white(cmd, false);
+
+  // Skip "*" used for Visual range.
+  if (*cmd == '*') {
+    cmd = skipwhite(cmd + 1);
+  }
 
   return (char *)cmd;
 }
@@ -4906,23 +4960,19 @@ static void ex_restart(exarg_T *eap)
     set_vim_var_list(VV_ARGV, argv_cpy);
   }
 
-  bool confirm = (p_confirm || (cmdmod.cmod_flags & CMOD_CONFIRM));
-  if (confirm && check_changed_any(false, false)) {
-    return;
-  }
+  char *quit_cmd = (eap->do_ecmd_cmd) ? eap->do_ecmd_cmd : "qall";
+  char *quit_cmd_copy = NULL;
 
-  char *quit_cmd;
-  if (eap->do_ecmd_cmd) {
-    quit_cmd = eap->do_ecmd_cmd;
-  } else if (confirm) {
-    quit_cmd = "qall";
-  } else {
-    quit_cmd = "qall!";
+  // Prepend "confirm " to cmd if :confirm is used
+  if (cmdmod.cmod_flags & CMOD_CONFIRM) {
+    quit_cmd_copy = concat_str("confirm ", quit_cmd);
+    quit_cmd = quit_cmd_copy;
   }
 
   Error err = ERROR_INIT;
   restarting = true;
   nvim_command(cstr_as_string(quit_cmd), &err);
+  xfree(quit_cmd_copy);
   if (ERROR_SET(&err)) {
     emsg(err.msg);  // Could not exit
     api_clear_error(&err);
@@ -5617,7 +5667,7 @@ static void ex_tabs(exarg_T *eap)
     FOR_ALL_WINDOWS_IN_TAB(wp, tp) {
       if (got_int) {
         break;
-      } else if (!wp->w_config.focusable) {
+      } else if (!wp->w_config.focusable || wp->w_config.hide) {
         continue;
       }
 
@@ -8001,6 +8051,21 @@ static void ex_terminal(exarg_T *eap)
   }
 
   do_cmdline_cmd(ex_cmd);
+}
+
+/// ":lsp {subcmd} {clients}"
+static void ex_lsp(exarg_T *eap)
+{
+  Error err = ERROR_INIT;
+  MAXSIZE_TEMP_ARRAY(args, 1);
+
+  ADD_C(args, CSTR_AS_OBJ(eap->arg));
+
+  NLUA_EXEC_STATIC("require'vim._core.ex_cmd'.ex_lsp(...)", args, kRetNilBool, NULL, &err);
+  if (ERROR_SET(&err)) {
+    emsg_multiline(err.msg, "lua_error", HLF_E, true);
+  }
+  api_clear_error(&err);
 }
 
 /// ":fclose"
