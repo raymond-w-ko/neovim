@@ -215,6 +215,8 @@ EDITOR
   "(v)iew" then run `:trust`.
 • |gx| in help buffers opens the online documentation for the tag under the
   cursor.
+• |:source| with a range in non-Lua files (e.g., vimdoc) now detects Lua
+  codeblocks via treesitter and executes them as Lua instead of Vimscript.
 • |:Undotree| for visually navigating the |undo-tree|
 • |:wall| permits a |++p| option for creating parent directories when writing
   changed buffers.
@@ -421,6 +423,8 @@ These existing features changed their behavior.
 • 'scrollback' maximum value increased from 100000 to 1000000
 • |matchfuzzy()| and |matchfuzzypos()| use an improved fuzzy matching algorithm
   (same as fzy).
+- Windows: Paths like "\Windows" and "/Windows" are now considered to be
+  absolute paths (to the current drive) and no longer relative.
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*
