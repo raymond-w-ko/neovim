@@ -543,7 +543,7 @@ end
 describe('TUI', function()
   local screen --[[@type test.functional.ui.screen]]
   local child_session --[[@type test.Session]]
-  local child_exec_lua
+  local child_exec_lua --[[@type fun(code: string, ...):any]]
 
   before_each(function()
     clear()
@@ -2468,6 +2468,22 @@ describe('TUI', function()
     screen:expect({ any = vim.pesc('[Process exited 1]') })
   end)
 
+  it('exits properly when :quit non-last window in event handler #14379', function()
+    local code = [[
+      vim.defer_fn(function()
+        vim.cmd('vsplit | quit')
+      end, 0)
+      vim.cmd('quit')
+    ]]
+    child_session:notify('nvim_exec_lua', code, {})
+    screen:expect([[
+                                                        |
+      [Process exited 0]^                                |
+                                                        |*4
+      {5:-- TERMINAL --}                                    |
+    ]])
+  end)
+
   it('no stack-use-after-scope with cursor color #22432', function()
     screen:set_option('rgb', true)
     command('set termguicolors')
@@ -2728,7 +2744,7 @@ describe('TUI', function()
 
   it('argv[0] can be overridden #23953', function()
     if not exec_lua('return pcall(require, "ffi")') then
-      pending('missing LuaJIT FFI')
+      pending('N/A: missing LuaJIT FFI')
     end
     local script_file = 'Xargv0.lua'
     write_file(
@@ -2788,6 +2804,7 @@ describe('TUI', function()
   it('with non-tty (pipe) stdout/stderr', function()
     finally(function()
       os.remove('testF')
+      os.remove(testlog)
     end)
     local screen = tt.setup_screen(
       0,
@@ -2795,16 +2812,19 @@ describe('TUI', function()
         nvim_prog
       ),
       nil,
-      { VIMRUNTIME = os.getenv('VIMRUNTIME') }
+      { VIMRUNTIME = os.getenv('VIMRUNTIME'), NVIM_LOG_FILE = testlog }
     )
     feed_data(':w testF\n:q\n')
     screen:expect([[
       :w testF                                          |
       :q                                                |
-      ^                                                  |
-                                                        |*3
+      abc                                               |
+                                                        |
+      [Process exited 0]^                                |
+                                                        |
       {5:-- TERMINAL --}                                    |
     ]])
+    assert_log('TUI: timed out waiting for DA1 response', testlog)
   end)
 
   it('<C-h> #10134', function()
@@ -2967,8 +2987,8 @@ describe('TUI UIEnter/UILeave', function()
 end)
 
 describe('TUI FocusGained/FocusLost', function()
-  local screen
-  local child_session
+  local screen --[[@type test.functional.ui.screen]]
+  local child_session --[[@type test.Session]]
 
   before_each(function()
     clear()
@@ -3161,7 +3181,7 @@ end)
 
 -- These tests require `tt` because --headless/--embed does not initialize the TUI.
 describe("TUI 't_Co' (terminal colors)", function()
-  local screen
+  local screen --[[@type test.functional.ui.screen]]
 
   local function assert_term_colors(term, colorterm, maxcolors)
     clear({ env = { TERM = term }, args = {} })
@@ -3179,7 +3199,7 @@ describe("TUI 't_Co' (terminal colors)", function()
       },
     })
 
-    local tline
+    local tline --[[@type string]]
     if maxcolors == 8 then
       tline = '{112:~                                                 }'
     elseif maxcolors == 16 then
@@ -3440,7 +3460,7 @@ end)
 
 -- These tests require `tt` because --headless/--embed does not initialize the TUI.
 describe("TUI 'term' option", function()
-  local screen
+  local screen --[[@type test.functional.ui.screen]]
 
   local function assert_term(term_envvar, term_expected)
     clear()
@@ -3491,7 +3511,7 @@ end)
 
 -- These tests require `tt` because --headless/--embed does not initialize the TUI.
 describe('TUI', function()
-  local screen
+  local screen --[[@type test.functional.ui.screen]]
 
   -- Runs (child) `nvim` in a TTY (:terminal), to start the builtin TUI.
   local function nvim_tui(extra_args)
@@ -3654,7 +3674,7 @@ describe('TUI', function()
   it('queries the terminal for OSC 52 support with XTGETTCAP', function()
     clear()
     if not exec_lua('return pcall(require, "ffi")') then
-      pending('missing LuaJIT FFI')
+      pending('N/A: missing LuaJIT FFI')
     end
 
     -- Change vterm's DA1 response so that it doesn't include 52
@@ -4003,7 +4023,7 @@ describe('TUI client', function()
     screen_client:expect({ any = vim.pesc('[Process exited 0]') })
   end)
 
-  local function start_headless_server_and_client()
+  local function start_headless_server_and_client(use_testlog)
     local server = n.new_session(false, {
       args_rm = { '--cmd' },
       args = {
@@ -4013,7 +4033,8 @@ describe('TUI client', function()
         nvim_set .. ' notermguicolors background=dark',
       },
     })
-    local client_super = n.new_session(true, { env = { NVIM_LOG_FILE = testlog } })
+    local client_super =
+      n.new_session(true, use_testlog and { env = { NVIM_LOG_FILE = testlog } } or {})
     finally(function()
       client_super:close()
       server:close()
@@ -4042,7 +4063,7 @@ describe('TUI client', function()
   end
 
   it('connects to remote instance (--headless)', function()
-    local server, server_pipe, screen_client = start_headless_server_and_client()
+    local server, server_pipe, screen_client = start_headless_server_and_client(false)
 
     -- No heap-use-after-free when receiving UI events after deadly signal #22184
     server:request('nvim_input', ('a'):rep(1000))
@@ -4057,6 +4078,7 @@ describe('TUI client', function()
 
     eq(0, api.nvim_get_vvar('shell_error'))
     -- exits on input eof #22244
+    -- Use system() without input so that stdin is closed.
     fn.system({ nvim_prog, '--remote-ui', '--server', server_pipe })
     eq(1, api.nvim_get_vvar('shell_error'))
 
@@ -4075,16 +4097,10 @@ describe('TUI client', function()
 
     feed_data(':echo "GUI Running: " .. has("gui_running")\013')
     screen_client:expect({ any = 'GUI Running: 0' })
-
-    if is_os('mac') then
-      -- this might either be "Unknown system error %-102" or
-      -- "inappropriate ioctl for device" depending on the phase of the moon
-      assert_log('uv_tty_set_mode failed', testlog)
-    end
   end)
 
   it(':restart works when connecting to remote instance (--headless)', function()
-    local _, server_pipe, screen_client = start_headless_server_and_client()
+    local _, server_pipe, screen_client = start_headless_server_and_client(false)
 
     -- Run :restart on the client.
     -- The client should start a new server while the original server should exit.
@@ -4106,33 +4122,29 @@ describe('TUI client', function()
     screen_client:expect({ any = vim.pesc('[Process exited 0]') })
   end)
 
-  it('does not crash or hang with a very long title', function()
-    local server, _, screen_client = start_headless_server_and_client()
+  local ffi_str_defs = [[
+    local ffi = require('ffi')
+    local cstr = ffi.typeof('char[?]')
+    ffi.cdef('typedef struct { char *data; size_t size; } String;')
+    local function to_api_string(str)
+      return ffi.new('String', { data = cstr(#str + 1, str), size = #str })
+    end
+  ]]
 
+  it('does not crash or hang with a very long title', function()
+    local server, _, screen_client = start_headless_server_and_client(true)
     local server_exec_lua = tt.make_lua_executor(server)
     if not server_exec_lua('return pcall(require, "ffi")') then
-      pending('missing LuaJIT FFI')
+      pending('N/A: missing LuaJIT FFI')
     end
 
     local bufname = api.nvim_buf_get_name(0)
     -- Normally a title cannot be longer than the 65535-byte buffer as maketitle()
     -- limits it length. Use FFI to send a very long title directly.
-    server_exec_lua([=[
-      local ffi = require('ffi')
-      local cstr = ffi.typeof('char[?]')
-      local function to_cstr(string)
-        return cstr(#string + 1, string)
-      end
-
-      ffi.cdef([[
-        typedef struct { char *data; size_t size; } String;
-        void ui_call_set_title(String title);
-      ]])
-
-      local len = 65536
-      local title = ffi.new('String', { data = to_cstr(('a'):rep(len)), size = len })
-      ffi.C.ui_call_set_title(title)
-    ]=])
+    server_exec_lua(ffi_str_defs .. [[
+      ffi.cdef('void ui_call_set_title(String title);')
+      ffi.C.ui_call_set_title(to_api_string(('a'):rep(65536)))
+    ]])
     screen_client:expect_unchanged()
     assert_log('set_title: title string too long!', testlog)
     eq(bufname, api.nvim_buf_get_var(0, 'term_title'))
@@ -4144,8 +4156,24 @@ describe('TUI client', function()
     end)
   end)
 
+  it('logs chdir failure properly', function()
+    local server, _, screen_client = start_headless_server_and_client(true)
+    local server_exec_lua = tt.make_lua_executor(server)
+    if not server_exec_lua('return pcall(require, "ffi")') then
+      pending('N/A: missing LuaJIT FFI')
+    end
+
+    -- Use FFI to send a chdir event to a non-directory path.
+    server_exec_lua(ffi_str_defs .. [[
+      ffi.cdef('void ui_call_chdir(String path);')
+      ffi.C.ui_call_chdir(to_api_string('README.md'))
+    ]])
+    screen_client:expect_unchanged()
+    assert_log('Failed to chdir to README.md: not a directory', testlog)
+  end)
+
   it('nvim_ui_send works with remote client #36317', function()
-    local server, _, _ = start_headless_server_and_client()
+    local server, _, _ = start_headless_server_and_client(false)
     server:request('nvim_ui_send', '\027]2;TEST_TITLE\027\\')
     retry(nil, nil, function()
       eq('TEST_TITLE', api.nvim_buf_get_var(0, 'term_title'))

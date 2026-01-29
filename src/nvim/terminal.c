@@ -143,7 +143,7 @@ typedef struct {
 } ScrollbackLine;
 
 struct terminal {
-  TerminalOptions opts;  // options passed to terminal_open
+  TerminalOptions opts;  // options passed to terminal_alloc()
   VTerm *vt;
   VTermScreen *vts;
   // buffer used to:
@@ -268,8 +268,10 @@ static void emit_termrequest(void **argv)
         terminator ==
         VTERM_TERMINATOR_BEL ? STATIC_CSTR_AS_OBJ("\x07") : STATIC_CSTR_AS_OBJ("\x1b\\"));
 
+  term->refcount++;
   apply_autocmds_group(EVENT_TERMREQUEST, NULL, NULL, true, AUGROUP_ALL, buf, NULL,
                        &DICT_OBJ(data));
+  term->refcount--;
   xfree(sequence);
 
   StringBuilder *term_pending_send = term->pending.send;
@@ -282,6 +284,13 @@ static void emit_termrequest(void **argv)
     term->pending.send = term_pending_send;
   }
   xfree(pending_send);
+
+  // Terminal buffer closed during TermRequest in Normal mode: destroy the terminal.
+  // In Terminal mode term->refcount should still be non-zero here.
+  if (term->buf_handle == 0 && !term->refcount) {
+    term->destroy = true;
+    term->opts.close_cb(term->opts.data);
+  }
 }
 
 static void schedule_termrequest(Terminal *term)
@@ -444,20 +453,50 @@ static void term_output_callback(const char *s, size_t len, void *user_data)
   terminal_send((Terminal *)user_data, s, len);
 }
 
+/// Allocates a terminal's scrollback buffer if it hasn't been allocated yet.
+/// Does nothing if it's already allocated, unlike adjust_scrollback().
+///
+/// @param term Terminal instance.
+/// @param buf  The terminal's buffer, or NULL to get it from buf_handle.
+///
+/// @return whether the terminal now has a scrollback buffer.
+static bool term_may_alloc_scrollback(Terminal *term, buf_T *buf)
+{
+  if (term->sb_buffer != NULL) {
+    return true;
+  }
+  if (buf == NULL) {
+    buf = handle_get_buffer(term->buf_handle);
+    if (buf == NULL) {  // No need to allocate scrollback if buffer is deleted.
+      return false;
+    }
+  }
+
+  if (buf->b_p_scbk < 1) {
+    buf->b_p_scbk = SB_MAX;
+  }
+  // Configure the scrollback buffer.
+  term->sb_size = (size_t)buf->b_p_scbk;
+  term->sb_buffer = xmalloc(sizeof(ScrollbackLine *) * term->sb_size);
+  return true;
+}
+
 // public API {{{
 
-/// Initializes terminal properties, and triggers TermOpen.
+/// Allocates a terminal instance and initializes terminal properties.
 ///
 /// The PTY process (TerminalOptions.data) was already started by jobstart(),
 /// via ex_terminal() or the term:// BufReadCmd.
 ///
 /// @param buf Buffer used for presentation of the terminal.
 /// @param opts PTY process channel, various terminal properties and callbacks.
-void terminal_open(Terminal **termpp, buf_T *buf, TerminalOptions opts)
+///
+/// @return the terminal instance.
+Terminal *terminal_alloc(buf_T *buf, TerminalOptions opts)
   FUNC_ATTR_NONNULL_ALL
 {
   // Create a new terminal instance and configure it
-  Terminal *term = *termpp = xcalloc(1, sizeof(Terminal));
+  Terminal *term = xcalloc(1, sizeof(Terminal));
   term->opts = opts;
 
   // Associate the terminal instance with the new buffer
@@ -517,9 +556,29 @@ void terminal_open(Terminal **termpp, buf_T *buf, TerminalOptions opts)
   // events from this queue are copied back onto the main event queue.
   term->pending.events = multiqueue_new(NULL, NULL);
 
+  return term;
+}
+
+/// Triggers TermOpen and allocates terminal scrollback buffer.
+///
+/// @param termpp  Pointer to the terminal channel's `term` field.
+/// @param buf     Buffer used for presentation of the terminal.
+void terminal_open(Terminal **termpp, buf_T *buf)
+  FUNC_ATTR_NONNULL_ALL
+{
+  Terminal *term = *termpp;
+  assert(term != NULL);
+
   aco_save_T aco;
   aucmd_prepbuf(&aco, buf);
 
+  if (term->sb_buffer != NULL) {
+    // If scrollback has been allocated by autocommands between terminal_alloc()
+    // and terminal_open(), it also needs to be refreshed.
+    refresh_scrollback(term, buf);
+  } else {
+    assert(term->invalid_start >= 0);
+  }
   refresh_screen(term, buf);
   set_option_value(kOptBuftype, STATIC_CSTR_AS_OPTVAL("terminal"), OPT_LOCAL);
 
@@ -529,27 +588,25 @@ void terminal_open(Terminal **termpp, buf_T *buf, TerminalOptions opts)
   RESET_BINDING(curwin);
   // Reset cursor in current window.
   curwin->w_cursor = (pos_T){ .lnum = 1, .col = 0, .coladd = 0 };
-  // Initialize to check if the scrollback buffer has been allocated in a TermOpen autocmd.
-  term->sb_buffer = NULL;
-  // Apply TermOpen autocmds _before_ configuring the scrollback buffer.
+
+  // Apply TermOpen autocmds _before_ configuring the scrollback buffer, to avoid
+  // over-allocating in case TermOpen reduces 'scrollback'.
+  // In the rare case where TermOpen polls for events, the scrollback buffer will be
+  // allocated anyway if needed.
   apply_autocmds(EVENT_TERMOPEN, NULL, NULL, false, buf);
 
   aucmd_restbuf(&aco);
 
-  if (*termpp == NULL) {
+  if (*termpp == NULL || term->buf_handle == 0) {
     return;  // Terminal has already been destroyed.
   }
 
-  if (term->sb_buffer == NULL) {
-    // Local 'scrollback' _after_ autocmds.
-    if (buf->b_p_scbk < 1) {
-      buf->b_p_scbk = SB_MAX;
-    }
-    // Configure the scrollback buffer.
-    term->sb_size = (size_t)buf->b_p_scbk;
-    term->sb_buffer = xmalloc(sizeof(ScrollbackLine *) * term->sb_size);
+  // Local 'scrollback' _after_ autocmds.
+  if (!term_may_alloc_scrollback(term, buf)) {
+    abort();
   }
 
+  VTermState *state = vterm_obtain_state(term->vt);
   // Configure the color palette. Try to get the color from:
   //
   // - b:terminal_color_{NUM}
@@ -558,7 +615,7 @@ void terminal_open(Terminal **termpp, buf_T *buf, TerminalOptions opts)
   for (int i = 0; i < 16; i++) {
     char var[64];
     snprintf(var, sizeof(var), "terminal_color_%d", i);
-    char *name = get_config_string(var);
+    char *name = get_config_string(buf, var);
     if (name) {
       int dummy;
       RgbValue color_val = name_to_color(name, &dummy);
@@ -583,9 +640,6 @@ void terminal_close(Terminal **termpp, int status)
   FUNC_ATTR_NONNULL_ALL
 {
   Terminal *term = *termpp;
-  if (term->destroy) {
-    return;
-  }
 
 #ifdef EXITFREE
   if (entered_free_all_mem) {
@@ -595,6 +649,10 @@ void terminal_close(Terminal **termpp, int status)
     return;
   }
 #endif
+
+  if (term->destroy) {  // Destruction already scheduled on the main loop.
+    return;
+  }
 
   bool only_destroy = false;
 
@@ -737,29 +795,50 @@ static void unset_terminal_winopts(TerminalState *const s)
 
   win_T *const wp = handle_get_window(s->save_curwin_handle);
   if (!wp) {
-    free_string_option(s->save_w_p_culopt);
-    s->save_curwin_handle = 0;
-    return;
+    goto end;
   }
 
-  if (win_valid(wp)) {  // No need to redraw if window not in curtab.
-    if (s->save_w_p_cuc != wp->w_p_cuc) {
-      redraw_later(wp, UPD_SOME_VALID);
-    } else if (s->save_w_p_cul != wp->w_p_cul
-               || (s->save_w_p_cul && s->save_w_p_culopt_flags != wp->w_p_culopt_flags)) {
-      redraw_later(wp, UPD_VALID);
+  winopt_T *winopts = NULL;
+  if (wp->w_buffer->handle != s->term->buf_handle) {  // Buffer no longer in "wp".
+    buf_T *buf = handle_get_buffer(s->term->buf_handle);
+    if (buf == NULL) {
+      goto end;  // Nothing to restore as the buffer was deleted.
     }
+    for (size_t i = 0; i < kv_size(buf->b_wininfo); i++) {
+      WinInfo *wip = kv_A(buf->b_wininfo, i);
+      if (wip->wi_win == wp && wip->wi_optset) {
+        winopts = &wip->wi_opt;
+        break;
+      }
+    }
+    if (winopts == NULL) {
+      goto end;  // Nothing to restore as there is no matching WinInfo.
+    }
+  } else {
+    winopts = &wp->w_onebuf_opt;
+    if (win_valid(wp)) {  // No need to redraw if window not in curtab.
+      if (s->save_w_p_cuc != wp->w_p_cuc) {
+        redraw_later(wp, UPD_SOME_VALID);
+      } else if (s->save_w_p_cul != wp->w_p_cul
+                 || (s->save_w_p_cul && s->save_w_p_culopt_flags != wp->w_p_culopt_flags)) {
+        redraw_later(wp, UPD_VALID);
+      }
+    }
+    wp->w_p_culopt_flags = s->save_w_p_culopt_flags;
   }
 
-  wp->w_p_cul = s->save_w_p_cul;
   if (s->save_w_p_culopt) {
-    free_string_option(wp->w_p_culopt);
-    wp->w_p_culopt = s->save_w_p_culopt;
+    free_string_option(winopts->wo_culopt);
+    winopts->wo_culopt = s->save_w_p_culopt;
+    s->save_w_p_culopt = NULL;
   }
-  wp->w_p_culopt_flags = s->save_w_p_culopt_flags;
-  wp->w_p_cuc = s->save_w_p_cuc;
-  wp->w_p_so = s->save_w_p_so;
-  wp->w_p_siso = s->save_w_p_siso;
+  winopts->wo_cul = s->save_w_p_cul;
+  winopts->wo_cuc = s->save_w_p_cuc;
+  winopts->wo_so = s->save_w_p_so;
+  winopts->wo_siso = s->save_w_p_siso;
+
+end:
+  free_string_option(s->save_w_p_culopt);
   s->save_curwin_handle = 0;
 }
 
@@ -1007,6 +1086,11 @@ static int terminal_execute(VimState *state, int key)
 
   case K_LUA:
     map_execute_lua(false, false);
+    break;
+
+  case K_IGNORE:
+  case K_NOP:
+    // Do not interrupt a Ctrl-\ sequence or close a finished terminal.
     break;
 
   case Ctrl_N:
@@ -1364,6 +1448,7 @@ static void buf_set_term_title(buf_T *buf, const char *title, size_t len)
   }
 
   Error err = ERROR_INIT;
+  buf->b_locked++;
   dict_set_var(buf->b_vars,
                STATIC_CSTR_AS_STRING("term_title"),
                STRING_OBJ(((String){ .data = (char *)title, .size = len })),
@@ -1371,6 +1456,7 @@ static void buf_set_term_title(buf_T *buf, const char *title, size_t len)
                false,
                NULL,
                &err);
+  buf->b_locked--;
   api_clear_error(&err);
   status_redraw_buf(buf);
 }
@@ -1467,9 +1553,10 @@ static int term_sb_push(int cols, const VTermScreenCell *cells, void *data)
 {
   Terminal *term = data;
 
-  if (!term->sb_size) {
+  if (!term_may_alloc_scrollback(term, NULL)) {
     return 0;
   }
+  assert(term->sb_size > 0);
 
   // copy vterm cells into sb_buffer
   size_t c = (size_t)cols;
@@ -2396,11 +2483,10 @@ static bool is_focused(Terminal *term)
   return State & MODE_TERMINAL && curbuf->terminal == term;
 }
 
-static char *get_config_string(char *key)
+static char *get_config_string(buf_T *buf, char *key)
 {
   Error err = ERROR_INIT;
-  // Only called from terminal_open where curbuf->terminal is the context.
-  Object obj = dict_get_value(curbuf->b_vars, cstr_as_string(key), NULL, &err);
+  Object obj = dict_get_value(buf->b_vars, cstr_as_string(key), NULL, &err);
   api_clear_error(&err);
   if (obj.type == kObjectTypeNil) {
     obj = dict_get_value(get_globvar_dict(), cstr_as_string(key), NULL, &err);

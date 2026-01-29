@@ -848,6 +848,8 @@ local extension = {
   NSP = 'natural',
   NSS = 'natural',
   ncf = 'ncf',
+  axs = 'netlinx',
+  axi = 'netlinx',
   nginx = 'nginx',
   ncl = 'nickel',
   nim = 'nim',
@@ -1299,6 +1301,8 @@ local extension = {
   tfvars = 'terraform-vars',
   thrift = 'thrift',
   tig = 'tiger',
+  Tiltfile = 'tiltfile',
+  tiltfile = 'tiltfile',
   tla = 'tla',
   tli = 'tli',
   toml = 'toml',
@@ -1902,6 +1906,8 @@ local filename = {
   ['.tcshrc'] = detect.tcsh,
   ['tcsh.login'] = detect.tcsh,
   ['tcsh.tcshrc'] = detect.tcsh,
+  ['.skhdrc'] = 'skhd',
+  ['skhdrc'] = 'skhd',
   ['/etc/slp.conf'] = 'slpconf',
   ['/etc/slp.reg'] = 'slpreg',
   ['/etc/slp.spi'] = 'slpspi',
@@ -1935,6 +1941,8 @@ local filename = {
   ['tidy.conf'] = 'tidy',
   tidyrc = 'tidy',
   ['.tidyrc'] = 'tidy',
+  Tiltfile = 'tiltfile',
+  tiltfile = 'tiltfile',
   ['.tmux.conf'] = 'tmux',
   ['Cargo.lock'] = 'toml',
   ['/.cargo/config'] = 'toml',
@@ -2757,6 +2765,7 @@ local pattern = {
     ['termcap'] = starsetf(function(_path, _bufnr)
       return require('vim.filetype.detect').printcap('term')
     end),
+    ['^Tiltfile%.'] = starsetf('tiltfile'),
     ['%.t%.html$'] = 'tilde',
     ['%.vhdl_[0-9]'] = starsetf('vhdl'),
     ['vimrc'] = starsetf('vim'),
@@ -2852,15 +2861,6 @@ local function normalize_path(path, as_pattern)
     end
   end
   return normal
-end
-
-local abspath = function(x)
-  return fn.fnamemodify(x, ':p')
-end
-if fn.has('win32') == 1 then
-  abspath = function(x)
-    return (fn.fnamemodify(x, ':p'):gsub('\\', '/'))
-  end
 end
 
 --- @class vim.filetype.add.filetypes
@@ -3169,7 +3169,7 @@ function M.match(args)
   if name then
     name = normalize_path(name)
 
-    local path = abspath(name)
+    local path = vim.fs.abspath(name)
     do -- First check for the simple case where the full path exists as a key
       local ft, on_detect = dispatch(filename[path], path, bufnr)
       if ft then
@@ -3177,7 +3177,7 @@ function M.match(args)
       end
     end
 
-    local tail = fn.fnamemodify(name, ':t')
+    local tail = vim.fs.basename(name)
 
     do -- Next check against just the file name
       local ft, on_detect = dispatch(filename[tail], path, bufnr)
