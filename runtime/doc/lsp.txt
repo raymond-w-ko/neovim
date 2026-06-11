@@ -1442,6 +1442,27 @@ the current buffer.
                         vim.lsp.buf.references(nil, { on_list = on_list })
 <
 
+                    The list can be transformed before it is shown. For
+                    example, to remove duplicate locations returned by
+                    multiple clients: >lua
+                        local function on_list(what)
+                          vim.list.unique(what.items, function(item)
+                            return ('%s\0%d\0%d\0%d\0%d'):format(
+                              item.filename or '',
+                              item.lnum or 0,
+                              item.col or 0,
+                              item.end_lnum or 0,
+                              item.end_col or 0
+                            )
+                          end)
+                          vim.fn.setqflist({}, ' ', what)
+                          vim.cmd('botright copen')
+                        end
+
+                        vim.lsp.buf.definition({ on_list = on_list })
+                        vim.lsp.buf.references(nil, { on_list = on_list })
+<
+
                     See |setqflist-what| for the structure of the `what`
                     parameter.
       • {pos}       (`vim.Pos`, default: cursor position) Position on a buffer
@@ -2204,9 +2225,15 @@ enable({enable}, {client_id}, {bufnr}, {opts})
 
     Examples: |lsp-attach| |lsp-completion|
 
-    Note: the behavior of `autotrigger=true` is controlled by the LSP
-    `triggerCharacters` field. You can override it on LspAttach, see
-    |lsp-autocompletion|.
+    Note: ~
+      • |vim.lsp.omnifunc()| (|i_CTRL-X_CTRL-O|) queries every client that
+        advertises completion, including clients that were disabled by
+        `enable(false)`. To suppress completions for a client, clear its
+        capability on |LspAttach|:
+        `client.server_capabilities.completionProvider = nil`.
+      • Behavior of `autotrigger=true` is controlled by the LSP
+        `triggerCharacters` field. You can override it on LspAttach, see
+        |lsp-autocompletion|.
 
     Parameters: ~
       • {enable}     (`boolean`) True to enable, false to disable
@@ -2225,9 +2252,7 @@ get({opts})                                         *vim.lsp.completion.get()*
     Triggers LSP completion once in the current buffer, if LSP completion is
     enabled (see |lsp-attach| |lsp-completion|).
 
-    Used by the default LSP |omnicompletion| provider |vim.lsp.omnifunc()|,
-    thus |i_CTRL-X_CTRL-O| invokes this in LSP-enabled buffers. Use CTRL-Y to
-    select an item from the completion menu. |complete_CTRL-Y|
+    Use CTRL-Y to select an item from the completion menu. |complete_CTRL-Y|
 
     To invoke manually with CTRL-space, use this mapping: >lua
         -- Use CTRL-space to trigger LSP completion.
@@ -2429,7 +2454,6 @@ To try it out, here is a quickstart example using Copilot:       *lsp-copilot*
 1. Install Copilot: >sh
     npm install --global @github/copilot-language-server
 <
-
 2. Define a config, (or copy `lsp/copilot.lua` from
    https://github.com/neovim/nvim-lspconfig): >lua
     vim.lsp.config('copilot', {
@@ -2442,18 +2466,14 @@ To try it out, here is a quickstart example using Copilot:       *lsp-copilot*
         },
    })
 <
-
 3. Activate the config: >lua
     vim.lsp.enable('copilot')
 <
-
 4. Sign in to Copilot, or use the `:LspCopilotSignIn` command from
    https://github.com/neovim/nvim-lspconfig
-
 5. Enable inline completion: >lua
     vim.lsp.inline_completion.enable()
 <
-
 6. Set a keymap for `vim.lsp.inline_completion.get()` and invoke the keymap.
 
 

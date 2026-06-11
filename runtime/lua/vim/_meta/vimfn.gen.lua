@@ -2571,8 +2571,16 @@ function vim.fn.foreach(expr1, expr2) end
 --- Returns an empty string if a command doesn't exist or if it's
 --- ambiguous (for user-defined commands).
 ---
---- For example `fullcommand('s')`, `fullcommand('sub')`,
---- `fullcommand(':%substitute')` all return "substitute".
+--- Note: Command validation is not performed.  Results depend on
+--- Vim's internal command-specific identification rules.
+--- Examples:
+--- >vim
+---   echo [fullcommand('s')]    |" ['substitute']
+---   echo [fullcommand('sub')]    |" ['substitute']
+---   echo [fullcommand(': mark word')]  |" ['mark']
+---   echo [fullcommand(': markword')]  |" ['']
+---   echo [fullcommand('en')]    |" ['endif']
+--- <
 ---
 --- @param name string
 --- @return string
@@ -3056,12 +3064,11 @@ function vim.fn.getchar(expr, opts) end
 --- @return integer
 function vim.fn.getcharmod() end
 
---- Get the position for String {expr}.  Same as |getpos()| but the
---- column number in the returned List is a character index
---- instead of a byte index.
---- If |getpos()| returns a very large column number, equal to
---- |v:maxcol|, then getcharpos() will return the character index
---- of the last character.
+--- Same as |getpos()|, except the column-number is
+--- character-indexed (UTF-8) instead of byte-indexed.
+---
+--- If |getpos()| returns |v:maxcol|, then getcharpos() returns
+--- the index of the last character.
 ---
 --- Example:
 --- With the cursor on '세' in line 5 with text "여보세요": >vim
@@ -5530,8 +5537,8 @@ function vim.fn.lispindent(lnum) end
 --- @return string
 function vim.fn.list2blob(list) end
 
---- Convert each number in {list} to a character string can
---- concatenate them all.  Examples: >vim
+--- Converts each codepoint in {list} to a UTF-8 character and
+--- returns the concatenated string.  Examples: >vim
 ---   echo list2str([32])    " returns " "
 ---   echo list2str([65, 66, 67])  " returns "ABC"
 --- <The same can be done (slowly) with: >vim
@@ -6171,15 +6178,15 @@ function vim.fn.matchend(expr, pat, start, count) end
 ---     use for fuzzy matching.
 ---
 --- {str} is treated as a literal string and regular expression
---- matching is NOT supported.  The maximum supported {str} length
---- is 256.
+--- matching is NOT supported.  Only the first 1024 characters of
+--- {str} and of each item in {list} are used for matching;
+--- characters beyond that are ignored.
 ---
 --- When {str} has multiple words each separated by white space,
 --- then the list of strings that have all the words is returned.
 ---
 --- If there are no matching strings or there is an error, then an
---- empty list is returned.  If length of {str} is greater than
---- 256, then returns an empty list.
+--- empty list is returned.
 ---
 --- When {limit} is given, matchfuzzy() will find up to this
 --- number of matches in {list} and return them in sorted order.
@@ -6713,11 +6720,10 @@ function vim.fn.nextnonblank(lnum) end
 
 --- Lua: Prefer |string.char()|: only works with ASCII.
 ---
---- Return a string with a single character, which has the number
---- value {expr}.  Examples: >vim
+--- Gets a UTF-8 string for a single codepoint {expr}.
+--- Examples: >vim
 ---   echo nr2char(64)    " returns '\@'
 ---   echo nr2char(32)    " returns ' '
---- <Example for "utf-8": >vim
 ---   echo nr2char(300)    " returns I with bow character
 --- <
 --- UTF-8 encoding is always used, {utf8} option has no effect,

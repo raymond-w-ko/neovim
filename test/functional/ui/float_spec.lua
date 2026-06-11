@@ -205,6 +205,13 @@ describe('float window', function()
       "Conflict: 'bufpos' not allowed with non-float window",
       pcall_err(api.nvim_win_set_config, winid, { split = 'right', bufpos = { 0, 0 } })
     )
+
+    -- Reconfiguring split
+    local not_allowed = { hide = true, zindex = 1, title = '', footer = '', border = 'single' }
+    for k, v in pairs(not_allowed) do
+      local err = ("Conflict: '%s' not allowed with non-float window"):format(k)
+      eq(err, pcall_err(api.nvim_win_set_config, winid, { [k] = v }))
+    end
   end)
 
   it('win_execute() should work', function()
@@ -3055,6 +3062,45 @@ describe('float window', function()
       end
       eq({ { '🦄', '' }, { 'BB', { 'B0', 'B1', '' } } }, api.nvim_win_get_config(win).title)
       eq({ { '🦄', '' }, { 'BB', { 'B0', 'B1', '' } } }, api.nvim_win_get_config(win).footer)
+
+      api.nvim_win_set_config(win, { border = 'single', title = 'a\tb', footer = 'A\tB' })
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {5:┌}{11:a^Ib}{5:─────┐}|
+            {5:│}{1: halloj! }{5:│}|
+            {5:│}{1: BORDAA  }{5:│}|
+            {5:└}{11:A^IB}{5:─────┘}|
+          ]],
+          float_pos = { [4] = { 1001, 'NW', 1, 2, 5, true, 50, 1, 2, 5 } },
+          win_viewport = {
+            [2] = { win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0 },
+            [4] = { win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0 },
+          },
+        })
+      else
+        screen:expect([[
+          ^                                        |
+          {0:~                                       }|
+          {0:~    }{5:┌}{11:a^Ib}{5:─────┐}{0:                        }|
+          {0:~    }{5:│}{1: halloj! }{5:│}{0:                        }|
+          {0:~    }{5:│}{1: BORDAA  }{5:│}{0:                        }|
+          {0:~    }{5:└}{11:A^IB}{5:─────┘}{0:                        }|
+                                                  |
+        ]])
+      end
+
+      api.nvim_win_set_config(win, { title = { { 'a\tb' } }, footer = { { 'A\tB' } } })
+      screen:expect_unchanged()
 
       -- making it a split should not leak memory
       api.nvim_win_set_config(win, { vertical = true })
@@ -11432,8 +11478,18 @@ describe('float window', function()
       winid = api.nvim_open_win(buf, false, config)
       eq('●', api.nvim_win_get_config(winid).border[1])
 
+      -- Single-space border char.
+      command([[lua vim.opt.winborder=",,, ,,,, "]])
+      winid = api.nvim_open_win(buf, false, config)
+      eq({ '', '', '', ' ', '', '', '', ' ' }, api.nvim_win_get_config(winid).border)
+
+      -- Trailing comma hides the last side
+      command([[set winborder=+,-,+,\|,+,-,+,]])
+      winid = api.nvim_open_win(buf, false, config)
+      eq({ '+', '-', '+', '|', '+', '-', '+', '' }, api.nvim_win_get_config(winid).border)
+      command('fclose!')
+
       eq('Vim(set):E474: Invalid argument: winborder=,,', pcall_err(command, 'set winborder=,,'))
-      eq('Vim(set):E474: Invalid argument: winborder=+,-,+,|,+,-,+,', pcall_err(command, [[set winborder=+,-,+,\|,+,-,+,]]))
       eq('Vim(set):E474: Invalid argument: winborder=custom', pcall_err(command, 'set winborder=custom'))
     end)
 

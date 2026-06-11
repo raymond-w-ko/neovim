@@ -665,6 +665,12 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
     unblock_autocmds();
   }
 
+  // When a quickfix buffer is deleted from a window, clear the
+  // 'winfixheight' option.
+  if (bt_quickfix(buf) && win_valid && win->w_buffer == buf) {
+    win->w_p_wfh = false;
+  }
+
   // Remember if the buffer may be hidden soon, or is already hidden.
   bool hiding_buf = buf->b_nwindows <= 0
                     || (win_valid && win->w_buffer == buf && buf->b_nwindows == 1);
@@ -1476,6 +1482,7 @@ static int do_buffer_ext(int action, int start, int dir, int count, int flags)
         const int rv = switch_win_noblock(&switchwin, firstwin, curtab, true);
         assert(rv == OK);
         (void)rv;
+        // retry (recurse)
         do_buffer_ext(action, start, dir, count, flags);
         restore_win_noblock(&switchwin, true);
       }
