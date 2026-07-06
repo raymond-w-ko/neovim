@@ -294,6 +294,8 @@ static buf_T *compl_curr_buf = NULL;  ///< buf where completion is active
 // longer fixed timeout is used (COMPL_FUNC_TIMEOUT_MS or
 // COMPL_FUNC_TIMEOUT_NON_KW_MS). - girish
 static bool compl_autocomplete = false;        ///< whether autocompletion is active
+static bool compl_autocomplete_pending = false;
+static uint64_t compl_autocomplete_start_tv;   ///< when the delay was armed
 static uint64_t compl_timeout_ms = COMPL_INITIAL_TIMEOUT_MS;
 static bool compl_time_slice_expired = false;  ///< time budget exceeded for current source
 static bool compl_from_nonkeyword = false;     ///< completion started from non-keyword
@@ -1777,6 +1779,14 @@ void ins_compl_show_pum(void)
   pum_display(compl_match_array, compl_match_arraysize, cur, array_changed, 0);
   curwin->w_cursor.col = col;
 
+  // The cursor was temporarily moved to "compl_col" above to position the
+  // menu, so the screen update left w_wcol conceal-corrected for that column
+  // rather than for the real cursor.  Redraw the cursor line so the caret is
+  // positioned correctly when the cursor line has concealed text.
+  if (curwin->w_p_cole > 0 && conceal_cursor_line(curwin)) {
+    redrawWinline(curwin, curwin->w_cursor.lnum);
+  }
+
   // After adding leader, set the current match to shown match.
   if (compl_started && compl_curr_match != compl_shown_match) {
     compl_curr_match = compl_shown_match;
@@ -2328,13 +2338,8 @@ static void ins_compl_new_leader(void)
   ins_compl_insert_bytes(compl_leader.data + get_compl_len(), -1);
   compl_used_match = false;
 
-  if (p_acl > 0) {
-    pum_undisplay(true);
-    redraw_later(curwin, UPD_VALID);
-    update_screen();  // Show char (deletion) immediately
-    ui_flush();
-  }
-
+  int save_w_wrow = curwin->w_wrow;
+  int save_w_leftcol = curwin->w_leftcol;
   if (compl_started) {
     ins_compl_set_original_text(compl_leader.data, compl_leader.size);
     if (is_cpt_func_refresh_always()) {
@@ -2353,7 +2358,7 @@ static void ins_compl_new_leader(void)
     } else {
       compl_autocomplete = false;
     }
-    if (ins_complete(Ctrl_N, true) == FAIL) {
+    if (ins_complete(Ctrl_N, false) == FAIL) {
       compl_cont_status = 0;
     }
     compl_restarting = false;
@@ -2361,8 +2366,12 @@ static void ins_compl_new_leader(void)
 
   compl_enter_selects = !compl_used_match && compl_selected_item != -1;
 
-  // Show the popup menu with a different set of matches.
-  ins_compl_show_pum();
+  // Show the popup menu with a different set of matches.  With
+  // 'autocompletedelay' the menu is already visible here, so update it
+  // immediately rather than re-arming the delay, like a zero delay does.
+  if (!compl_interrupted) {
+    show_pum(save_w_wrow, save_w_leftcol);
+  }
 
   // Don't let Enter select the original text when there is no popup menu.
   if (compl_match_array == NULL) {
@@ -2745,7 +2754,7 @@ static bool ins_compl_stop(const int c, const int prev_mode, bool retval)
   compl_num_bests = 0;
   compl_ins_end_col = 0;
 
-  if (c == Ctrl_C && cmdwin_type != 0) {
+  if (c == Ctrl_C && bt_cmdwin(curbuf)) {
     // Avoid the popup menu remains displayed when leaving the
     // command line window.
     update_screen();
@@ -3448,7 +3457,7 @@ static void set_completion(colnr_T startcol, list_T *list)
   bool compl_no_select = (cur_cot_flags & kOptCotFlagNoselect) != 0;
 
   // If already doing completions stop it.
-  if (ctrl_x_mode_not_default()) {
+  if (compl_started || ctrl_x_mode_not_default()) {
     ins_compl_prep(' ');
   }
   ins_compl_clear();
@@ -5406,7 +5415,6 @@ static int ins_compl_next(bool allow_get_expansion, int count, bool insert_match
   bool compl_no_insert = (cur_cot_flags & kOptCotFlagNoinsert) != 0
                          || (compl_autocomplete && !ins_compl_has_preinsert());
   bool compl_preinsert = ins_compl_has_preinsert();
-  bool has_autocomplete_delay = (compl_autocomplete && p_acl > 0);
 
   // When user complete function return -1 for findstart which is next
   // time of 'always', compl_shown_match become NULL.
@@ -5453,9 +5461,6 @@ static int ins_compl_next(bool allow_get_expansion, int count, bool insert_match
   // Insert the text of the new completion, or the compl_leader.
   if (!started && ins_compl_preinsert_longest()) {
     ins_compl_insert(true, true);
-    if (has_autocomplete_delay) {
-      update_screen();  // Show the inserted text right away
-    }
   } else if (compl_no_insert && !started && !compl_preinsert) {
     ins_compl_insert_bytes(compl_orig_text.data + get_compl_len(), -1);
     compl_used_match = false;
@@ -5480,10 +5485,8 @@ static int ins_compl_next(bool allow_get_expansion, int count, bool insert_match
     // redraw to show the user what was inserted
     update_screen();  // TODO(bfredl): no!
 
-    if (!has_autocomplete_delay) {
-      // display the updated popup menu
-      ins_compl_show_pum();
-    }
+    // display the updated popup menu
+    ins_compl_show_pum();
 
     // Delete old text to be replaced, since we're still searching and
     // don't want to match ourselves!
@@ -5557,9 +5560,9 @@ void ins_compl_check_keys(int frequency, bool in_compl_func)
       // back with vungetc() below.  But skip K_IGNORE.
       c = safe_vgetc();
       if (c != K_IGNORE) {
-        // Don't interrupt completion when the character wasn't typed,
-        // e.g., when doing @q to replay keys.
-        if (c != Ctrl_R && KeyTyped) {
+        // Typed keys that get mapped lose KeyTyped. Still let
+        // complete_check() interrupt, except during @r replay.
+        if (c != Ctrl_R && (KeyTyped || (in_compl_func && reg_executing == 0))) {
           compl_interrupted = true;
         }
 
@@ -6257,10 +6260,6 @@ static void ins_compl_show_statusmsg(void)
 /// Returns OK if completion was done, FAIL if something failed.
 int ins_complete(int c, bool enable_pum)
 {
-  const bool disable_ac_delay = compl_started && ctrl_x_mode_normal()
-                                && (c == Ctrl_N || c == Ctrl_P || c == Ctrl_R
-                                    || ins_compl_pum_key(c));
-
   compl_direction = ins_compl_key2dir(c);
   int insert_match = ins_compl_use_match(c);
 
@@ -6272,10 +6271,6 @@ int ins_complete(int c, bool enable_pum)
     return FAIL;
   }
 
-  uint64_t compl_start_tv = 0;  ///< Time when match collection starts
-  if (compl_autocomplete && p_acl > 0 && !disable_ac_delay) {
-    compl_start_tv = os_hrtime();
-  }
   compl_curr_win = curwin;
   compl_curr_buf = curwin->w_buffer;
   compl_shown_match = compl_curr_match;
@@ -6331,26 +6326,6 @@ int ins_complete(int c, bool enable_pum)
     ins_compl_show_statusmsg();
   }
 
-  // Wait for the autocompletion delay to expire
-  if (compl_autocomplete && p_acl > 0 && !disable_ac_delay && !no_matches_found
-      && (os_hrtime() - compl_start_tv) / 1000000 < (uint64_t)p_acl) {
-    setcursor();
-    ui_flush();
-    do {
-      if (char_avail()) {
-        if (ins_compl_preinsert_effect() && ins_compl_win_active(curwin)) {
-          ins_compl_delete(false);  // Remove pre-inserted text
-          compl_ins_end_col = compl_col;
-        }
-        ins_compl_restart();
-        compl_interrupted = true;
-        break;
-      } else {
-        os_delay(2L, true);
-      }
-    } while ((os_hrtime() - compl_start_tv) / 1000000 < (uint64_t)p_acl);
-  }
-
   // Show the popup menu, unless we got interrupted.
   if (enable_pum && !compl_interrupted) {
     show_pum(save_w_wrow, save_w_leftcol);
@@ -6366,6 +6341,36 @@ void ins_compl_enable_autocomplete(void)
 {
   compl_autocomplete = true;
   compl_get_longest = false;
+}
+
+/// Arm the 'autocompletedelay' timer when the delay is in effect.
+/// Return true when the popup should be deferred, false to trigger it now.
+bool ins_compl_arm_autocomplete_delay(void)
+{
+  if (p_acl > 0) {
+    compl_autocomplete_start_tv = os_hrtime();
+    compl_autocomplete_pending = true;
+    return true;
+  }
+  return false;
+}
+
+/// Clear the pending 'autocompletedelay' state.
+void ins_compl_clear_autocomplete_delay(void)
+{
+  compl_autocomplete_pending = false;
+}
+
+/// Return true while waiting for 'autocompletedelay' to expire.
+bool ins_compl_autocomplete_pending(void)
+{
+  return compl_autocomplete_pending;
+}
+
+/// Return the time in msec since the 'autocompletedelay' was armed.
+int64_t ins_compl_autocomplete_elapsed(void)
+{
+  return (int64_t)((os_hrtime() - compl_autocomplete_start_tv) / 1000000);
 }
 
 /// Remove (if needed) and show the popup menu

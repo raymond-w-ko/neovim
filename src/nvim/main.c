@@ -303,10 +303,7 @@ int main(int argc, char **argv)
 #ifdef MSWIN
   int startup_stderr_fd = -1;
   if (embedded_mode) {
-    startup_stderr_fd = os_dup(STDERR_FILENO);
-    if (startup_stderr_fd >= 0) {
-      os_set_cloexec(startup_stderr_fd);
-    }
+    startup_stderr_fd = os_dup_cloexec(STDERR_FILENO);
   }
 #endif
 
@@ -684,7 +681,7 @@ int main(int argc, char **argv)
   ILOG("starting main loop");
 
   // Main loop: never returns.
-  normal_enter(false, false);
+  normal_enter(false);
 
 #if defined(MSWIN) && !defined(MAKE_LIB)
   xfree(argv);

@@ -39,6 +39,10 @@ func Test_highlight()
   call assert_equal("Group3         xxx cleared",
 				\ split(execute("hi Group3"), "\n")[0])
   call assert_fails("hi Crash term='asdf", "E475:")
+
+  if has('gui_running')
+    call assert_fails('hi NotUsed guibg=none', 'E1361:')
+  endif
 endfunc
 
 func HighlightArgs(name)
@@ -771,6 +775,7 @@ func Test_visual_sbr()
   let buf = RunVimInTerminal('-S Xtest_visual_sbr', {'rows': 6,'columns': 60})
 
   call term_sendkeys(buf, "v$")
+  call WaitForAssert({-> assert_match('VISUAL.*\d\+\s\+\d', term_getline(buf, 6))}, 1000)
   call VerifyScreenDump(buf, 'Test_visual_sbr_1', {})
 
   " clean up

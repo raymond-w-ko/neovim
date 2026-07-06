@@ -140,6 +140,12 @@ describe(':checkhealth', function()
     eq(true, report:find('- custom_ft:', 1, true) ~= nil)
     eq(true, report:find('- bad_ft:', 1, true) ~= nil)
   end)
+
+  it('renders report when Nvim starts with -M', function()
+    clear { args = { '-M' } }
+    command('checkhealth lsp')
+    eq(true, curbuf_contents() ~= '')
+  end)
 end)
 
 describe('vim.health', function()
@@ -507,7 +513,7 @@ describe(':checkhealth window', function()
     end)
   end
 
-  it('opens in tab', function()
+  it('opens in new tabpage after the current one', function()
     -- create an empty buffer called "my_buff"
     api.nvim_create_buf(false, true)
     command('file my_buff')
@@ -530,5 +536,16 @@ describe(':checkhealth window', function()
     ]])
     local buffers_per_tab = fn.CollectBuffersPerTab()
     eq(buffers_per_tab, { tab1 = { 'my_buff' }, tab2 = { 'health://' } })
+    command('bwipe')
+    command('tab split | tab split | tab split | tabprevious')
+    command('checkhealth success1')
+    buffers_per_tab = fn.CollectBuffersPerTab()
+    eq(buffers_per_tab, {
+      tab1 = { 'my_buff' },
+      tab2 = { 'my_buff' },
+      tab3 = { 'my_buff' },
+      tab4 = { 'health://' },
+      tab5 = { 'my_buff' },
+    })
   end)
 end)

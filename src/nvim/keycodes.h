@@ -195,7 +195,7 @@ enum key_extra {
   // KE_CSI = 81,           // Nvim doesn't need escaping CSI
   KE_SNR = 82,              // <SNR>
   KE_PLUG = 83,             // <Plug>
-  KE_CMDWIN = 84,           // open command-line window from Command-line Mode
+  // KE_CMDWIN = 84,        // Nvim "cmdwin" is not special. #40312
 
   KE_C_LEFT = 85,           // control-left
   KE_C_RIGHT = 86,          // control-right
@@ -224,6 +224,8 @@ enum key_extra {
   // KE_SID = 106,
   // KE_ESC = 107,
   KE_WILD = 108,            // triggers wildmode completion
+  // KE_OSC = 109,
+  KE_COMPLETE_DELAY = 110,  // 'autocompletedelay' expired
 };
 
 // the three byte codes are replaced with the following int when using vgetc()
@@ -448,9 +450,10 @@ enum key_extra {
 
 #define K_SNR           TERMCAP2KEY(KS_EXTRA, KE_SNR)
 #define K_PLUG          TERMCAP2KEY(KS_EXTRA, KE_PLUG)
-#define K_CMDWIN        TERMCAP2KEY(KS_EXTRA, KE_CMDWIN)
 
 #define K_DROP          TERMCAP2KEY(KS_EXTRA, KE_DROP)
+
+#define K_COMPLETE_DELAY TERMCAP2KEY(KS_EXTRA, KE_COMPLETE_DELAY)
 
 #define K_EVENT         TERMCAP2KEY(KS_EXTRA, KE_EVENT)
 #define K_COMMAND       TERMCAP2KEY(KS_EXTRA, KE_COMMAND)

@@ -449,6 +449,7 @@ M.vars = {
   },
   useractive = {
     type = 'integer',
+    tags = { 'user-idle' },
     desc = [=[
       Timestamp (nanoseconds since UNIX epoch) indicating the most
       recent user activity, i.e. when a key is received from a UI
@@ -773,6 +774,17 @@ M.vars = {
       To see the current "uptime": >lua
         vim.print(('uptime: %d seconds'):format(os.time() - (vim.v.starttime / 1e9)))
       <
+      Read-only.
+    ]=],
+  },
+  startreason = {
+    type = 'string',
+    desc = [=[
+      The reason Nvim started. Possible values:
+      - "normal"    Normal startup, yearning for life, etc.
+      - "restart"   Started by |:restart|.
+      - "restart!"  Started by |:restart!| or |ZR|.
+
       Read-only.
     ]=],
   },

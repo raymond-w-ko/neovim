@@ -28,6 +28,7 @@
 #include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
+#include "nvim/ex_getln.h"
 #include "nvim/extmark.h"
 #include "nvim/extmark_defs.h"
 #include "nvim/fileio.h"
@@ -145,14 +146,19 @@ static linenr_T o_lnum = 0;
 
 static kvec_t(char) replace_stack = KV_INITIAL_VALUE;
 
+// With 'autocompletedelay' set, arm the delay and let the main loop fire
+// Insert-mode autocommands; the popup is shown later on K_COMPLETE_DELAY.
+// Otherwise trigger completion right away.
 #define TRIGGER_AUTOCOMPLETE() \
   do { \
     redraw_later(curwin, UPD_VALID); \
     update_screen();  /* Show char deletion immediately */ \
     ui_flush(); \
     ins_compl_enable_autocomplete(); \
-    insert_do_complete(s); \
-    break; \
+    if (!ins_compl_arm_autocomplete_delay()) { \
+      insert_do_complete(s); \
+      break; \
+    } \
   } while (0)
 
 #define MAY_TRIGGER_AUTOCOMPLETE(c) \
@@ -366,6 +372,8 @@ static void insert_enter(InsertState *s)
     // and return false, causing `state_enter` to be called again.
   } while (!ins_esc(&s->count, s->cmdchar, s->nomove));
 
+  // Drop a pending autocomplete so it does not outlive Insert mode.
+  ins_compl_clear_autocomplete_delay();
   // Always update o_lnum, so that a "CTRL-O ." that adds a line
   // still puts the cursor back after the inserted text.
   if (ins_at_eol) {
@@ -518,8 +526,8 @@ static int insert_check(VimState *state)
   s->old_topline = curwin->w_topline;
   s->old_topfill = curwin->w_topfill;
 
-  if (s->c != K_EVENT) {
-    s->lastc = s->c;  // remember previous char for CTRL-D
+  if (s->c != K_EVENT && s->c != K_COMPLETE_DELAY) {
+    s->lastc = s->c;  // remember the previous char for CTRL-D
   }
 
   // After using CTRL-G U the next cursor key will not break undo.
@@ -539,9 +547,13 @@ static int insert_check(VimState *state)
       if (vim_isprintc(s->c)) {
         ins_compl_enable_autocomplete();
         ins_compl_init_get_longest();
-        insert_do_complete(s);
-        insert_handle_key_post(s);
-        return 1;
+        // Defer until the delay expires (K_COMPLETE_DELAY), or
+        // trigger now when no delay is in effect.
+        if (!ins_compl_arm_autocomplete_delay()) {
+          insert_do_complete(s);
+          insert_handle_key_post(s);
+          return 1;
+        }
       }
     }
   }
@@ -571,6 +583,10 @@ static int insert_execute(VimState *state, int key)
   // Don't want K_EVENT with cursorhold for the second key, e.g., after CTRL-V.
   if (key != K_EVENT) {
     did_cursorhold = true;
+  }
+  if (key != K_EVENT && key != K_COMPLETE_DELAY) {
+    // Don't want delayed autocompletion from the previous key either.
+    ins_compl_clear_autocomplete_delay();
   }
 
   // Special handling of keys while the popup menu is visible or wanted
@@ -740,11 +756,9 @@ static int insert_handle_key(InsertState *s)
     FALLTHROUGH;
 
   case Ctrl_C:        // End input mode
-    if (s->c == Ctrl_C && cmdwin_type != 0) {
-      // Close the cmdline window.
-      cmdwin_result = K_IGNORE;
-      got_int = false;         // don't stop executing autocommands et al
-      s->nomove = true;
+    if (s->c == Ctrl_C && bt_cmdwin(curbuf)) {
+      got_int = false;  // Don't interrupt autocmds etc.
+      cmdwin_do_action("cancel");  // cmdwin: CTRL-C closes cmdwin, pre-fills cmdline.
       return 0;  // exit insert mode
     }
     if (s->c == Ctrl_C && bt_prompt(curbuf)) {
@@ -996,6 +1010,25 @@ static int insert_handle_key(InsertState *s)
     break;
   }
 
+  case K_COMPLETE_DELAY:  // 'autocompletedelay' expired
+    // If CTRL-G U was used apply it to the next typed key.
+    if (dont_sync_undo == kTrue) {
+      dont_sync_undo = kNone;
+    }
+    ins_compl_clear_autocomplete_delay();
+    if (!ins_compl_has_autocomplete() || char_avail() || curwin->w_cursor.col == 0) {
+      break;
+    }
+    s->c = char_before_cursor();
+    if (!vim_isprintc(s->c)) {
+      break;
+    }
+    // The completion may have been cleared while waiting, so re-enable
+    // autocomplete to match a zero delay.
+    ins_compl_enable_autocomplete();
+    insert_do_complete(s);
+    break;
+
   case K_HOME:        // <Home>
   case K_KHOME:
   case K_S_HOME:
@@ -1107,10 +1140,9 @@ static int insert_handle_key(InsertState *s)
       }
       break;
     }
-    if (cmdwin_type != 0) {
-      // Execute the command in the cmdline window.
-      cmdwin_result = CAR;
-      return 0;
+    if (s->c == CAR && bt_cmdwin(curbuf)) {
+      cmdwin_do_action("confirm");  // cmdwin: <CR> executes the command under the cursor.
+      return 0;  // exit insert mode
     }
     if ((mod_mask & MOD_MASK_SHIFT) == 0 && bt_prompt(curbuf)) {
       prompt_invoke_callback();
@@ -1273,6 +1305,7 @@ normalchar:
 
 static void insert_do_complete(InsertState *s)
 {
+  ins_compl_clear_autocomplete_delay();
   compl_busy = true;
   disable_fold_update++;  // don't redraw folds here
   if (ins_complete(s->c, true) == FAIL) {
@@ -1296,8 +1329,9 @@ static void insert_do_cindent(InsertState *s)
 
 static void insert_handle_key_post(InsertState *s)
 {
-  // If typed something may trigger CursorHoldI again.
-  if (s->c != K_EVENT
+  // If typed something may trigger CursorHoldI again; K_COMPLETE_DELAY is
+  // injected, not typed.
+  if (s->c != K_EVENT && s->c != K_COMPLETE_DELAY
       // but not in CTRL-X mode, a script can't restore the state
       && ctrl_x_mode_normal()) {
     did_cursorhold = false;

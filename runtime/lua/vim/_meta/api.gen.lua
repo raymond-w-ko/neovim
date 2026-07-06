@@ -26,6 +26,14 @@ function vim.api.nvim__buf_stats(buf) end
 
 --- WARNING: This feature is experimental/unstable.
 ---
+--- Records the cmdwin scratchbuf and type, or clears both when type="" / buf=0. Internal use only.
+---
+--- @param type string ':', '/', '?' (first char only); empty to clear.
+--- @param buf integer cmdwin buffer id, or 0 to clear.
+function vim.api.nvim__cmdwin_set(type, buf) end
+
+--- WARNING: This feature is experimental/unstable.
+---
 --- Sets info for the completion item at the given index. If the info text was shown in a window,
 --- returns the window and buffer ids, or empty dict if not shown.
 ---
@@ -501,7 +509,7 @@ function vim.api.nvim_buf_get_lines(buf, start, end_, strict_indexing) end
 --- uppercase/file mark set in another buffer.
 function vim.api.nvim_buf_get_mark(buf, name) end
 
---- Gets the full file name for the buffer
+--- Gets the full/absolute filepath of the buffer, or the buffer name for non-file buffers.
 ---
 --- @param buf integer Buffer id, or 0 for current buffer
 --- @return string # Buffer name
@@ -849,7 +857,7 @@ function vim.api.nvim_clear_autocmds(opts) end
 --- Executes an Ex command `cmd`, specified as a Dict with the same structure as returned by
 --- `nvim_parse_cmd()`.
 ---
---- Use `magic={…=false}` to disable special chars:
+--- Use `magic={…=false}` to disable special chars (see also `open-file`):
 --- ```lua
 --- vim.api.nvim_cmd({
 ---     cmd = 'edit',
@@ -967,12 +975,10 @@ function vim.api.nvim_create_autocmd(event, opts) end
 
 --- Creates a new, empty, unnamed buffer.
 ---
---- @see buf_open_scratch
 --- @param listed boolean Sets 'buflisted'
 --- @param scratch boolean Creates a "throwaway" `scratch-buffer` for temporary work
 --- (always 'nomodified'). Also sets 'nomodeline' on the buffer.
 --- @return integer # Buffer id, or 0 on error
----
 function vim.api.nvim_create_buf(listed, scratch) end
 
 --- Creates a new namespace or gets an existing one. [namespace]()
@@ -2299,12 +2305,18 @@ function vim.api.nvim_set_option(name, value) end
 --- @param value any New option value
 --- @param opts vim.api.keyset.option Optional parameters
 --- - buf: Buffer number. Used for setting buffer local option.
+--- - dry_run: (`boolean?`, default: false) If true, then the
+---   option value won't be set.
+--- - operation: One of "set", "append", "prepend", or "remove".
+---   Corresponds to `:set=`, `:set+=`, `:set^=`, and `:set-=`.
+---   Default is "set".
 --- - scope: One of "global" or "local". Analogous to
 --- `:setglobal` and `:setlocal`, respectively.
 --- - tab: `tab-ID` for tab-local options (currently only 'cmdheight'). Tabpage 0
 ---   means the current tabpage. If a non-current tab is given, the value will take
 ---   effect when it is switched-to.
 --- - win: `window-ID`. Used for setting window local option.
+--- @return any # Option value
 function vim.api.nvim_set_option_value(name, value, opts) end
 
 --- Sets a global (g:) variable.
@@ -2492,6 +2504,24 @@ function vim.api.nvim_win_hide(win) end
 --- @return boolean # true if the window is valid, false otherwise
 function vim.api.nvim_win_is_valid(win) end
 
+--- Resizes a window, anchored to a given edge.
+---
+--- The window first takes space from the non-anchored side, and only then from the anchored side.
+--- The "anchor" decides the fixed edge, so a window can grow or shrink in any direction.
+---
+--- Can set height, width (only for a vertical split), or both. The "anchor" applies to the matching
+--- axis (top/bottom for height, left/right for width); the other axis uses its default anchor.
+---
+--- @param win integer `window-ID`, or 0 for current window
+--- @param width integer New width (columns), or -1 for "no change".
+--- @param height integer New height (rows), or -1 for "no change".
+--- @param opts vim.api.keyset.win_resize Optional parameters.
+--- - anchor: Edge that stays fixed while the opposite edge moves; the
+---   neighbor on the moving side is resized first. One of:
+---   - "top" (default) or "bottom"
+---   - "left" (default) or "right"
+function vim.api.nvim_win_resize(win, width, height, opts) end
+
 --- Sets the current buffer in a window.
 ---
 --- Note: As a side-effect, this executes `BufEnter` and `BufLeave` autocommands.
@@ -2526,10 +2556,9 @@ function vim.api.nvim_win_set_config(win, config) end
 --- @param pos [integer, integer] (row, col) tuple representing the new position
 function vim.api.nvim_win_set_cursor(win, pos) end
 
---- Sets the window height.
----
---- @param win integer `window-ID`, or 0 for current window
---- @param height integer Height as a count of rows
+--- @deprecated
+--- @param win integer
+--- @param height integer
 function vim.api.nvim_win_set_height(win, height) end
 
 --- Set highlight namespace for a window. This will use highlights defined with
@@ -2555,11 +2584,9 @@ function vim.api.nvim_win_set_option(window, name, value) end
 --- @param value any Variable value
 function vim.api.nvim_win_set_var(win, name, value) end
 
---- Sets the window width. This will only succeed if the screen is split
---- vertically.
----
---- @param win integer `window-ID`, or 0 for current window
---- @param width integer Width as a count of columns
+--- @deprecated
+--- @param win integer
+--- @param width integer
 function vim.api.nvim_win_set_width(win, width) end
 
 --- Computes the number of screen lines occupied by a range of text in a given window.

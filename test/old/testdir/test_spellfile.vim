@@ -408,6 +408,31 @@ func Test_spellfile_format_error()
   let &rtp = save_rtp
 endfunc
 
+" An over-length soundfold() argument must not overflow the MAXWLEN result
+" buffer in the single-byte branch of spell_soundfold_sal().
+func Test_spellfile_soundfold_sal_overflow()
+  throw 'Skipped: Nvim does not support enc=latin1'
+  let save_enc = &encoding
+  set encoding=latin1
+  " A SAL map that appends without collapsing, so the result is not shorter
+  " than the input.
+  call writefile(['SET ISO8859-1', 'SAL collapse_result false',
+	\ 'SAL a aaaa', 'SAL b bbbb'], 'Xsal.aff')
+  call writefile(['2', 'hello', 'world'], 'Xsal.dic')
+  mkspell! Xsal Xsal
+  set spl=Xsal.latin1.spl spell
+
+  " 253 input characters hit the buffer boundary; the result must not exceed
+  " MAXWLEN - 1.
+  call assert_true(strlen(soundfold(repeat('a', 253))) <= 253)
+
+  set nospell spl& spelllang&
+  call delete('Xsal.aff')
+  call delete('Xsal.dic')
+  call delete('Xsal.latin1.spl')
+  let &encoding = save_enc
+endfunc
+
 " Test for format errors in suggest file
 func Test_sugfile_format_error()
   let save_rtp = &rtp
@@ -1277,6 +1302,55 @@ func Test_spell_sug_tree_count_words_overflow()
 
   set spell& spelllang& runtimepath&
   bwipe!
+endfunc
+
+" A word longer than MAXWLEN must not overflow the soundfold result buffer in
+" the single-byte SOFO branch of spell_soundfold_sofo().
+func Test_soundfold_overflow()
+  throw 'Skipped: Nvim does not support setting encoding=latin1'
+  let _enc=&enc
+  set enc=latin1
+  call writefile(['SOFOFROM ab', 'SOFOTO xy'], 'Xtest.aff', 'D')
+  call writefile(['1', 'foo'], 'Xtest.dic', 'D')
+  mkspell! Xtest Xtest
+  defer delete('Xtest.latin1.spl')
+  defer delete('Xtest.latin1.sug')
+  setl spelllang=Xtest.latin1.spl spell
+
+  " Before the fix the copy loop wrote one byte per input byte into a
+  " MAXWLEN (254) stack buffer with no upper bound, smashing the stack.
+  let sound = soundfold(repeat('ab', 300))
+  call assert_true(strlen(sound) < 254, 'soundfold result exceeds MAXWLEN')
+
+  set spell& spelllang&
+  let &enc = _enc
+endfunc
+
+func Test_spell_sal_sofo_truncated()
+  call mkdir('Xspelldir/spell', 'pR')
+
+  " "VIMspell" <ver=0x32>
+  "   SN_SAL(5)  flags=0 len=7   : <salflags=0><salcount=0,1><a><0><1>a<1>a
+  "   SN_SOFO(6) flags=0 len=0   : truncated, no body -> EOF in reader
+  " (28 bytes total)
+  let bytes = 0z56494d7370656c6c.3205000000000700.000101610161060000.000000
+  call writefile(bytes, 'Xspelldir/spell/Xx.utf-8.spl', 'b')
+
+  let save_rtp = &rtp
+  set rtp=./Xspelldir
+  try
+    set spelllang=Xx
+    silent! set spell
+  catch
+    " an error message is fine; a crash is not
+  endtry
+
+  " Reaching this point means Vim did not crash on the crafted file.
+  call assert_true(v:true)
+
+  set nospell
+  set spelllang&
+  let &rtp = save_rtp
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

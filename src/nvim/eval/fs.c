@@ -208,34 +208,25 @@ repeat:
     }
   }
 
-#ifndef MSWIN
+  FileInfo file_info;
+  os_fileinfo2(*fnamep, &file_info);
   if (src[*usedlen] == ':' && src[*usedlen + 1] == 'h') {
-    char *fname = *fnamep;
-    // POSIX reserves exactly "//"; longer slash runs are ordinary absolute paths.
-    // "///foo/bar" => "/foo"
-    // "//foo/bar" => "//foo"
-    if (fname[0] == '/' && fname[1] == '/' && fname[2] == '/') {
-      while (fname[1] == '/') {
-        fname++;
-      }
-      *fnamep = fname;
-    }
+    s = *fnamep + file_info.rest_off;
+    *fnamep = *fnamep + file_info.prefix_off;
   }
-#endif
 
   char *tail = path_tail(*fnamep);
   *fnamelen = strlen(*fnamep);
 
   // ":h" - head, remove "/file_name", can be repeated
-  // Don't remove the first "/" or "c:\"
+  // Don't remove the logical root, see `FileInfo`.
   while (src[*usedlen] == ':' && src[*usedlen + 1] == 'h') {
     valid |= VALID_HEAD;
     *usedlen += 2;
-    s = get_past_head(*fnamep);
     while (tail > s && after_pathsep(s, tail)) {
       MB_PTR_BACK(*fnamep, tail);
     }
-    *fnamelen = (size_t)(tail - *fnamep);
+    *fnamelen = tail <= s ? (size_t)(s - *fnamep) : (size_t)(tail - *fnamep);
     if (*fnamelen == 0) {
       // Result is empty.  Turn it into "." to make ":cd %:h" work.
       xfree(*bufp);
@@ -783,8 +774,6 @@ void f_getfperm(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 void f_getfsize(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   const char *fname = tv_get_string(&argvars[0]);
-
-  rettv->v_type = VAR_NUMBER;
 
   FileInfo file_info;
   if (os_fileinfo(fname, &file_info)) {

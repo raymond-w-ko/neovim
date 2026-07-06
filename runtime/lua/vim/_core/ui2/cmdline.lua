@@ -22,7 +22,7 @@ local function win_config(win, hide, height)
   if ui.cmdheight == 0 and api.nvim_win_get_config(win).hide ~= hide then
     api.nvim_win_set_config(win, { hide = hide, height = not hide and height or nil })
   elseif api.nvim_win_get_height(win) ~= height then
-    api.nvim_win_set_height(win, height)
+    api.nvim_win_resize(win, -1, height, {})
   end
   if vim.o.cmdheight ~= height then
     -- Avoid moving the cursor with 'splitkeep' = "screen", and altering the user
@@ -87,13 +87,13 @@ end
 ---@param content CmdContent
 ---@param pos integer
 ---@param firstc string
----@param prompt string
+---@param prompt string|false
 ---@param indent integer
 ---@param level integer
 ---@param hl_id integer
 function M.cmdline_show(content, pos, firstc, prompt, indent, level, hl_id)
-  -- When entering the cmdline while it is expanded, move messages to dialog window.
-  if M.level == 0 and ui.msg.cmd_on_key then
+  -- Move expanded messages, or messages emitted before a prompt to dialog window.
+  if M.level == 0 and (ui.msg.cmd_on_key or (hl_id >= 0 and next(ui.msg.cmd.ids) ~= nil)) then
     M.expand, M.dialog, ui.msg.cmd_on_key = 1, true, nil
     api.nvim_win_set_config(ui.wins.cmd, { border = 'none' })
     ui.msg.expand_msg('cmd', 'dialog')
@@ -101,7 +101,7 @@ function M.cmdline_show(content, pos, firstc, prompt, indent, level, hl_id)
     ui.msg.cmd:clear()
   end
 
-  M.level, M.indent, M.prompt = level, indent, #prompt > 0
+  M.level, M.indent, M.prompt = level, indent, hl_id >= 0
   set_text(content, ('%s%s%s'):format(firstc, prompt, (' '):rep(indent)), hl_id)
   ui.msg.virt.last = { {}, {}, {}, {} }
 
