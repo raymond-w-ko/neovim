@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each, pending = t.describe, t.it, t.before_each, t.pending
 local clear, feed = n.clear, n.feed
 local source = n.source
 local command = n.command
@@ -781,35 +782,34 @@ local function test_cmdline(linegrid)
   end)
 
   it('works with exmode', function()
-    feed('gQ')
-    screen:expect({
-      grid = [[
-                                 |
-        {3:                         }|
-        Entering Ex mode.  Type "|
-        visual" to go to Normal m|
-        ode.^                     |
-      ]],
-      cmdline = { { content = { { '' } }, firstc = ':', pos = 0 } },
-    })
+    screen:try_resize(60, 12)
+    feed('1q:')
+    screen:expect([[
+                                                                  |
+      {1:~                                                           }|
+      {2:[No Name]                                                   }|
+      {1::}^                                                           |
+      {1:~                                                           }|*6
+      {3:[Ex mode]                                                   }|
+      {5:-- INSERT --}                                                |
+    ]])
     feed('echo "foo"<CR>')
-    screen:expect({
-      grid = [[
-        {3:                         }|
-        Entering Ex mode.  Type "|
-        visual" to go to Normal m|
-        ode.                     |
-        foo^                      |
-      ]],
-      cmdline = { { content = { { '' } }, firstc = ':', pos = 0 } },
-      cmdline_block = { { { 'echo "foo"' } } },
-    })
-    -- Shouldn't crash for NULL cmdline_block event after <C-\><C-N> #39021.
+    screen:expect([[
+                                                                  |
+      {1:~                                                           }|
+      {2:[No Name]                                                   }|
+      {1::}echo "foo"                                                 |
+      {1::}" foo                                                      |
+      {1::}^                                                           |
+      {1:~                                                           }|*4
+      {3:[Ex mode]                                                   }|
+      {5:-- INSERT --}                                                |
+    ]])
     feed('<C-\\><C-N>vis<CR>')
     screen:expect([[
-      ^                         |
-      {1:~                        }|*3
-                               |
+      ^                                                            |
+      {1:~                                                           }|*10
+                                                                  |
     ]])
     assert_alive()
   end)
@@ -900,7 +900,7 @@ describe('cmdline redraw', function()
                                               |
       {1:~                                       }|*3
       {2:[No Name]                               }|
-      {1::}^a{17:bc}                                    |
+      {1::}{17:^abc}                                    |
       {1:~                                       }|*2
       {3:[Command Line]                          }|
       {5:-- VISUAL --}                            |
@@ -1007,7 +1007,7 @@ describe('cmdline redraw', function()
       {3:                                                                           }|
       foo                                                                        |
       bar                                                                        |
-      Type number and <Enter> or click with the mouse (q or empty cancels): ^     |
+      Type number and <Enter> (q or empty cancels): ^                             |
     ]])
     command('redraw')
     screen:expect_unchanged()
@@ -1217,7 +1217,7 @@ end)
 
 it('tabline is not redrawn in Ex mode #24122', function()
   clear()
-  local screen = Screen.new(60, 5)
+  local screen = Screen.new(60, 8)
 
   exec([[
     set showtabline=2
@@ -1229,22 +1229,26 @@ it('tabline is not redrawn in Ex mode #24122', function()
     endfunction
   ]])
 
-  feed('gQ')
+  feed('1q:')
   screen:expect([[
     {2:foo                                                         }|
                                                                 |
-    {3:                                                            }|
-    Entering Ex mode.  Type "visual" to go to Normal mode.      |
-    :^                                                           |
+    {2:[No Name]                                                   }|
+    {1::}^                                                           |
+    {1:~                                                           }|*2
+    {3:[Ex mode]                                                   }|
+    {5:-- INSERT --}                                                |
   ]])
-
   feed('echo 1<CR>')
   screen:expect([[
-    {3:                                                            }|
-    Entering Ex mode.  Type "visual" to go to Normal mode.      |
-    :echo 1                                                     |
-    1                                                           |
-    :^                                                           |
+    {2:foo                                                         }|
+                                                                |
+    {2:[No Name]                                                   }|
+    {1::}echo 1                                                     |
+    {1::}" 1                                                        |
+    {1::}^                                                           |
+    {3:[Ex mode]                                                   }|
+    {5:-- INSERT --}                                                |
   ]])
 end)
 

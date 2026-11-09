@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each, finally = t.describe, t.it, t.before_each, t.finally
 local clear = n.clear
 local command = n.command
 local eq = t.eq
@@ -11,8 +12,8 @@ local exec_lua = n.exec_lua
 local feed = n.feed
 local api = n.api
 local request = n.request
-local poke_eventloop = n.poke_eventloop
 local pcall_err = t.pcall_err
+local assert_alive = n.assert_alive
 local uv = vim.uv
 
 describe('nvim_ui_attach()', function()
@@ -24,6 +25,16 @@ describe('nvim_ui_attach()', function()
     local _ = Screen.new(999, 999)
     eq(999, eval('&lines'))
     eq(999, eval('&columns'))
+  end)
+
+  it('does not crash on self-attach', function()
+    local rv = exec_lua(function()
+      local chan = vim.fn.sockconnect('pipe', vim.v.servername, { rpc = true })
+      return { pcall(vim.fn.rpcrequest, chan, 'nvim_ui_attach', 80, 24, { ext_linegrid = true }) }
+    end)
+    eq(false, rv[1])
+    t.matches('failed to parse redraw event$', rv[2])
+    assert_alive()
   end)
 
   it('validation', function()
@@ -123,19 +134,20 @@ describe('nvim_ui_send', function()
       close_pipe(read_pipe)
     end)
 
-    api.nvim_ui_send('Hello world')
-
-    poke_eventloop()
-
     screen:expect([[
       ^                                                  |
       {1:~                                                 }|*8
                                                         |
     ]])
 
-    -- The TUI client queries OSC 11 on connect, so that precedes the payload.
-    local bg_request = '\027]11;?\007'
-    eq(bg_request .. 'Hello world', table.concat(read_data))
+    api.nvim_ui_send('Hello world')
+
+    screen:expect_unchanged()
+
+    -- On connect, these queries precede the payload.
+    local mcursor_request = '\027[> q' -- kitty-multicursor (CSI > SP q) query.
+    local bg_request = '\027]11;?\007' -- TUI client OSC 11 query.
+    eq(mcursor_request .. bg_request .. 'Hello world', table.concat(read_data))
   end)
 
   it('ignores ui_send event for UIs without stdout_tty', function()
@@ -159,15 +171,15 @@ describe('nvim_ui_send', function()
       close_pipe(read_pipe)
     end)
 
-    api.nvim_ui_send('Hello world')
-
-    poke_eventloop()
-
     screen:expect([[
       ^                                                  |
       {1:~                                                 }|*8
                                                         |
     ]])
+
+    api.nvim_ui_send('Hello world')
+
+    screen:expect_unchanged()
 
     eq('', table.concat(read_data))
   end)
@@ -280,6 +292,36 @@ describe('UI event channels', function()
     request('nvim_ui_term_event', 'termresponse', 'ignored')
     session2:request('nvim_ui_term_event', 'termresponse', 'accepted')
     eq({ 'accepted' }, exec_lua('return _G.filtered'))
+
+    exec_lua([[
+      _G.capability = nil
+      vim.tty.query('missing', { timeout = 0 }, function(cap, found)
+        _G.capability = { cap, found }
+      end)
+    ]])
+    request('nvim_ui_term_event', 'termresponse', '\027P0+r6d697373696e67')
+    eq({ 'missing', false }, exec_lua('return _G.capability'))
+
+    exec_lua([[
+      _G.capabilities = {}
+      vim.tty.query({ 'kcuu1', 'kcud1' }, { timeout = 0 }, function(cap, found, seq)
+        table.insert(_G.capabilities, { cap, found, seq })
+      end)
+    ]])
+    request('nvim_ui_term_event', 'termresponse', '\027P1+r6b63757531=1b4f41;6b63756431=1b4f42')
+    eq({
+      { 'kcuu1', true, '\027OA' },
+      { 'kcud1', true, '\027OB' },
+    }, exec_lua('return _G.capabilities'))
+
+    exec_lua([[
+      _G.sequence = nil
+      vim.tty.query('kbs', { timeout = 0 }, function(_, _, seq)
+        _G.sequence = seq
+      end)
+    ]])
+    request('nvim_ui_term_event', 'termresponse', '\027P1+r6b6273=5c313737')
+    eq(string.char(127), exec_lua('return _G.sequence'))
 
     session2:close()
   end)

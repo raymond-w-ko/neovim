@@ -35,6 +35,7 @@
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/os/os_defs.h"
+#include "nvim/os/time.h"
 #include "nvim/strings.h"
 #include "nvim/tui/input.h"
 #include "nvim/tui/termdef_field_defs.h"
@@ -765,9 +766,10 @@ void tui_stop(TUIData *tui)
   terminfo_disable(tui);
 
   // Wait until DA1 response is received, or stdin is closed (#35744).
+  uint64_t wait_start = os_hrtime();
   LOOP_PROCESS_EVENTS_UNTIL(tui->loop, tui->loop->events, EXIT_TIMEOUT_MS,
                             tui->stopped || tui->input.read_stream.did_eof);
-  if (!tui->stopped && !tui->input.read_stream.did_eof) {
+  if (!tui->stopped && (os_hrtime() - wait_start) / 1000000 >= EXIT_TIMEOUT_MS) {
     WLOG("TUI: timed out waiting for DA1 response");
   }
   tui->stopped = true;
@@ -1685,10 +1687,16 @@ void tui_default_colors_set(TUIData *tui, Integer rgb_fg, Integer rgb_bg, Intege
   invalidate(tui, 0, tui->grid.height, 0, tui->grid.width);
 }
 
-/// Writes directly to the TTY, bypassing the buffer.
+/// Writes to the TTY, or buffers (to avoid "tearing") if a frame is being assembled (or output is
+/// already buffered).
 void tui_ui_send(TUIData *tui, String content)
   FUNC_ATTR_NONNULL_ALL
 {
+  if (kv_size(tui->invalid_regions) || tui->bufpos > 0) {
+    // Append to buffer instead of writing directly.
+    out(tui, content.data, content.size);
+    return;
+  }
   uv_write_t req;
   uv_buf_t buf = { .base = content.data, .len = UV_BUF_LEN(content.size) };
   int ret = uv_write(&req, (uv_stream_t *)&tui->output_handle, &buf, 1, NULL);
@@ -1792,6 +1800,12 @@ static void tui_suspend_cb(TUIData *tui)
   tui_terminal_stop(tui);
   stream_set_blocking(tui->input.in_fd, true);   // normalize stream (#2598)
 
+  // Stop a parent sharing our process group (e.g. `fish -c`) first, so it can't reap our stop
+  // while still running and then exit instead of waiting for us when resumed.
+  pid_t ppid = getppid();
+  if (getpgid(ppid) == getpgrp()) {
+    kill(ppid, SIGSTOP);
+  }
   // Avoid os/signal.c SIGTSTP handler. ex_stop calls auto_writeall. #33258
   kill(0, SIGSTOP);
 
@@ -2270,6 +2284,12 @@ static void patch_terminfo_bugs(TUIData *tui, const char *term, const char *colo
     // 2017-04 terminfo.src has older control sequences.
     terminfo_set_str(tui, kTerm_enter_ca_mode, "\x1b[?1049h");
     terminfo_set_str(tui, kTerm_exit_ca_mode, "\x1b[?1049l");
+    // rxvt-unicode has a default steady block cursor, though there's an option
+    // to initialize it with an underline https://cvs.schmorp.de/rxvt-unicode/src/init.C?revision=1.351&view=markup#l727
+    // \x1b[0 q doesn't work because it makes it a blinking block https://cvs.schmorp.de/rxvt-unicode/src/command.C?revision=1.605&view=markup#l4122
+    // We can't really account for that, so just set it to steady block and hope for the best.
+    terminfo_set_str(tui, kTerm_reset_cursor_style, "\x1b[2 q");
+    terminfo_set_str(tui, kTerm_set_cursor_style, "\x1b[%p1%d q");
   } else if (screen) {
     // per the screen manual; 2017-04 terminfo.src lacks these.
     terminfo_set_if_empty(tui, kTerm_to_status_line, "\x1b_");
@@ -2357,9 +2377,7 @@ static void patch_terminfo_bugs(TUIData *tui, const char *term, const char *colo
   // DECSCUSR (cursor shape) is widely supported.
   // https://github.com/gnachman/iTerm2/pull/92
   if (!bsdvt
-      && (xterm         // anything claiming xterm compat
-          // per MinTTY 0.4.3-1 release notes from 2009
-          || putty
+      && (putty         // per MinTTY 0.4.3-1 release notes from 2009
           // per https://chromium.googlesource.com/apps/libapps/+/a5fb83c190aa9d74f4a9bca233dac6be2664e9e9/hterm/doc/ControlSequences.md
           || hterm
           // per https://bugzilla.gnome.org/show_bug.cgi?id=720821
@@ -2369,7 +2387,6 @@ static void patch_terminfo_bugs(TUIData *tui, const char *term, const char *colo
           // https://lists.gnu.org/archive/html/screen-devel/2013-03/msg00000.html
           || screen
           || st         // #7641
-          || rxvt       // per command.C
           // https://github.com/gnachman/iTerm2/pull/651
           || iterm || iterm_pretending_xterm
           || teraterm   // per TeraTerm "Supported Control Functions" doco
@@ -2406,6 +2423,11 @@ static void patch_terminfo_bugs(TUIData *tui, const char *term, const char *colo
                      "%e%{0}"                   // anything else
                      "%;" "%dc");
     terminfo_set_str(tui, kTerm_reset_cursor_style, "\x1b[?c");
+  } else if (!bsdvt && xterm) {
+    terminfo_set_if_empty(tui, kTerm_set_cursor_style, "\x1b[%p1%d q");
+    // xterm has a configurable cursor, but the default is 2, and 0 doesn't
+    // reset to default. #41047
+    terminfo_set_if_empty(tui, kTerm_reset_cursor_style, "\x1b[2 q");
   }
 
   xfree(xterm_version);

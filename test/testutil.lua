@@ -1,3 +1,4 @@
+---@type test.assert
 local test_assert = require('test.assert')
 ---@type test.harness
 local harness = require('test.harness')
@@ -8,6 +9,16 @@ local Paths = require('test.cmakeconfig.paths')
 --- @class test.testutil
 local M = {
   paths = Paths,
+
+  -- Test framework:
+  after_each = harness.after_each,
+  before_each = harness.before_each,
+  describe = harness.describe,
+  finally = harness.finally,
+  it = harness.it,
+  pending = harness.pending,
+  setup = harness.setup,
+  teardown = harness.teardown,
 }
 
 --- @param path string
@@ -100,6 +111,9 @@ local check_logs_useless_lines = {
 
 function M.eq(expected, actual, context)
   return test_assert.eq(expected, actual, context)
+end
+function M.eq_partial(expected, actual, context)
+  return test_assert.eq_partial(expected, actual, context)
 end
 function M.neq(expected, actual, context)
   return test_assert.neq(expected, actual, context)
@@ -597,6 +611,18 @@ function M.repeated_read_cmd(...)
   return table.concat(data)
 end
 
+--- Projects the named fields of `t` (a nil field stays absent).
+--- @param t table<string,any>
+--- @param ... string Field names.
+--- @return table<string,any>
+function M.pick(t, ...)
+  local r = {} --- @type table<string,any>
+  for _, f in ipairs({ ... }) do
+    r[f] = t[f]
+  end
+  return r
+end
+
 --- @generic T
 --- @param orig T
 --- @return T
@@ -776,9 +802,9 @@ function M.read_file_list(filename, start)
   local i = 1
   local line = file:read('*l')
   while line ~= nil do
-    if i >= start then
+    if i >= lnum then
       table.insert(lines, line)
-      if #lines > maxlines then
+      if maxlines and #lines > maxlines then
         table.remove(lines, 1)
       end
     end
@@ -869,9 +895,7 @@ end
 --- @return boolean
 function M.skip(cond, reason)
   if cond then
-    --- @type fun(reason: string)
-    local pending = getfenv(2).pending
-    pending(reason or 'FIXME')
+    M.pending(reason or 'FIXME')
     return true
   end
   return false

@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local assert_alive = n.assert_alive
 local clear, feed = n.clear, n.feed
 local source = n.source
@@ -34,6 +35,48 @@ describe('ui/ext_popupmenu', function()
     { 'bar', '', '', '' },
     { 'spam', '', '', '' },
   }
+
+  it('conceal anchors agree for cached and recomputed cursor columns', function()
+    screen:try_resize(30, 6)
+    local ns = api.nvim_create_namespace('conceal_wrap_anchor')
+    for _, case in ipairs({
+      { suffix = 15, replacement = '', opts = '', row = 0, col = 25 },
+      { suffix = 15, replacement = '#', opts = '', row = 0, col = 26 },
+      { suffix = 30, replacement = '', opts = 'showbreak=>>', row = 1, col = 12 },
+      { suffix = 10, replacement = '', opts = 'number numberwidth=4', row = 0, col = 24 },
+      { prefix = 'a\t', suffix = 10, replacement = '', opts = '', row = 0, col = 18 },
+      { suffix = 15, replacement = '', opts = 'concealcursor=nv', row = 1, col = 1 },
+    }) do
+      for _, noinsert in ipairs({ false, true }) do
+        command('set wrap conceallevel=2 concealcursor=nvic nonumber showbreak=')
+        if case.opts ~= '' then
+          command(('set %s'):format(case.opts))
+        end
+        command(('set completeopt=menuone%s'):format(noinsert and ',noinsert,noselect' or ''))
+        api.nvim_buf_clear_namespace(0, ns, 0, -1)
+        local prefix = case.prefix or ('a'):rep(10)
+        api.nvim_buf_set_lines(0, 0, -1, true, {
+          prefix .. 'HIDDEN' .. ('b'):rep(case.suffix),
+        })
+        api.nvim_buf_set_extmark(0, ns, 0, #prefix, {
+          end_col = #prefix + 6,
+          conceal = case.replacement,
+        })
+        feed('ggA')
+        exec_lua(function()
+          vim.fn.complete(vim.fn.col('.'), { 'foo', 'foobar', 'foobaz' })
+        end)
+        screen:expect({
+          popupmenu = {
+            items = { { 'foo', '', '', '' }, { 'foobar', '', '', '' }, { 'foobaz', '', '', '' } },
+            pos = noinsert and -1 or 0,
+            anchor = { 1, case.row, case.col },
+          },
+        })
+        feed('<C-e><Esc>')
+      end
+    end
+  end)
 
   it('works', function()
     feed('o<C-r>=TestComplete()<CR>')
@@ -8938,6 +8981,8 @@ describe('builtin popupmenu', function()
         ]])
         -- T1
         command('set cia=abbr,kind,menu')
+        -- A dry run must leave the popup columns in their current order.
+        api.nvim_set_option_value('completeitemalign', 'menu,kind,abbr', { dry_run = true })
         feed('S<C-X><C-O>')
         screen:expect([[
           foo^                           |

@@ -1,6 +1,8 @@
 local n = require('test.functional.testnvim')()
+local t = require('test.testutil')
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear = n.clear
 local exec = n.exec
 local feed = n.feed
@@ -25,7 +27,7 @@ describe('matchparen', function()
       {17:}}                             |
       {17:{}                             |
       {17:f}                             |
-      ^g                             |
+      {17:^g}                             |
       }                             |
       {5:-- VISUAL LINE --}             |
     ]])

@@ -1,4 +1,5 @@
 local t = require('test.testutil')
+local describe, it, before_each, finally = t.describe, t.it, t.before_each, t.finally
 local pcall_err = t.pcall_err
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
@@ -64,10 +65,16 @@ describe('completion', function()
     it('returns expected dict in normal completion', function()
       feed('ifoo<ESC>o<C-x><C-n>')
       eq('foo', eval('getline(2)'))
-      eq(
-        { word = 'foo', abbr = '', menu = '', info = '', kind = '', user_data = '' },
-        eval('v:completed_item')
-      )
+      eq({
+        word = 'foo',
+        abbr = '',
+        menu = '',
+        info = '',
+        kind = '',
+        user_data = '',
+        abbr_hlgroup = '',
+        kind_hlgroup = '',
+      }, eval('v:completed_item'))
     end)
     it('is readonly', function()
       screen:try_resize(80, 8)
@@ -104,6 +111,8 @@ describe('completion', function()
         menu = 'baz',
         info = 'foobar',
         kind = 'foobaz',
+        abbr_hlgroup = '',
+        kind_hlgroup = '',
         user_data = '',
       }, eval('v:completed_item'))
     end)
@@ -269,30 +278,25 @@ describe('completion', function()
     end)
 
     describe('"preselect"', function()
-      it('selects first item.preselect item', function()
+      it('respects "preselect" of complete items', function()
         source([[
           function! TestComplete() abort
-            call complete(1, [
-              \ {'word': 'aaa'},
-              \ {'word': 'bbb'},
-              \ {'word': 'ccc', 'preselect': v:true},
-              \ {'word': 'ddd'},
-              \ ])
-            return ''
-          endfunction
-          function! TestCompleteMany() abort
-            let items = []
-            for i in range(20)
-              call add(items, {'word': 'item' .. i})
-            endfor
-            let items[15].preselect = v:true
-            call complete(1, items)
+            call complete(1, g:comp_items)
             return ''
           endfunction
         ]])
-
+        local function complete(items)
+          api.nvim_set_var('comp_items', items)
+          feed('<Esc>S<C-r>=TestComplete()<CR>')
+        end
+        local items = {
+          { word = 'aaa' },
+          { word = 'bbb' },
+          { word = 'ccc', preselect = true },
+          { word = 'ddd' },
+        }
         command('set completeopt=menuone,preselect')
-        feed('i<C-r>=TestComplete()<CR>')
+        complete(items)
         screen:expect([[
           ccc^                                                         |
           {4:aaa            }{1:                                             }|
@@ -303,10 +307,14 @@ describe('completion', function()
           {5:-- INSERT --}                                                |
         ]])
 
-        -- scrolls pum when preselect item is far down
-        feed('<Esc>S')
+        -- scrolls pum when preselected item is far down
         command('set pumheight=5')
-        feed('<C-r>=TestCompleteMany()<CR>')
+        local many = {} ---@type table[]
+        for i = 0, 19 do
+          many[i + 1] = { word = 'item' .. i }
+        end
+        many[16].preselect = true ---@type boolean
+        complete(many)
         screen:expect([[
           item15^                                                      |
           {4:item13         }{12: }{1:                                            }|
@@ -318,9 +326,9 @@ describe('completion', function()
           {5:-- INSERT --}                                                |
         ]])
 
-        feed('<Esc>S')
+        -- preselected item is selected but not inserted with "noselect"
         command('set completeopt=menuone,noselect,preselect pumheight=0')
-        feed('<C-r>=TestComplete()<CR>')
+        complete(items)
         screen:expect([[
           ^                                                            |
           {4:aaa            }{1:                                             }|
@@ -331,11 +339,32 @@ describe('completion', function()
           {5:-- INSERT --}                                                |
         ]])
 
-        -- without "preselect" in completeopt, preselect attribute is ignored
-        feed('<Esc>S')
+        -- selects the first preselected item that still matches
+        complete({
+          { word = 'aaa', preselect = true },
+          { word = 'abb' },
+          { word = 'abc', preselect = true },
+        })
+        feed('ab<C-Y>')
+        eq('abc', api.nvim_get_current_line())
+
+        -- without "preselect" in 'completeopt' the attribute is ignored
         command('set completeopt-=preselect')
-        feed('<C-r>=TestComplete()<CR><C-N><C-Y>')
+        complete(items)
+        feed('<C-N><C-Y>')
         eq('aaa', api.nvim_get_current_line())
+      end)
+
+      it('does not insert text if noinsert', function()
+        source([[
+          function! TestComplete() abort
+            call complete(1, [{'word': 'aaa', 'preselect': v:true}, {'word': 'bbb'}])
+            return ''
+          endfunction
+        ]])
+        command('set completeopt=menuone,noinsert,preselect')
+        feed('i<C-r>=TestComplete()<CR>')
+        eq('', api.nvim_get_current_line())
       end)
     end)
   end)
@@ -1039,6 +1068,21 @@ describe('completion', function()
     eq('edit', fn.getcompletion('restart ed', 'cmdline')[1])
   end)
 
+  it('cmdline completion for :*cd family shows dirs only', function()
+    local dir = 'Xtest-cd-compl/'
+    local subdir1 = dir .. 'subdir1/'
+    local subdir2 = dir .. 'subdir2/'
+    finally(function()
+      n.rmdir(dir)
+    end)
+    fn.mkdir(subdir1, 'p')
+    fn.mkdir(subdir2, 'p')
+    fn.writefile({ '' }, dir .. 'file')
+    for _, cmd in ipairs({ 'cd', 'lcd', 'tcd', 'bcd' }) do
+      eq({ subdir1, subdir2 }, fn.getcompletion(cmd .. ' ' .. dir, 'cmdline'))
+    end
+  end)
+
   describe('from the commandline window', function()
     it('is cleared after CTRL-C', function()
       feed('q:')
@@ -1277,6 +1321,31 @@ describe('completion', function()
     ]])
   end)
 
+  -- oldtest: Test_complete_included_file_name()
+  it('shows included files by relative path', function()
+    t.mkdir('Xincl')
+    finally(function()
+      n.rmdir('Xincl')
+    end)
+    t.mkdir('Xincl/sub')
+    t.write_file('Xincl/sub/inc.vim', 'let included_word = 1\n')
+    t.write_file('Xincl/main.vim', 'source ./sub/inc.vim\n\n')
+    n.exec([[
+      edit Xincl/main.vim
+      setlocal include=^\\s*source\\s\\+ complete=i completeopt=menuone,noselect
+    ]])
+    feed('Goincluded_<C-N>')
+    screen:expect([[
+      source ./sub/inc.vim                                        |
+                                                                  |
+      included_^                                                   |
+      {4:included_word Xincl/sub/inc.vim }{1:                            }|
+      {1:~                                                           }|*3
+      {5:-- Keyword completion (^N^P) }{19:Back at original}               |
+    ]])
+    feed('<Esc>')
+  end)
+
   -- oldtest: Test_complete_changed_complete_info()
   it('no crash calling complete_info() in CompleteChanged', function()
     source([[
@@ -1486,7 +1555,7 @@ describe('completion', function()
       {12:hello          }{1:                                             }|
       {4:hullo          }{1:                                             }|
       {4:heee           }{1:                                             }|
-      {5:-- INSERT --}                              4,6           All |
+      {5:-- INSERT --}                              4,6            All|
     ]])
   end)
 
@@ -1850,5 +1919,63 @@ describe('completion', function()
       {1:~                                                           }|*5
       {5:-- File name completion (^F^N^P) }{9:Pattern not found}          |
     ]])
+  end)
+
+  it('returns all entries in the directory #25791', function()
+    n.mkdir_p('Xtest/sub1')
+    n.mkdir_p('Xtest/sub2')
+    t.write_file('Xtest/A', '')
+    t.write_file('Xtest/sub1/B', '')
+    t.write_file('Xtest/sub2/C', '')
+    finally(function()
+      n.rmdir('Xtest')
+    end)
+    local path = ('%s/Xtest/**'):format(vim.fs.normalize(vim.uv.cwd()))
+    command(('set path=%s'):format(path))
+    eq({ 'A', 'B', 'C', 'sub1/', 'sub2/' }, fn.getcompletion('find ', 'cmdline'))
+  end)
+
+  it('complete-items commit_chars', function()
+    exec_lua(function()
+      _G.Omnifunc = function(findstart, _)
+        return findstart == 1 and 0 or { { word = 'foobar', commit_chars = '(' } }
+      end
+      vim.bo.omnifunc = 'v:lua.Omnifunc'
+    end)
+    n.command('set completeopt=menuone,noinsert')
+    feed('i<C-x><C-o>')
+    poke_eventloop()
+    feed('(')
+    eq('foobar(', n.api.nvim_get_current_line())
+  end)
+
+  it('complete_info() reports completion item fields', function()
+    command('set hidden complete=FTestComplete,b completeopt=menuone,noinsert')
+    command('file Xcompletion-source')
+    api.nvim_buf_set_lines(0, 0, -1, false, { 'foobar' })
+    command('enew')
+    source([[
+      function! TestComplete(findstart, base) abort
+        if a:findstart
+          return 0
+        endif
+        return [
+              \ {'word': 'foo', 'equal': 1},
+              \ {'word': 'bar', 'preselect': v:true},
+              \ {'word': 'baz', 'commit_chars': '('},
+              \ {'word': 'qux'},
+              \ ]
+      endfunction
+    ]])
+    feed('i<C-n>')
+    poke_eventloop()
+
+    local items = fn.complete_info({ 'items' }).items
+    eq(5, #items)
+    eq({ 1, nil }, { items[1].equal, items[1].preselect })
+    eq(1, items[2].preselect)
+    eq('(', items[3].commit_chars)
+    eq({ nil, nil, nil }, { items[4].equal, items[4].preselect, items[4].commit_chars })
+    eq('Xcompletion-source', items[5].menu)
   end)
 end)

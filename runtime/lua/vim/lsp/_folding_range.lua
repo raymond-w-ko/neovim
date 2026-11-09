@@ -61,7 +61,12 @@ function State:evaluate()
   tableclear(row_text)
   tableclear(row_virt_text)
 
-  for client_id, ranges in pairs(self.client_state) do
+  -- Whether at least one range starts on the row.
+  local row_starts = {} ---@type table<integer, true>
+  -- Number of ranges ending on the row.
+  local row_ends = {} ---@type table<integer, integer>
+
+  for _, ranges in pairs(self.client_state) do
     for _, range in ipairs(ranges) do
       local start_row = range.startLine
       local end_row = range.endLine
@@ -70,15 +75,11 @@ function State:evaluate()
         row_text[start_row] = range.collapsedText
 
         local kind = range.kind
-        if kind then
-          -- Ignore unsupported fold kinds.
-          if supported_fold_kinds[kind] then
-            local kinds = row_kinds[start_row] or {}
-            kinds[kind] = true
-            row_kinds[start_row] = kinds
-          else
-            log.info(('Unknown fold kind "%s" from client %d'):format(kind, client_id))
-          end
+        -- Treat unknown kinds like an absent kind, but still fold the range.
+        if kind and supported_fold_kinds[kind] then
+          local kinds = row_kinds[start_row] or {}
+          kinds[kind] = true
+          row_kinds[start_row] = kinds
         end
 
         for row = start_row, end_row do
@@ -86,9 +87,21 @@ function State:evaluate()
           level[1] = level[1] + 1
           row_level[row] = level
         end
-        row_level[start_row][2] = '>'
-        row_level[end_row][2] = '<'
+        row_starts[start_row] = true
+        row_ends[end_row] = (row_ends[end_row] or 0) + 1
       end
+    end
+  end
+  for row, level in pairs(row_level) do
+    -- A start takes precedence when ranges start and end on the same row,
+    -- otherwise the new fold is ignored.
+    if row_starts[row] then
+      level[2] = '>'
+    elseif row_ends[row] then
+      level[2] = '<'
+      -- Use the outermost level when nested ranges end on the same row,
+      -- otherwise the end of the outer fold is ignored.
+      level[1] = level[1] - row_ends[row] + 1
     end
   end
 end
@@ -159,27 +172,18 @@ end
 
 --- Request `textDocument/foldingRange` from the server.
 --- `foldupdate()` is scheduled once after the request is completed.
----@param client? vim.lsp.Client The client whose server supports `foldingRange`.
-function State:refresh(client)
-  ---@type lsp.FoldingRangeParams
-  local params = { textDocument = util.make_text_document_params(self.bufnr) }
-
+---@param client_id integer
+function State:refresh(client_id)
+  local client = vim.lsp.get_client_by_id(client_id)
   if client then
+    ---@type lsp.FoldingRangeParams
+    local params = { textDocument = util.make_text_document_params(self.bufnr) }
+
     client:request('textDocument/foldingRange', params, function(...)
       self:handler(...)
     end, self.bufnr)
     return
   end
-
-  if
-    not next(vim.lsp.get_clients({ bufnr = self.bufnr, method = 'textDocument/foldingRange' }))
-  then
-    return
-  end
-
-  vim.lsp.buf_request_all(self.bufnr, 'textDocument/foldingRange', params, function(...)
-    self:multi_handler(...)
-  end)
 end
 
 function State:reset()
@@ -195,6 +199,7 @@ end
 ---@return vim.lsp.folding_range.State
 function State:new(bufnr)
   self = Capability.new(self, bufnr)
+  ---@cast self vim.lsp.folding_range.State
   self.lang = vim.treesitter.language.get_lang(vim.bo[self.bufnr].filetype)
   self.row_level = {}
   self.row_kinds = {}
@@ -202,14 +207,6 @@ function State:new(bufnr)
   self.row_virt_text = {}
 
   api.nvim_buf_attach(bufnr, false, {
-    -- Reset `bufstate` and request folding ranges.
-    on_reload = function()
-      local state = State.active[bufnr]
-      if state then
-        state:reset()
-        state:refresh()
-      end
-    end,
     --- Sync changed rows with their previous foldlevels before applying new ones.
     on_bytes = function(_, _, _, start_row, _, _, old_row, _, _, new_row, _, _)
       local state = State.active[bufnr]
@@ -235,15 +232,6 @@ function State:new(bufnr)
       end
     end,
   })
-  nvim_on('LspNotify', self.augroup, { buf = bufnr }, function(ev)
-    local client = assert(vim.lsp.get_client_by_id(ev.data.client_id))
-    if
-      client:supports_method('textDocument/foldingRange', bufnr)
-      and (ev.data.method == 'textDocument/didChange' or ev.data.method == 'textDocument/didOpen')
-    then
-      self:refresh(client)
-    end
-  end)
   nvim_on('OptionSet', self.augroup, { pattern = 'foldexpr' }, function()
     if vim.v.option_type == 'global' or api.nvim_get_current_buf() == bufnr then
       vim.lsp._capability.enable('folding_range', false, { bufnr = bufnr })
@@ -256,30 +244,43 @@ function State:new(bufnr)
   return self
 end
 
-function State:destroy()
-  api.nvim_del_augroup_by_id(self.augroup)
-  State.active[self.bufnr] = nil
-end
-
 ---@param client_id integer
 function State:on_attach(client_id)
   self.client_state[client_id] = {}
-  self:refresh(vim.lsp.get_client_by_id(client_id))
+  self:refresh(client_id)
 end
 
----@params client_id integer
+---@param client_id integer
 function State:on_detach(client_id)
   self.client_state[client_id] = nil
   self:evaluate()
   foldupdate(self.bufnr)
 end
 
+---@private
+---@param client_id integer
+function State:on_close(client_id)
+  self.client_state[client_id] = {}
+  self:evaluate()
+  foldupdate(self.bufnr)
+end
+
+---@private
+---@param client_id integer
+function State:on_change(client_id)
+  self:refresh(client_id)
+end
+
 ---@param kind lsp.FoldingRangeKind
 ---@param winid integer
-function State:foldclose(kind, winid)
+function State.foldclose(_, kind, winid)
   vim._with({ win = winid }, function()
     local bufnr = api.nvim_win_get_buf(winid)
-    local row_kinds = State.active[bufnr].row_kinds
+    local state = State.active[bufnr]
+    if not state then
+      return
+    end
+    local row_kinds = state.row_kinds
     -- Reverse traverse to ensure that the smallest ranges are closed first.
     for row = api.nvim_buf_line_count(bufnr) - 1, 0, -1 do
       local kinds = row_kinds[row]
@@ -290,6 +291,27 @@ function State:foldclose(kind, winid)
   end)
 end
 
+--- |lsp-handler| for the method `workspace/foldingRange/refresh`
+---
+--- Refresh requests are sent by the server to indicate a project-wide change
+--- that requires all folding ranges to be re-requested by the client.
+---@param ctx lsp.HandlerContext
+---@param err lsp.ResponseError?
+---@internal
+function M.on_refresh(err, _, ctx)
+  if err then
+    return vim.NIL
+  end
+
+  for _, state in pairs(State.active) do
+    if state.client_state[ctx.client_id] then
+      state:refresh(ctx.client_id)
+    end
+  end
+
+  return vim.NIL
+end
+
 ---@param kind lsp.FoldingRangeKind
 ---@param winid? integer
 function M.foldclose(kind, winid)
@@ -298,14 +320,14 @@ function M.foldclose(kind, winid)
 
   winid = winid or api.nvim_get_current_win()
   local bufnr = api.nvim_win_get_buf(winid)
-  local state = State.active[bufnr]
-  if not state then
+  local provider = State.active[bufnr]
+  if not provider then
     return
   end
 
   -- Schedule `foldclose()` if the buffer is not up-to-date.
-  if state.version == util.buf_versions[bufnr] then
-    state:foldclose(kind, winid)
+  if provider.version == util.buf_versions[bufnr] then
+    provider:foldclose(kind, winid)
     return
   end
 
@@ -315,11 +337,11 @@ function M.foldclose(kind, winid)
   ---@type lsp.FoldingRangeParams
   local params = { textDocument = util.make_text_document_params(bufnr) }
   vim.lsp.buf_request_all(bufnr, 'textDocument/foldingRange', params, function(...)
-    state:multi_handler(...)
+    provider:multi_handler(...)
     -- Ensure this window is still valid and buffer stays as the current buffer
     -- after the async request.
     if api.nvim_win_is_valid(winid) and api.nvim_win_get_buf(winid) == bufnr then
-      state:foldclose(kind, winid)
+      provider:foldclose(kind, winid)
     end
   end)
 end
@@ -327,8 +349,8 @@ end
 --- Split `line` into highlighted virt_text chunks from `spans`.
 ---
 ---@param line string
----@param spans [integer, integer, string][] [start_col, end_col, highlight]
----@return [string, string[]?][] [text, highlight[]?][]
+---@param spans [integer, integer, string][] # [start_col, end_col, highlight]
+---@return [string, string[]?][] # [text, highlight[]?][]
 local function spans_to_virt_text(line, spans)
   local boundaries = { 0, #line }
   for _, span in ipairs(spans) do
@@ -337,7 +359,7 @@ local function spans_to_virt_text(line, spans)
   end
   table.sort(boundaries)
 
-  local virt_text = {} ---@type [string, string[]][]
+  local virt_text = {} ---@type [string, string[]?][]
   local last_b = -1
   for _, b in ipairs(boundaries) do
     if b > last_b then
@@ -388,9 +410,9 @@ function M.foldtext(lnum)
 
   line = state.row_text[row] or line
   local ok, parser = pcall(function()
-    local parser = vim.treesitter.get_string_parser(line, lang)
-    parser:parse(true)
-    return parser
+    local string_parser = vim.treesitter.get_string_parser(line, lang)
+    string_parser:parse(true)
+    return string_parser
   end)
   if not ok then
     return line
@@ -404,7 +426,7 @@ function M.foldtext(lnum)
     local query = vim.treesitter.query.get(tree:lang(), 'highlights')
     if query then
       for capture, node in query:iter_captures(tstree:root(), line) do
-        local name = query.captures[capture]
+        local name = assert(query.captures[capture])
         local _, start_col, _, end_col = node:range()
         if name:match('^[^_]') then
           spans[#spans + 1] = {

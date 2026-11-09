@@ -11,7 +11,7 @@
 --- Heads-up: |vim.snippet.jump()| re-registers them on every jump.
 
 local G = vim.lsp._snippet_grammar
-local snippet_group = vim.api.nvim_create_augroup('nvim.snippet', {})
+local snippet_group = vim.api.nvim_create_augroup('nvim.snippet')
 local snippet_ns = vim.api.nvim_create_namespace('nvim.snippet')
 local hl_group = 'SnippetTabstop'
 local hl_group_active = 'SnippetTabstopActive'
@@ -58,7 +58,7 @@ local function resolve_variable(var, default)
   elseif var == 'TM_FILENAME_BASE' then
     return expand_or_default('%:t:r')
   elseif var == 'TM_DIRECTORY' then
-    return expand_or_default('%:p:h:t')
+    return expand_or_default('%:p:h')
   elseif var == 'TM_FILEPATH' then
     return expand_or_default('%:p')
   end
@@ -108,9 +108,10 @@ end
 --- @param extmark_id integer
 --- @return Range4
 local function get_extmark_range(bufnr, extmark_id)
+  -- Snippet and tabstop marks are created with both end positions.
   local mark = vim.api.nvim_buf_get_extmark_by_id(bufnr, snippet_ns, extmark_id, { details = true })
+  --- @cast mark [integer, integer, { end_row: integer, end_col: integer }]
 
-  --- @diagnostic disable-next-line: undefined-field
   return { mark[1], mark[2], mark[3].end_row, mark[3].end_col }
 end
 
@@ -166,7 +167,7 @@ end
 function Tabstop:get_text()
   local range = self:get_range()
   return table.concat(
-    vim.api.nvim_buf_get_text(self.bufnr, range[1], range[2], range[3], range[4], {}),
+    vim.api.nvim_buf_get_text(self.bufnr, range[1], range[2], range[3], range[4]),
     '\n'
   )
 end
@@ -389,6 +390,7 @@ local function select_tabstop(tabstop)
       ('<Cmd>call cursor(%s,%s)<CR>'):format(range[1] + 1, range[2] + 1),
       'v',
       ('<Cmd>call cursor(%s,%s)<CR>'):format(range[3] + 1, range[4]),
+      vim.o.selection == 'exclusive' and 'l' or '',
       'o<c-g><c-r>_',
     }
     feedkeys(table.concat(keys))
@@ -480,7 +482,7 @@ local function setup_autocmds(bufnr)
     desc = 'Stop the snippet session when leaving select mode',
     buf = bufnr,
   }, function(args)
-    if args.match ~= 's:n' then
+    if args.match ~= 's:n' and args.match ~= 'i:n' then
       return
     end
     vim.schedule(function()
@@ -649,7 +651,7 @@ function M.jump(direction)
 
   -- Find the tabstop with the lowest range.
   local tabstops = M._session.tabstops[dest_index]
-  local dest = tabstops[1]
+  local dest = assert(tabstops[1])
   for _, tabstop in ipairs(tabstops) do
     local dest_range, range = dest:get_range(), tabstop:get_range()
     if (range[1] < dest_range[1]) or (range[1] == dest_range[1] and range[2] < dest_range[2]) then

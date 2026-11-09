@@ -11,7 +11,20 @@ vim.keymap.set('n', '<Plug>(nvim-dir-open)', function()
 end, { silent = true, desc = 'Open directory entry' })
 
 vim.keymap.set('n', '<Plug>(nvim-dir-up)', function()
-  require('nvim.dir')._open_parent()
+  if vim.v.count == 1 then
+    -- Edits global CWD
+    api.nvim_cmd({
+      cmd = 'edit',
+      args = { vim.fn.getcwd(-1, -1, -1) },
+      mods = { keepalt = vim.b.nvim_dir ~= nil },
+      magic = { file = false, bar = false },
+    }, {})
+    return
+  end
+  local dir = require('nvim.dir')
+  for _ = 1, vim.v.count1 do
+    dir._open_parent()
+  end
 end, { silent = true, desc = 'Open parent directory' })
 
 vim.keymap.set('n', '<Plug>(nvim-dir-reload)', function()

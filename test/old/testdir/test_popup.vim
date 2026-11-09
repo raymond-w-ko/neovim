@@ -1150,11 +1150,11 @@ func Test_popup_complete_info_02()
     \   'mode': 'function',
     \   'pum_visible': 1,
     \   'items': [
-    \     {'word': 'Jan', 'menu': 'January', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
-    \     {'word': 'Feb', 'menu': 'February', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
-    \     {'word': 'Mar', 'menu': 'March', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
-    \     {'word': 'Apr', 'menu': 'April', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
-    \     {'word': 'May', 'menu': 'May', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''}
+    \     {'word': 'Jan', 'menu': 'January', 'kind_hlgroup': '', 'abbr_hlgroup': '', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
+    \     {'word': 'Feb', 'menu': 'February', 'kind_hlgroup': '', 'abbr_hlgroup': '', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
+    \     {'word': 'Mar', 'menu': 'March', 'kind_hlgroup': '', 'abbr_hlgroup': '', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
+    \     {'word': 'Apr', 'menu': 'April', 'kind_hlgroup': '', 'abbr_hlgroup': '', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
+    \     {'word': 'May', 'menu': 'May', 'kind_hlgroup': '', 'abbr_hlgroup': '', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''}
     \   ],
     \   'preinserted_text': '',
     \   'selected': 0,
@@ -1271,6 +1271,24 @@ func Test_pum_getpos()
 
   call assert_false( pumvisible() )
   call assert_equal( {}, pum_getpos() )
+  bw!
+  unlet g:pum_pos
+endfunc
+
+" The popup menu is also used on a terminal without colors (issue #20800)
+func Test_pum_without_colors()
+  CheckNotGui
+
+  new
+  let save_t_Co = &t_Co
+  set t_Co=0
+  inoremap <buffer><F5> <C-R>=GetPumPosition()<CR>
+  call setline(1, ['hello', 'help', ''])
+  call cursor(3, 1)
+  call feedkeys("ih\<C-N>\<F5>\<Esc>", 'tx')
+  call assert_equal(2, g:pum_pos.size)
+
+  let &t_Co = save_t_Co
   bw!
   unlet g:pum_pos
 endfunc

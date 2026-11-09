@@ -1,6 +1,7 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each, after_each = t.describe, t.it, t.before_each, t.after_each
 local eq = t.eq
 local pcall_err = t.pcall_err
 local clear = n.clear
@@ -121,14 +122,28 @@ describe('spellfile', function()
     api.nvim_set_option_value('spellfile', fname, {})
   end)
 
+  it('uses the current mkspellmem limits for each build', function()
+    local words = testdir .. '/words'
+    write_file(words, 'one\ntwo\nthree\n')
+    for _, case in ipairs({
+      { '16,16,1', 2 }, -- Compress while reading and at the end.
+      { '1000,50,10', 1 }, -- Compress only at the end.
+    }) do
+      api.nvim_set_option_value('mkspellmem', case[1], {})
+      local output = n.exec_capture('mkspell! ' .. testdir .. '/spell/test.spl ' .. words)
+      local _, count = output:gsub('Compressed case%-folded:', '')
+      eq(case[2], count)
+    end
+  end)
+
   describe('default location', function()
     it("is stdpath('data')/site/spell/en.utf-8.add", function()
       n.command('set spell')
       n.insert('abc')
       n.feed('zg')
       eq(
-        t.fix_slashes(fn.stdpath('data') .. '/site/spell/en.utf-8.add'),
-        t.fix_slashes(api.nvim_get_option_value('spellfile', {}))
+        ('%s/site/spell/en.utf-8.add'):format(fn.stdpath('data')),
+        api.nvim_get_option_value('spellfile', {})
       )
     end)
 

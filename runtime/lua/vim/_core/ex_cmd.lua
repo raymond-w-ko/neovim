@@ -14,7 +14,7 @@ local M = {}
 
 --- Apply the `:filter[!] /pattern/` modifier to a single message. See also `message_filtered()`.
 ---
---- @param filter vim.api.keyset.cmd_mods_filter ":filter" mod.
+--- @param filter { pattern: string, force: boolean }? ":filter" mod.
 --- @param msg string Message to test.
 --- @return boolean # True if `msg` should be skipped (not displayed).
 function M.filter(filter, msg)
@@ -28,7 +28,7 @@ end
 --- @return string[]
 local function get_client_names()
   return vim
-    .iter(vim.lsp.get_clients())
+    .iter(vim.lsp.get_clients({ _uninitialized = true }))
     :map(function(client)
       return client.name
     end)
@@ -97,7 +97,7 @@ local function ex_lsp_disable(config_names)
   -- Default to disabling all clients attached to the current buffer.
   if #config_names == 0 then
     config_names = vim
-      .iter(vim.lsp.get_clients { bufnr = api.nvim_get_current_buf() })
+      .iter(vim.lsp.get_clients { bufnr = api.nvim_get_current_buf(), _uninitialized = true })
       :map(function(client)
         return client.name
       end)
@@ -119,7 +119,8 @@ end
 local function get_clients_from_names(client_names)
   -- Default to all active clients attached to the current buffer.
   if #client_names == 0 then
-    local clients = vim.lsp.get_clients { bufnr = api.nvim_get_current_buf() }
+    local clients =
+      vim.lsp.get_clients { bufnr = api.nvim_get_current_buf(), _uninitialized = true }
     if #clients == 0 then
       util.echo_err(N_('E5805: No clients attached to current buffer'))
     end
@@ -128,7 +129,7 @@ local function get_clients_from_names(client_names)
     return vim
       .iter(client_names)
       :map(function(name)
-        local clients = vim.lsp.get_clients { name = name }
+        local clients = vim.lsp.get_clients { name = name, _uninitialized = true }
         if #clients == 0 then
           util.echo_err(N_('E5806: No active clients matching name: %s'):format(name))
         end
@@ -189,7 +190,6 @@ function M.lsp_complete(_, line)
     local subcmd = split[2]
     return vim
       .iter(complete_args[subcmd]())
-      --- @param n string
       :map(function(n)
         return vim.fn.escape(n, ' \t')
       end)
@@ -210,13 +210,13 @@ function M.ex_log(eap)
   else
     local path --- @type string
     -- Special case for NVIM_LOG_FILE
-    local nvim_log_file = vim.env.NVIM_LOG_FILE --- @type string
+    local nvim_log_file = vim.env.NVIM_LOG_FILE
     if filename == 'nvim' and nvim_log_file and nvim_log_file ~= '' then
       path = nvim_log_file
     else
       path = fs.joinpath(log_dir, filename .. '.log')
     end
-    if not vim.uv.fs_stat(path) then
+    if not uv.fs_stat(path) then
       util.echo_err(N_('E5200: No such log file: %s'):format(path))
       return
     end
@@ -229,7 +229,7 @@ end
 --- @return string[] completions
 function M.log_complete()
   local names = { 'nvim' } --- @type string[]
-  for file, type in vim.fs.dir(log_dir, { depth = math.huge }) do
+  for file, type in fs.dir(log_dir, { depth = vim._maxint }) do
     local name, matches = file:gsub('%.log$', '')
     if matches ~= 0 and type == 'file' and name ~= 'nvim' then
       names[#names + 1] = name
@@ -248,17 +248,20 @@ function M.ex_terminal(eap, shell_argv)
     or smods.horizontal
     or smods.vertical
 
+  -- Use the invocation-time CWD, before creating a new buffer.
+  local opts = { term = true, cwd = vim.fn.getcwd() }
+
   if has_mods then
     vim.cmd.new { mods = smods }
   else
     vim.cmd.enew { bang = eap.bang }
   end
 
-  if shell_argv then -- No `cmd`, run 'shell'.
-    vim.fn.jobstart(shell_argv, { term = true })
-  else -- Run [cmd] in 'shell'.
-    vim.fn.jobstart(eap.args, { term = true })
-  end
+  vim.fn.jobstart(
+    shell_argv and shell_argv -- No `cmd`, run 'shell'.
+      or eap.args, -- Run [cmd] in 'shell'.
+    opts
+  )
 end
 
 function M.ex_uptime()
@@ -266,7 +269,7 @@ function M.ex_uptime()
   local now = assert(uv.clock_gettime('realtime'))
   local uptime = math.floor((now.sec * 1e9 + now.nsec - vim.v.starttime) / 1e9)
   local uptime_display = time.fmt_rtime(uptime)
-  api.nvim_echo({ { N_('Up %s'):format(uptime_display) } }, true, {})
+  api.nvim_echo({ { N_('Up %s'):format(uptime_display) } }, true)
 end
 
 --- `:oldfiles` and `:browse oldfiles`. Lists v:oldfiles (plain `:oldfiles`) or shows (async)
@@ -275,7 +278,7 @@ end
 function M.ex_oldfiles(eap)
   local files = vim.v.oldfiles
   if not files or #files == 0 then
-    api.nvim_echo({ { N_('No old files') } }, false, {})
+    api.nvim_echo({ { N_('No old files') } }, false)
     return
   end
 
@@ -287,7 +290,7 @@ function M.ex_oldfiles(eap)
       if idx then
         api.nvim_cmd({
           cmd = 'edit',
-          args = { vim.fn.expand(files[idx]) },
+          args = { vim.fn.expand(assert(files[idx])) },
           magic = { file = false, bar = true }, -- May contain '%' (e.g. swapfiles), don't expand.
         }, {})
       end
@@ -305,7 +308,7 @@ function M.ex_oldfiles(eap)
   if #lines == 0 then
     return
   end
-  api.nvim_echo(lines, false, {})
+  api.nvim_echo(lines, false)
 end
 
 --- Verify that all plugins in a list are installed.
@@ -390,11 +393,11 @@ end
 --- @param line string content of the current command line
 --- @return string[] completions
 function M.packdel_complete(pattern, line)
-  local cmd = api.nvim_parse_cmd(line, {})
+  local cmd = api.nvim_parse_cmd(line)
   if #cmd.args == 1 and vim.startswith(pattern, '++') then
     return { '++all' }
   end
-  if vim.list_contains(cmd.args, '++all') then
+  if vim.list_contains(assert(cmd.args), '++all') then
     return {}
   end
   return vim.pack._get_names(not cmd.bang)

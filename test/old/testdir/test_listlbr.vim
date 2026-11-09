@@ -268,11 +268,13 @@ endfunc
 func Test_undo_after_block_visual()
   call s:test_windows()
   call setline(1, ["aaa", "aaa", "a"])
+  " Nvim: "." re-executes the captured keysequence ("<C-V>2jg~"), not an
+  " equal-size reselect (|visual-repeat|).
   exe "norm! gg\<C-V>2j~e."
   let lines = s:screen_lines([1, 3], winwidth(0))
   let expect = [
-\ "AaA                 ",
-\ "AaA                 ",
+\ "AAA                 ",
+\ "AAA                 ",
 \ "A                   ",
 \ ]
   call s:compare_lines(expect, lines)
@@ -399,6 +401,22 @@ func Test_linebreak_no_break_after_whitespace_only()
 \ "~                   ",
 \ ]
   call s:compare_lines(expect, lines)
+  call s:close_windows()
+endfunc
+
+func Test_linebreak_with_large_tabstop()
+  call s:test_windows('setl ts=45 linebreak wrap')
+  call setline(1, "foo\tbar")
+  normal! $
+  let lines = s:screen_lines([1, 3], winwidth(0))
+  let expect = [
+\ "foo                 ",
+\ "                    ",
+\ "     bar            ",
+\ ]
+  call s:compare_lines(expect, lines)
+  call assert_equal(3, winline())
+  call assert_equal(8, wincol())
   call s:close_windows()
 endfunc
 

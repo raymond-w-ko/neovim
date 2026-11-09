@@ -95,46 +95,6 @@
 local M = {}
 local api = vim.api
 
--- TODO(tjdevries): Improve option metadata so that this doesn't have to be hardcoded.
-local key_value_options = {
-  fillchars = true,
-  fcs = true,
-  listchars = true,
-  lcs = true,
-  winhighlight = true,
-  winhl = true,
-}
-
---- @nodoc
---- @class vim._option.Info : vim.api.keyset.get_option_info
---- @field metatype 'boolean'|'string'|'number'|'map'|'array'|'set'
-
---- Convert a vimoption_T style dictionary to the correct OptionType associated with it.
----@return string
-local function get_option_metatype(name, info)
-  if info.type == 'string' then
-    if info.flaglist then
-      return 'set'
-    elseif info.commalist then
-      if key_value_options[name] then
-        return 'map'
-      end
-      return 'array'
-    end
-    return 'string'
-  end
-  return info.type
-end
-
---- @param name string
---- @return vim._option.Info
-local function get_options_info(name)
-  local info = api.nvim_get_option_info2(name, {})
-  --- @cast info vim._option.Info
-  info.metatype = get_option_metatype(name, info)
-  return info
-end
-
 --- Gets or sets environment variables in the current editor process. See |expand-env| and
 --- |:let-environment| for the Vimscript behavior. Invalid or unset key returns `nil`.
 ---
@@ -144,6 +104,7 @@ end
 --- vim.env.FOO = 'bar'
 --- print(vim.env.TERM)
 --- ```
+--- @type table<string, string?>
 vim.env = setmetatable({}, {
   __index = function(_, k)
     local v = vim.fn.getenv(k)
@@ -158,10 +119,13 @@ vim.env = setmetatable({}, {
   end,
 })
 
+--- @param bufnr? integer
+--- @return vim.bo
 local function new_buf_opt_accessor(bufnr)
   return setmetatable({}, {
     __index = function(_, k)
       if bufnr == nil and type(k) == 'number' then
+        --- @cast k integer
         return new_buf_opt_accessor(k)
       end
       return api.nvim_get_option_value(k, { buf = bufnr or 0 })
@@ -173,6 +137,9 @@ local function new_buf_opt_accessor(bufnr)
   })
 end
 
+--- @param winid? integer
+--- @param bufnr? integer
+--- @return vim.wo
 local function new_win_opt_accessor(winid, bufnr)
   -- TODO(lewis6991): allow passing both buf and win to nvim_get_option_value
   if bufnr ~= nil and bufnr ~= 0 then
@@ -182,6 +149,7 @@ local function new_win_opt_accessor(winid, bufnr)
   return setmetatable({}, {
     __index = function(_, k)
       if bufnr == nil and type(k) == 'number' then
+        --- @cast k integer
         if winid == nil then
           return new_win_opt_accessor(k)
         else
@@ -247,10 +215,10 @@ end
 --- ```
 vim.o = setmetatable({}, {
   __index = function(_, k)
-    return api.nvim_get_option_value(k, {})
+    return api.nvim_get_option_value(k)
   end,
   __newindex = function(_, k, v)
-    api.nvim_set_option_value(k, v, {})
+    api.nvim_set_option_value(k, v)
   end,
 })
 
@@ -305,117 +273,17 @@ vim.bo = new_buf_opt_accessor()
 --- ```
 vim.wo = new_win_opt_accessor()
 
-local function passthrough(_, x)
-  return x
-end
-
--- Map of OptionType to functions that take vimoption_T values and convert to Lua values.
--- Each function takes (info, vim_value) -> lua_value
-local to_lua_value = {
-  boolean = passthrough,
-  number = passthrough,
-  string = passthrough,
-
-  array = function(_, value)
-    -- Empty strings mean that there is nothing there,
-    -- so empty table should be returned.
-    if value == '' then
-      return {}
-    end
-
-    -- Handles unescaped commas in a list.
-    if value:find(',,,') then
-      --- @type string, string
-      local left, right = unpack(vim.split(value, ',,,'))
-
-      local result = {}
-      vim.list_extend(result, vim.split(left, ','))
-      table.insert(result, ',')
-      vim.list_extend(result, vim.split(right, ','))
-
-      table.sort(result)
-
-      return result
-    end
-
-    if value:find(',^,,', 1, true) then
-      --- @type string, string
-      local left, right = unpack(vim.split(value, ',^,,', { plain = true }))
-
-      local result = {}
-      vim.list_extend(result, vim.split(left, ','))
-      table.insert(result, '^,')
-      vim.list_extend(result, vim.split(right, ','))
-
-      table.sort(result)
-
-      return result
-    end
-
-    return vim.split(value, ',')
-  end,
-
-  set = function(info, value)
-    if type(value) == 'table' then
-      return value
-    end
-
-    -- Empty strings mean that there is nothing there,
-    -- so empty table should be returned.
-    if value == '' then
-      return {}
-    end
-
-    assert(info.flaglist, 'That is the only one I know how to handle')
-
-    local result = {} --- @type table<string,true>
-
-    if info.flaglist and info.commalist then
-      local split_value = vim.split(value, ',')
-      for _, v in ipairs(split_value) do
-        result[v] = true
-      end
-    else
-      for i = 1, #value do
-        result[value:sub(i, i)] = true
-      end
-    end
-
-    return result
-  end,
-
-  map = function(info, raw_value)
-    if type(raw_value) == 'table' then
-      return raw_value
-    end
-
-    assert(info.commalist, 'Only commas are supported currently')
-
-    local result = {} --- @type table<string,string>
-
-    local comma_split = vim.split(raw_value, ',')
-    for _, key_value_str in ipairs(comma_split) do
-      --- @type string, string
-      local key, value = unpack(vim.split(key_value_str, ':'))
-      key = vim.trim(key)
-
-      result[key] = value
-    end
-
-    return result
-  end,
-}
-
---- Converts a vimoption_T style value to a Lua value
-function M.convert_value_to_lua(name, option_value)
-  local info = get_options_info(name) or error('Not a valid option name: ' .. name)
-  return to_lua_value[info.metatype](info, option_value)
-end
-
+--- @param scope? 'local'|'global'
+--- @return table<string,vim.Option>
 local function create_option_accessor(scope)
   --- @diagnostic disable-next-line: no-unknown
   local option_mt
 
+  --- @generic T
+  --- @param name string
+  --- @param value T
+  --- @param op_count integer
+  --- @return vim.Option & { _name: string, _value: T, _op_count: integer }
   local function make_option(name, value, op_count)
     if type(value) == 'table' and getmetatable(value) == option_mt then
       assert(name == value._name, "must be the same value, otherwise that's weird.")
@@ -433,11 +301,11 @@ local function create_option_accessor(scope)
 
   option_mt = {
     get = function(self)
-      return M.convert_value_to_lua(self._name, self._value)
+      return api.nvim__option_to_object(self._name, self._value)
     end,
 
     append = function(self, right)
-      vim.api.nvim_set_option_value(self._name, right, { operation = 'append', scope = scope })
+      api.nvim_set_option_value(self._name, right, { operation = 'append', scope = scope })
     end,
 
     __infix = function(self, right, operation)
@@ -457,7 +325,7 @@ local function create_option_accessor(scope)
       end
       return make_option(
         self._name,
-        vim.api.nvim_set_option_value(
+        api.nvim_set_option_value(
           self._name,
           right,
           { operation = operation, scope = scope, dry_run = true }
@@ -471,7 +339,7 @@ local function create_option_accessor(scope)
     end,
 
     prepend = function(self, right)
-      vim.api.nvim_set_option_value(self._name, right, { operation = 'prepend', scope = scope })
+      api.nvim_set_option_value(self._name, right, { operation = 'prepend', scope = scope })
     end,
 
     __pow = function(self, right)
@@ -479,7 +347,7 @@ local function create_option_accessor(scope)
     end,
 
     remove = function(self, right)
-      vim.api.nvim_set_option_value(self._name, right, { operation = 'remove', scope = scope })
+      api.nvim_set_option_value(self._name, right, { operation = 'remove', scope = scope })
     end,
 
     __sub = function(self, right)
@@ -620,7 +488,8 @@ local Option = {} -- luacheck: no unused
 ---     print("J is enabled!")
 --- end
 --- ```
----@return string|integer|boolean|nil value of option
+---@return string|integer|boolean|string[]|table<string,string|boolean>|nil value of option
+---@diagnostic disable-next-line: unused used for gen_vimdoc
 function Option:get() end
 
 --- Append a value to string-style options. See |:set+=|
@@ -632,7 +501,7 @@ function Option:get() end
 --- vim.opt.formatoptions = vim.opt.formatoptions + 'j'
 --- ```
 ---@param value string Value to append
----@diagnostic disable-next-line:unused-local used for gen_vimdoc
+---@diagnostic disable-next-line:unused used for gen_vimdoc
 function Option:append(value) end -- luacheck: no unused
 
 --- Prepend a value to string-style options. See |:set^=|
@@ -644,7 +513,7 @@ function Option:append(value) end -- luacheck: no unused
 --- vim.opt.wildignore = vim.opt.wildignore ^ '*.o'
 --- ```
 ---@param value string Value to prepend
----@diagnostic disable-next-line:unused-local used for gen_vimdoc
+---@diagnostic disable-next-line:unused used for gen_vimdoc
 function Option:prepend(value) end -- luacheck: no unused
 
 --- Remove a value from string-style options. See |:set-=|
@@ -656,7 +525,7 @@ function Option:prepend(value) end -- luacheck: no unused
 --- vim.opt.wildignore = vim.opt.wildignore - '*.pyc'
 --- ```
 ---@param value string Value to remove
----@diagnostic disable-next-line:unused-local used for gen_vimdoc
+---@diagnostic disable-next-line:unused used for gen_vimdoc
 function Option:remove(value) end -- luacheck: no unused
 
 --- @nodoc

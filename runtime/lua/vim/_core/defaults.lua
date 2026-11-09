@@ -5,12 +5,22 @@ local nvim_on = require('vim._core.util').nvim_on
 --- Default user commands
 do
   vim.api.nvim_create_user_command('Inspect', function(cmd)
-    if cmd.bang then
-      vim.print(vim.inspect_pos())
-    else
-      vim.show_pos()
+    local opts = {} --- @type vim.inspect_pos.Opts
+    local row, col --- @type integer?, integer?
+    if cmd.range > 0 then
+      row, col = cmd.line1 - 1, 0
+      opts.end_row, opts.end_col = cmd.line2, 0
     end
-  end, { desc = 'Inspect highlights and extmarks at the cursor', bang = true })
+    if cmd.bang then
+      vim.print(vim.inspect_pos(0, row, col, opts))
+    else
+      vim.show_pos(0, row, col, opts)
+    end
+  end, {
+    desc = 'Inspect highlights and extmarks at the cursor or in a line range',
+    bang = true,
+    range = true,
+  })
 
   vim.api.nvim_create_user_command('InspectTree', function(cmd)
     local opts = { lang = cmd.fargs[1] }
@@ -42,7 +52,7 @@ do
         vim.ui.open(current_file)
       end
     else
-      vim.ui.open(cmd.fargs[1])
+      vim.ui.open(assert(cmd.fargs[1]))
     end
   end, {
     desc = 'Open file with system default handler. See :help vim.ui.open()',
@@ -57,8 +67,8 @@ do
   ---
   --- See |v_star-default| and |v_#-default|
   do
+    --- @param forward 0|1
     local function _visual_search(forward)
-      assert(forward == 0 or forward == 1)
       local pos = vim.fn.getpos('.')
       local vpos = vim.fn.getpos('v')
       local mode = vim.fn.mode()
@@ -112,9 +122,14 @@ do
   --- Use normal! <C-L> to prevent inserting raw <C-L> when using i_<C-O>. #17473
   ---
   --- See |CTRL-L-default|
-  vim.keymap.set('n', '<C-L>', '<Cmd>nohlsearch<Bar>diffupdate<Bar>normal! <C-L><CR>', {
-    desc = ':help CTRL-L-default',
-  })
+  vim.keymap.set(
+    'n',
+    '<C-L>',
+    '<Cmd>nohlsearch<Bar>diffupdate'
+      .. '<Bar>call nvim_buf_clear_namespace(0, nvim_create_namespace("nvim.multicursor"), 0, -1)'
+      .. '<Bar>normal! <C-L><CR>',
+    { desc = ':help CTRL-L-default' }
+  )
 
   --- Set undo points when deleting text in insert mode.
   ---
@@ -129,23 +144,10 @@ do
   --- See |&-default|
   vim.keymap.set('n', '&', ':&&<CR>', { desc = ':help &-default' })
 
-  vim.keymap.set('n', '-', function()
-    if vim.fn.maparg('<Plug>(nvim-dir-up)', 'n') ~= '' then
-      return '<Plug>(nvim-dir-up)'
-    end
-    return (vim.v.count == 0 and '' or vim.v.count) .. '-'
-  end, { expr = true, silent = true, desc = 'Open parent directory' })
-
-  --- Use Q in Visual mode to execute a macro on each line of the selection. #21422
+  --- Use @ in Visual mode to execute a macro on each line of the selection. #21422
   --- This only make sense in linewise Visual mode. #28287
   ---
-  --- Applies to @x and includes @@ too.
-  vim.keymap.set(
-    'x',
-    'Q',
-    "mode() ==# 'V' ? ':normal! @<C-R>=reg_recorded()<CR><CR>' : 'Q'",
-    { silent = true, expr = true, desc = ':help v_Q-default' }
-  )
+  --- Includes @@ too.
   vim.keymap.set(
     'x',
     '@',
@@ -155,6 +157,7 @@ do
 
   --- Map |gx| to call |vim.ui.open| on the `textDocument/documentLink` or <cfile> at cursor.
   do
+    --- @param uri string
     local function do_open(uri)
       local cmd, err = vim.ui.open(uri)
       local rv = cmd and cmd:wait(1000) or nil
@@ -309,7 +312,7 @@ do
   local function cmd(opts)
     local ok, err = pcall(vim.api.nvim_cmd, opts, {})
     if not ok then
-      vim.api.nvim_echo({ { err:sub(#'Vim:' + 1) } }, true, { err = true })
+      vim.api.nvim_echo({ { require('vim._core.util').cmd_errmsg(err) } }, true, { err = true })
     end
   end
 
@@ -453,14 +456,12 @@ do
 
     -- Add empty lines
     vim.keymap.set('n', '[<Space>', function()
-      -- TODO: update once it is possible to assign a Lua function to options #25672
-      vim.go.operatorfunc = "v:lua.require'vim._core.util'.space_above"
+      vim.go.operatorfunc = require('vim._core.util').space_above
       return 'g@l'
     end, { expr = true, desc = 'Add empty line above cursor' })
 
     vim.keymap.set('n', ']<Space>', function()
-      -- TODO: update once it is possible to assign a Lua function to options #25672
-      vim.go.operatorfunc = "v:lua.require'vim._core.util'.space_below"
+      vim.go.operatorfunc = require('vim._core.util').space_below
       return 'g@l'
     end, { expr = true, desc = 'Add empty line below cursor' })
   end
@@ -555,7 +556,7 @@ do
     end
   end
 
-  local nvim_popupmenu_augroup = vim.api.nvim_create_augroup('nvim.popupmenu', {})
+  local nvim_popupmenu_augroup = vim.api.nvim_create_augroup('nvim.popupmenu')
   nvim_on('MenuPopup', nvim_popupmenu_augroup, {
     pattern = '*',
     desc = 'Mouse popup menu',
@@ -576,7 +577,7 @@ do
     end)
   end
 
-  local nvim_terminal_augroup = vim.api.nvim_create_augroup('nvim.terminal', {})
+  local nvim_terminal_augroup = vim.api.nvim_create_augroup('nvim.terminal')
   vim.api.nvim_create_autocmd('BufReadCmd', {
     pattern = 'term://*',
     group = nvim_terminal_augroup,
@@ -622,7 +623,7 @@ do
     local buf = vim.bo[ev.buf]
     local pos = ev.data.pos ---@type integer
     local buf_has_exitmsg = #(
-        vim.api.nvim_buf_get_extmarks(ev.buf, nvim_terminal_exitmsg_ns, 0, -1, {})
+        vim.api.nvim_buf_get_extmarks(ev.buf, nvim_terminal_exitmsg_ns, 0, -1)
       ) > 0
 
     -- `nvim_open_term` buffers do not have an attached 'channel'.
@@ -689,6 +690,7 @@ do
   end)
 
   ---@param ns integer
+  ---@param win integer
   ---@param buf integer
   ---@param count integer
   local function jump_to_prompt(ns, win, buf, count)
@@ -756,18 +758,19 @@ do
   vim.api.nvim_create_autocmd('CmdwinEnter', {
     pattern = '[:>]',
     desc = 'Limit syntax sync to maxlines=1 in the command window',
-    group = vim.api.nvim_create_augroup('nvim.cmdwin', {}),
+    group = vim.api.nvim_create_augroup('nvim.cmdwin'),
     command = 'syntax sync minlines=1 maxlines=1',
   })
 
-  nvim_on('SwapExists', vim.api.nvim_create_augroup('nvim.swapfile', {}), {
+  nvim_on('SwapExists', vim.api.nvim_create_augroup('nvim.swapfile'), {
     pattern = '*',
     desc = 'Skip the swapfile prompt when the swapfile is owned by a running Nvim process',
   }, function()
     local info = vim.fn.swapinfo(vim.v.swapname)
-    local user = vim.uv.os_get_passwd().username
+    local passwd = vim.uv.os_get_passwd()
+    local user = passwd and passwd.username
     local iswin = 1 == vim.fn.has('win32')
-    if info.error or info.pid <= 0 or (not iswin and info.user ~= user) then
+    if info.error or info.pid <= 0 or (not iswin and (not user or info.user ~= user)) then
       vim.v.swapchoice = '' -- Show the prompt.
       return
     end
@@ -803,7 +806,7 @@ do
   -- attached terminal, and a |TermResponse| is not attributable to a UI, so the
   -- value reflects whichever terminal answers last (decided by response speed),
   -- not necessarily the most recently attached one.
-  local group = vim.api.nvim_create_augroup('nvim.tty', {})
+  local group = vim.api.nvim_create_augroup('nvim.tty')
 
   --- Set an option after startup (so that OptionSet is fired), but only if not
   --- already set by the user.
@@ -812,7 +815,7 @@ do
   --- @param value any Option value
   --- @param force boolean? Always set the value, even if already set
   local function setoption(option, value, force)
-    if not force and vim.api.nvim_get_option_info2(option, {}).was_set then
+    if not force and vim.api.nvim_get_option_info2(option).was_set then
       -- Don't do anything if option is already set
       return
     end
@@ -838,7 +841,7 @@ do
 
   --- True if 'background' was set by the user, not by our detection (sid_lua).
   local function bg_user_set()
-    local info = vim.api.nvim_get_option_info2('background', {})
+    local info = vim.api.nvim_get_option_info2('background')
     return info.was_set and info.last_set_sid ~= sid_lua
   end
 
@@ -929,10 +932,11 @@ do
   --- @param sync boolean When true (a TTY is present at startup), also send a
   --- DSR probe and synchronously wait so 'background' is set before user config,
   --- warning (E1568) if the terminal never answers the DSR.
+  --- @param chan integer
   local function detect_background(sync, chan)
     -- Re-create (clear) the handler's augroup on each call so only the
     -- most-recently-attached TUI's handler remains.
-    local bg_group = vim.api.nvim_create_augroup('nvim.tty.background', {})
+    local bg_group = vim.api.nvim_create_augroup('nvim.tty.background')
 
     -- Send OSC 11 query. In the startup (sync) path also send a DSR probe: if
     -- the DSR response comes first, the terminal most likely doesn't support the
@@ -973,8 +977,7 @@ do
           if rr and gg and bb then
             local luminance = (0.299 * rr) + (0.587 * gg) + (0.114 * bb)
             local bg = luminance < 0.5 and 'dark' or 'light'
-            -- Use :noautocmd to suppress OptionSet event; OSC11 response may arrive after VimEnter.
-            vim.cmd('noautocmd set background=' .. bg)
+            vim.o.background = bg
           end
         end
       end
@@ -1001,10 +1004,9 @@ do
     end
   end
 
-  --- If the TUI (term_has_truecolor) was able to determine that the host
-  --- terminal supports truecolor, enable 'termguicolors'. Otherwise, query the
-  --- terminal (using both XTGETTCAP and SGR + DECRQSS). If the terminal's
-  --- response indicates that it does support truecolor enable 'termguicolors',
+  --- If the TUI (term_has_truecolor) detected that the host terminal supports truecolor, enable
+  --- 'termguicolors'. Otherwise, query the terminal (using both XTGETTCAP and SGR + DECRQSS). If
+  --- the terminal's response indicates that it does support truecolor enable 'termguicolors',
   --- but only if the user has not already disabled it.
   ---
   --- @param ui table<string,any> The attached TTY UI (see |nvim_list_uis()|).
@@ -1062,7 +1064,7 @@ do
         end
 
         -- The returned SGR sequence should begin with 48:2
-        local sgr = assert(attrs[#attrs]):match('^48:2:([%d:]+)$')
+        local sgr = attrs[#attrs]:match('^48:2:([%d:]+)$')
         if not sgr then
           return
         end
@@ -1098,9 +1100,10 @@ do
     end
 
     detect_termguicolors(tty)
+    require('vim._core.mcursor').detect(tty) -- Kitty multicursor protocol.
 
     -- Show progress bars in supporting terminals
-    nvim_on('Progress', vim.api.nvim_create_augroup('nvim.progress', {}), {
+    nvim_on('Progress', vim.api.nvim_create_augroup('nvim.progress'), {
       desc = 'Display native progress bars',
     }, function(ev)
       if ev.data.status == 'running' then
@@ -1134,15 +1137,14 @@ do
       return nil
     end
 
-    nvim_on('UIEnter', vim.api.nvim_create_augroup('nvim.tty.attach', {}), {}, function()
+    nvim_on('UIEnter', vim.api.nvim_create_augroup('nvim.tty.attach'), {}, function()
       local ui = attaching_tty()
       if not ui then
         return
       end
 
-      -- 'termguicolors': enable when the attaching UI reports truecolor (or the
-      -- terminal query confirms it), unless the user set it. Never disabled here.
-      detect_termguicolors(ui)
+      detect_termguicolors(ui) -- 'termguicolors'
+      require('vim._core.mcursor').detect(ui) -- Kitty multicursor protocol.
 
       -- 'background': (re)query OSC 11. The persistent handler also reacts to
       -- runtime theme changes (mode 2031 -> TUI re-queries -> |TermResponse|);

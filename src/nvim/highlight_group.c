@@ -143,16 +143,20 @@ static const char e_missing_argument_str[]
 // they still work when the runtime files can't be found.
 
 static const char *highlight_init_both[] = {
-  "Cursor            guifg=bg      guibg=fg",
+  "Cursor            guifg=bg      guibg=fg                cterm=reverse",
   "CursorLineNr      gui=bold      cterm=bold",
+  "Ignore            guifg=bg      ctermfg=0",
   "PmenuMatch        gui=bold      cterm=bold",
   "PmenuMatchSel     gui=bold      cterm=bold",
   "PmenuSel          gui=reverse   cterm=reverse,underline blend=0",
   "RedrawDebugNormal gui=reverse   cterm=reverse",
-  "TabLineSel        gui=bold      cterm=NONE",
+  "TabLineSel        guifg=fg      guibg=bg                gui=bold cterm=nocombine",
   "TermCursor        gui=reverse   cterm=reverse",
   "Underlined        gui=underline cterm=underline",
-  "lCursor           guifg=bg      guibg=fg",
+  "Bold              gui=bold        cterm=bold",
+  "Italic            gui=italic      cterm=italic",
+  "BoldItalic        gui=bold,italic cterm=bold,italic",
+  "lCursor           guifg=bg      guibg=fg                cterm=reverse",
 
   // UI
   "default link CursorIM         Cursor",
@@ -182,13 +186,16 @@ static const char *highlight_init_both[] = {
   "default link ComplMatchIns    NONE",
   "default link ComplHint        NonText",
   "default link ComplHintMore    MoreMsg",
+  "default link MCursor          CurSearch",
+  "default link MCursorVisual    Visual",
   "default link Substitute       Search",
   "default link StatusLineTerm   StatusLine",
   "default link StatusLineTermNC StatusLineNC",
+  "default link StatusLineRemote DiffAdd",
   "default link StderrMsg        ErrorMsg",
   "default link StdoutMsg        NONE",
-  "default link TabLine          StatusLineNC",
-  "default link TabLineFill      TabLine",
+  "default link TabLine          TabLineFill",
+  "default link TabLineFill      StatusLineNC",
   "default link VertSplit        WinSeparator",
   "default link VisualNOS        Visual",
   "default link Whitespace       NonText",
@@ -199,6 +206,7 @@ static const char *highlight_init_both[] = {
   "default link Character      Constant",
   "default link Number         Constant",
   "default link Boolean        Constant",
+  "default link Regexp         Constant",
   "default link Float          Number",
   "default link Conditional    Statement",
   "default link Repeat         Statement",
@@ -219,7 +227,6 @@ static const char *highlight_init_both[] = {
   // Used by HLF_8 (very common). None of the HLF_* things use the other Special* groups.
   "default link SpecialKey     Special",
   "default link Dimmed         Comment",
-  "default link Ignore         Normal",
 
   // Built-in LSP
   "default link LspCodeLens                 NonText",
@@ -524,6 +531,7 @@ static const char *highlight_init_dark[] = {
   NULL
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): used with FFI in unittests
 const char *const highlight_init_cmdline[] = {
   // XXX When modifying a list modify it in both valid and invalid halves.
   // TODO(ZyX-I): merge valid and invalid groups via a macros.
@@ -1448,7 +1456,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
                       && dark != (*p_bg == 'd')
                       && !option_was_set(kOptBackground)) {
                     set_option_value_give_err(kOptBackground,
-                                              CSTR_AS_OPTVAL(dark ? "dark" : "light"), 0);
+                                              CSTR_AS_OBJ(dark ? "dark" : "light"), 0);
                     reset_option_was_set(kOptBackground);
                   }
                 }
@@ -2293,7 +2301,7 @@ void highlight_changed(void)
     if (id == 0) {
       abort();
     }
-    int ns_id = -1;
+    int ns_id = 0;
     int final_id = id;
     syn_ns_get_final_id(&ns_id, &final_id);
     if (hlf == HLF_SNC) {

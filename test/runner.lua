@@ -32,13 +32,20 @@ if _G.arg[1] and vim.startswith(_G.arg[1], '-P') then
   vim.env.TMPDIR = build_dir .. '/Xtest_tmpdir'
   vim.fn.mkdir(vim.env.TMPDIR, 'p')
 end
+local run_dir --- @type string?
 if _G.arg[1] and vim.startswith(_G.arg[1], '-X') then
   local xdg_dir = string.sub(table.remove(_G.arg, 1), 3)
-  vim.env.NVIM_LOG_FILE = xdg_dir .. '/Xtest_nvimlog'
   vim.env.NVIM_RPLUGIN_MANIFEST = xdg_dir .. '/Xtest_rplugin_manifest'
   vim.env.XDG_CONFIG_HOME = xdg_dir .. '/config'
   vim.env.XDG_DATA_HOME = xdg_dir .. '/share'
   vim.env.XDG_STATE_HOME = xdg_dir .. '/state'
+  if vim.fn.has('win32') == 0 then
+    -- Socket dir (stdpath("run")), deliberately NOT in the build dir. sockaddr_un.sun_path is 104
+    -- bytes on macOS/BSD, "/…/build/tmp/nvim.<pid>.<n>" can exceed it. #38623
+    run_dir = ('/tmp/nvim_%d'):format(vim.uv.os_getpid())
+    vim.env.XDG_RUNTIME_DIR = run_dir
+    vim.fn.mkdir(run_dir, 'p')
+  end
 end
 
 local root = repo_root()
@@ -55,6 +62,9 @@ if vim.v.servername ~= '' then
 end
 
 local exit_code = require('test.harness').main(_G.arg)
+if run_dir then
+  vim.fn.delete(run_dir, 'rf')
+end
 io.stdout:flush()
 io.stderr:flush()
 

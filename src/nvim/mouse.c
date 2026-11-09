@@ -13,21 +13,23 @@
 #include "nvim/decoration.h"
 #include "nvim/diff.h"
 #include "nvim/drawscreen.h"
-#include "nvim/edit.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/vars.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/fold.h"
-#include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/grid_defs.h"
+#include "nvim/input.h"
+#include "nvim/input_cmdatom.h"
+#include "nvim/insert.h"
 #include "nvim/keycodes.h"
 #include "nvim/macros_defs.h"
 #include "nvim/mark_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/mbyte_defs.h"
+#include "nvim/mcursor.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/menu.h"
@@ -226,9 +228,10 @@ static void call_click_def_func(StlClickDefinition *click_defs, int col, int whi
 }
 
 /// Translate window coordinates to buffer position without any side effects.
-/// Returns IN_BUFFER and sets "mpos->col" to the column when in buffer text.
-/// The column is one for the first column.
-static int get_fpos_of_mouse(pos_T *mpos)
+/// Returns IN_BUFFER and sets `mpos` (0-based column) when in buffer text.
+///
+/// @param wpp  If not NULL: consider any window (not just `curwin`), and return it here.
+static int get_fpos_of_mouse(pos_T *mpos, win_T **wpp)
 {
   int grid = mouse_grid;
   int row = mouse_row;
@@ -242,6 +245,9 @@ static int get_fpos_of_mouse(pos_T *mpos)
   win_T *wp = mouse_find_win_inner(&grid, &row, &col);
   if (wp == NULL) {
     return IN_UNKNOWN;
+  }
+  if (wpp != NULL) {
+    *wpp = wp;
   }
   int winrow = row;
   int wincol = col;
@@ -275,7 +281,7 @@ static int get_fpos_of_mouse(pos_T *mpos)
     return IN_SEP_LINE;
   }
 
-  if (wp != curwin || below_buffer) {
+  if ((wpp == NULL && wp != curwin) || below_buffer) {
     return IN_UNKNOWN;
   }
 
@@ -288,27 +294,27 @@ static int do_popup(int which_button, int m_pos_flag, pos_T m_pos)
   int jump_flags = 0;
   if (strcmp(p_mousem, "popup_setpos") == 0) {
     // First set the cursor position before showing the popup menu.
-    if (VIsual_active) {
+    if (Visual.active) {
       // set MOUSE_MAY_STOP_VIS if we are outside the selection
       // or the current window (might have false negative here)
       if (m_pos_flag != IN_BUFFER) {
         jump_flags = MOUSE_MAY_STOP_VIS;
       } else {
-        if (VIsual_mode == 'V') {
-          if ((curwin->w_cursor.lnum <= VIsual.lnum
-               && (m_pos.lnum < curwin->w_cursor.lnum || VIsual.lnum < m_pos.lnum))
-              || (VIsual.lnum < curwin->w_cursor.lnum
-                  && (m_pos.lnum < VIsual.lnum || curwin->w_cursor.lnum < m_pos.lnum))) {
+        if (Visual.mode == 'V') {
+          if ((curwin->w_cursor.lnum <= Visual.start.lnum
+               && (m_pos.lnum < curwin->w_cursor.lnum || Visual.start.lnum < m_pos.lnum))
+              || (Visual.start.lnum < curwin->w_cursor.lnum
+                  && (m_pos.lnum < Visual.start.lnum || curwin->w_cursor.lnum < m_pos.lnum))) {
             jump_flags = MOUSE_MAY_STOP_VIS;
           }
-        } else if ((ltoreq(curwin->w_cursor, VIsual)
-                    && (lt(m_pos, curwin->w_cursor) || lt(VIsual, m_pos)))
-                   || (lt(VIsual, curwin->w_cursor)
-                       && (lt(m_pos, VIsual) || lt(curwin->w_cursor, m_pos)))) {
+        } else if ((ltoreq(curwin->w_cursor, Visual.start)
+                    && (lt(m_pos, curwin->w_cursor) || lt(Visual.start, m_pos)))
+                   || (lt(Visual.start, curwin->w_cursor)
+                       && (lt(m_pos, Visual.start) || lt(curwin->w_cursor, m_pos)))) {
           jump_flags = MOUSE_MAY_STOP_VIS;
-        } else if (VIsual_mode == Ctrl_V) {
+        } else if (Visual.mode == Ctrl_V) {
           colnr_T leftcol, rightcol;
-          getvcols(curwin, &curwin->w_cursor, &VIsual, &leftcol, &rightcol, 0);
+          getvcols(curwin, &curwin->w_cursor, &Visual.start, &leftcol, &rightcol, 0);
           getvcol(curwin, &m_pos, NULL, &m_pos.col, NULL, 0);
           if (m_pos.col < leftcol || m_pos.col > rightcol) {
             jump_flags = MOUSE_MAY_STOP_VIS;
@@ -321,7 +327,7 @@ static int do_popup(int which_button, int m_pos_flag, pos_T m_pos)
   }
   if (jump_flags) {
     jump_flags = jump_to_mouse(jump_flags, NULL, which_button);
-    redraw_curbuf_later(VIsual_active ? UPD_INVERTED : UPD_VALID);
+    redraw_curbuf_later(Visual.active ? UPD_INVERTED : UPD_VALID);
     update_screen();
     setcursor();
     ui_flush();  // Update before showing popup menu
@@ -332,37 +338,7 @@ static int do_popup(int which_button, int m_pos_flag, pos_T m_pos)
 }
 
 /// Do the appropriate action for the current mouse click in the current mode.
-/// Not used for Command-line mode.
-///
-/// Normal and Visual Mode:
-/// event         modi-  position      visual       change   action
-///               fier   cursor                     window
-/// left press     -     yes         end             yes
-/// left press     C     yes         end             yes     "^]" (2)
-/// left press     S     yes     end (popup: extend) yes     "*" (2)
-/// left drag      -     yes     start if moved      no
-/// left relse     -     yes     start if moved      no
-/// middle press   -     yes      if not active      no      put register
-/// middle press   -     yes      if active          no      yank and put
-/// right press    -     yes     start or extend     yes
-/// right press    S     yes     no change           yes     "#" (2)
-/// right drag     -     yes     extend              no
-/// right relse    -     yes     extend              no
-///
-/// Insert or Replace Mode:
-/// event         modi-  position      visual       change   action
-///               fier   cursor                     window
-/// left press     -     yes     (cannot be active)  yes
-/// left press     C     yes     (cannot be active)  yes     "CTRL-O^]" (2)
-/// left press     S     yes     (cannot be active)  yes     "CTRL-O*" (2)
-/// left drag      -     yes     start or extend (1) no      CTRL-O (1)
-/// left relse     -     yes     start or extend (1) no      CTRL-O (1)
-/// middle press   -     no      (cannot be active)  no      put register
-/// right press    -     yes     start or extend     yes     CTRL-O
-/// right press    S     yes     (cannot be active)  yes     "CTRL-O#" (2)
-///
-/// (1) only if mouse pointer moved since press
-/// (2) only if click is in same buffer
+/// Not used for Command-line mode. Per-mode/button behavior: |mouse-mode-table|.
 ///
 /// @param oap        operator argument, can be NULL
 /// @param c          K_LEFTMOUSE, etc
@@ -414,6 +390,7 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
   // Ignore drag and release events if we didn't get a click.
   if (is_click) {
     got_click = true;
+    in_tab_line = false;
   } else {
     if (!got_click) {                   // didn't get click, ignore
       return false;
@@ -437,6 +414,9 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
     }
     stuffcharReadbuff(Ctrl_T);
     got_click = false;            // ignore drag&release now
+    if ((State & MODE_INSERT) == 0) {
+      exec_stuffed(NULL);
+    }
     return false;
   }
 
@@ -483,14 +463,20 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
       // If visual was active, yank the highlighted text and put it
       // before the mouse pointer position.
       // In Select mode replace the highlighted text with the clipboard.
-      if (VIsual_active) {
-        if (VIsual_select) {
+      if (Visual.active) {
+        if (Visual.select) {
           stuffcharReadbuff(Ctrl_G);
           stuffReadbuff("\"+p");
         } else {
+          // Reg prefix must travel in the keys run by exec_stuffed. E.g. `"ay<MiddleMouse>`
+          if (regname != 0) {
+            stuffcharReadbuff('"');
+            stuffcharReadbuff(regname);
+          }
           stuffcharReadbuff('y');
           stuffcharReadbuff(K_MIDDLEMOUSE);
         }
+        exec_stuffed(NULL);
         return false;
       }
       // The rest is below jump_to_mouse()
@@ -518,9 +504,9 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
                  (fixindent ? PUT_FIXINDENT : 0) | PUT_CURSEND);
 
           // Repeat it with CTRL-R CTRL-O r or CTRL-R CTRL-P r
-          AppendCharToRedobuff(Ctrl_R);
-          AppendCharToRedobuff(fixindent ? Ctrl_P : Ctrl_O);
-          AppendCharToRedobuff(regname == 0 ? '"' : regname);
+          redo_append_char(Ctrl_R);
+          redo_append_char(fixindent ? Ctrl_P : Ctrl_O);
+          redo_append_char(regname == 0 ? '"' : regname);
         }
       }
       return false;
@@ -585,6 +571,21 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
     }
   }
 
+  // Multicursor: CTRL-click toggles a cursor at click pos, without moving the primary cursor.
+  // Not in quickfix: there CTRL-click jumps to the item. No-op during insert.
+  if (is_click && (mod_mask & MOD_MASK_CTRL) && which_button == MOUSE_LEFT) {
+    pos_T pos;
+    win_T *wp = NULL;
+    if (get_fpos_of_mouse(&pos, &wp) == IN_BUFFER && !bt_quickfix(wp->w_buffer)) {
+      got_click = false;  // ignore drag&release now
+      if ((State & MODE_INSERT) == 0) {
+        pos.coladd = 0;
+        mc_toggle(wp->w_buffer, pos, false, kNone);
+      }
+      return false;
+    }
+  }
+
   int m_pos_flag = 0;
   pos_T m_pos = { 0 };
   // When 'mousemodel' is "popup" or "popup_setpos", translate mouse events:
@@ -592,7 +593,7 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
   // shift-left button -> right button
   // alt-left button   -> alt-right button
   if (mouse_model_popup()) {
-    m_pos_flag = get_fpos_of_mouse(&m_pos);
+    m_pos_flag = get_fpos_of_mouse(&m_pos, NULL);
     if (!(m_pos_flag & (IN_STATUS_LINE|MOUSE_WINBAR|MOUSE_STATUSCOL))
         && which_button == MOUSE_RIGHT && !(mod_mask & (MOD_MASK_SHIFT|MOD_MASK_CTRL))) {
       if (!is_click) {
@@ -612,26 +613,26 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
 
   pos_T end_visual = { 0 };
   pos_T start_visual = { 0 };
-  bool mouse_can_visual = ui_mouse_has(MOUSE_VISUAL);
+  bool mouse_can_visual = ui_mouse_has(kMouseVisual);
   if ((State & (MODE_NORMAL | MODE_INSERT))
       && !(mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))) {
     if (which_button == MOUSE_LEFT && mouse_can_visual) {
       if (is_click) {
         // stop Visual mode for a left click in a window, but not when on a status line
-        if (VIsual_active) {
+        if (Visual.active) {
           jump_flags |= MOUSE_MAY_STOP_VIS;
         }
       } else {
         jump_flags |= MOUSE_MAY_VIS;
       }
     } else if (which_button == MOUSE_RIGHT && mouse_can_visual) {
-      if (is_click && VIsual_active) {
+      if (is_click && Visual.active) {
         // Remember the start and end of visual before moving the cursor.
-        if (lt(curwin->w_cursor, VIsual)) {
+        if (lt(curwin->w_cursor, Visual.start)) {
           start_visual = curwin->w_cursor;
-          end_visual = VIsual;
+          end_visual = Visual.start;
         } else {
-          start_visual = VIsual;
+          start_visual = Visual.start;
           end_visual = curwin->w_cursor;
         }
       }
@@ -654,12 +655,12 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
   }
 
   // JUMP!
-  int old_active = VIsual_active;
+  int old_active = Visual.active;
   pos_T save_cursor = curwin->w_cursor;
 
   // Even though we gate *_VIS flags above, we want to make sure the cursor doesn't move
   // in visual mode unless it is set as a mouse option
-  if (!VIsual_active || mouse_can_visual) {
+  if (!Visual.active || mouse_can_visual) {
     jump_flags = jump_to_mouse(jump_flags, oap == NULL ? NULL : &(oap->inclusive), which_button);
   }
 
@@ -757,7 +758,7 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
 
   // Set global flag that we are extending the Visual area with mouse dragging;
   // temporarily minimize 'scrolloff'.
-  if (VIsual_active && is_drag && get_scrolloff_value(curwin)) {
+  if (Visual.active && is_drag && get_scrolloff_value(curwin)) {
     // In the very first line, allow scrolling one line
     if (mouse_row == 0) {
       mouse_dragging = 2;
@@ -772,17 +773,17 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
     mouse_row = 0;
   }
 
-  int old_mode = VIsual_mode;
+  int old_mode = Visual.mode;
   if (start_visual.lnum) {              // right click in visual mode
     linenr_T diff;
     // When ALT is pressed make Visual mode blockwise.
     if (mod_mask & MOD_MASK_ALT) {
-      VIsual_mode = Ctrl_V;
+      Visual.mode = Ctrl_V;
     }
 
     // In Visual-block mode, divide the area in four, pick up the corner
     // that is in the quarter that the cursor is in.
-    if (VIsual_mode == Ctrl_V) {
+    if (Visual.mode == Ctrl_V) {
       colnr_T leftcol, rightcol;
       getvcols(curwin, &start_visual, &end_visual, &leftcol, &rightcol, 0);
       if (curwin->w_curswant > (leftcol + rightcol) / 2) {
@@ -795,28 +796,28 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
         end_visual.lnum = start_visual.lnum;
       }
 
-      // move VIsual to the right column
+      // move Visual.start to the right column
       start_visual = curwin->w_cursor;              // save the cursor pos
       curwin->w_cursor = end_visual;
       coladvance(curwin, end_visual.col);
-      VIsual = curwin->w_cursor;
+      Visual.start = curwin->w_cursor;
       curwin->w_cursor = start_visual;              // restore the cursor
     } else {
       // If the click is before the start of visual, change the start.
       // If the click is after the end of visual, change the end.  If
       // the click is inside the visual, change the closest side.
       if (lt(curwin->w_cursor, start_visual)) {
-        VIsual = end_visual;
+        Visual.start = end_visual;
       } else if (lt(end_visual, curwin->w_cursor)) {
-        VIsual = start_visual;
+        Visual.start = start_visual;
       } else {
         // In the same line, compare column number
         if (end_visual.lnum == start_visual.lnum) {
           if (curwin->w_cursor.col - start_visual.col >
               end_visual.col - curwin->w_cursor.col) {
-            VIsual = start_visual;
+            Visual.start = start_visual;
           } else {
-            VIsual = end_visual;
+            Visual.start = end_visual;
           }
         } else {
           // In different lines, compare line number
@@ -824,21 +825,21 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
                  (end_visual.lnum - curwin->w_cursor.lnum);
 
           if (diff > 0) {                       // closest to end
-            VIsual = start_visual;
+            Visual.start = start_visual;
           } else if (diff < 0) {                   // closest to start
-            VIsual = end_visual;
+            Visual.start = end_visual;
           } else {                                // in the middle line
             if (curwin->w_cursor.col <
                 (start_visual.col + end_visual.col) / 2) {
-              VIsual = end_visual;
+              Visual.start = end_visual;
             } else {
-              VIsual = start_visual;
+              Visual.start = start_visual;
             }
           }
         }
       }
     }
-  } else if ((State & MODE_INSERT) && VIsual_active) {
+  } else if ((State & MODE_INSERT) && Visual.active) {
     // If Visual mode started in insert mode, execute "CTRL-O"
     stuffcharReadbuff(Ctrl_O);
   }
@@ -865,9 +866,9 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
       c1 = (dir == FORWARD) ? 'p' : 'P';
       c2 = NUL;
     }
-    prep_redo(regname, count, NUL, c1, NUL, c2, NUL);
+    prep_redo(true, false, (CmdSpec){ .regname = regname, .count = count, .cmd = c1, .cmd2 = c2 });
 
-    // Remember where the paste started, so in edit() Insstart can be set to this position
+    // Remember where the paste started, so in edit() Ins.start can be set to this position
     if (restart_edit != 0) {
       where_paste_started = curwin->w_cursor;
     }
@@ -883,19 +884,20 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
       do_cmdline_cmd(".ll");
     }
     got_click = false;                          // ignore drag&release now
-  } else if ((mod_mask & MOD_MASK_CTRL)
-             || (curbuf->b_help && (mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK)) {
-    // Ctrl-Mouse click (or double click in a help window) jumps to the tag
-    // under the mouse pointer.
+  } else if (curbuf->b_help && (mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK) {
+    // Double-click in a help window jumps to the clicked tag.
     if (State & MODE_INSERT) {
       stuffcharReadbuff(Ctrl_O);
     }
     stuffcharReadbuff(Ctrl_RSB);
     got_click = false;                          // ignore drag&release now
+    if ((State & MODE_INSERT) == 0) {
+      exec_stuffed(NULL);
+    }
   } else if ((mod_mask & MOD_MASK_SHIFT)) {
     // Shift-Mouse click searches for the next occurrence of the word under
     // the mouse pointer
-    if (State & MODE_INSERT || (VIsual_active && VIsual_select)) {
+    if (State & MODE_INSERT || (Visual.active && Visual.select)) {
       stuffcharReadbuff(Ctrl_O);
     }
     if (which_button == MOUSE_LEFT) {
@@ -903,19 +905,22 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
     } else {  // MOUSE_RIGHT
       stuffcharReadbuff('#');
     }
+    if ((State & MODE_INSERT) == 0) {
+      exec_stuffed(NULL);
+    }
   } else if (in_status_line || in_sep_line) {
     // Do nothing if on status line or vertical separator
     // Handle double clicks otherwise
   } else if ((mod_mask & MOD_MASK_MULTI_CLICK) && (State & (MODE_NORMAL | MODE_INSERT))
              && mouse_can_visual) {
-    if (is_click || !VIsual_active) {
-      if (VIsual_active) {
-        orig_cursor = VIsual;
+    if (is_click || !Visual.active) {
+      if (Visual.active) {
+        orig_cursor = Visual.start;
       } else {
-        VIsual = curwin->w_cursor;
-        orig_cursor = VIsual;
-        VIsual_active = true;
-        VIsual_reselect = true;
+        Visual.start = curwin->w_cursor;
+        orig_cursor = Visual.start;
+        Visual.active = true;
+        Visual.reselect = true;
         // start Select mode if 'selectmode' contains "mouse"
         may_start_select('o');
         setmouse();
@@ -923,14 +928,14 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
       if ((mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK) {
         // Double click with ALT pressed makes it blockwise.
         if (mod_mask & MOD_MASK_ALT) {
-          VIsual_mode = Ctrl_V;
+          Visual.mode = Ctrl_V;
         } else {
-          VIsual_mode = 'v';
+          Visual.mode = 'v';
         }
       } else if ((mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_3CLICK) {
-        VIsual_mode = 'V';
+        Visual.mode = 'V';
       } else if ((mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_4CLICK) {
-        VIsual_mode = Ctrl_V;
+        Visual.mode = Ctrl_V;
       }
     }
     // A double click selects a word or a block.
@@ -950,16 +955,16 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
           oap->motion_type = kMTCharWise;
         }
         if (oap != NULL
-            && VIsual_mode == 'v'
+            && Visual.mode == 'v'
             && !vim_iswordc(gchar_pos(&end_visual))
-            && equalpos(curwin->w_cursor, VIsual)
+            && equalpos(curwin->w_cursor, Visual.start)
             && (pos = findmatch(oap, NUL)) != NULL) {
           curwin->w_cursor = *pos;
           if (oap->motion_type == kMTLineWise) {
-            VIsual_mode = 'V';
+            Visual.mode = 'V';
           } else if (*p_sel == 'e') {
-            if (lt(curwin->w_cursor, VIsual)) {
-              VIsual.col++;
+            if (lt(curwin->w_cursor, Visual.start)) {
+              Visual.start.col++;
             } else {
               curwin->w_cursor.col++;
             }
@@ -971,9 +976,9 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
         // When not found a match or when dragging: extend to include a word.
         if (lt(curwin->w_cursor, orig_cursor)) {
           find_start_of_word(&curwin->w_cursor);
-          find_end_of_word(&VIsual);
+          find_end_of_word(&Visual.start);
         } else {
-          find_start_of_word(&VIsual);
+          find_start_of_word(&Visual.start);
           if (*p_sel == 'e' && *get_cursor_pos_ptr() != NUL) {
             curwin->w_cursor.col +=
               utfc_ptr2len(get_cursor_pos_ptr());
@@ -986,18 +991,18 @@ bool do_mouse(oparg_T *oap, int c, int dir, int count, bool fixindent)
     if (is_click) {
       redraw_curbuf_later(UPD_INVERTED);  // update the inversion
     }
-  } else if (VIsual_active && !old_active) {
+  } else if (Visual.active && !old_active) {
     if (mod_mask & MOD_MASK_ALT) {
-      VIsual_mode = Ctrl_V;
+      Visual.mode = Ctrl_V;
     } else {
-      VIsual_mode = 'v';
+      Visual.mode = 'v';
     }
   }
 
   // If Visual mode changed show it later.
-  if ((!VIsual_active && old_active && mode_displayed)
-      || (VIsual_active && p_smd && msg_silent == 0
-          && (!old_active || VIsual_mode != old_mode))) {
+  if ((!Visual.active && old_active && mode_displayed)
+      || (Visual.active && p_smd && msg_silent == 0
+          && (!old_active || Visual.mode != old_mode))) {
     redraw_cmdline = true;
   }
 
@@ -1023,7 +1028,7 @@ void ins_mouse(int c)
         curbuf->b_prompt_insert = 'A';
       }
     }
-    start_arrow(curwin == old_curwin ? &tpos : NULL);
+    start_arrow(curwin == old_curwin ? &tpos : NULL, true, NUL);
     if (curwin != new_curwin && win_valid(new_curwin)) {
       curwin = new_curwin;
       curbuf = curwin->w_buffer;
@@ -1137,7 +1142,7 @@ void ins_mousescroll(int dir)
   curbuf = curwin->w_buffer;
 
   if (!equalpos(curwin->w_cursor, orig_cursor)) {
-    start_arrow(&orig_cursor);
+    start_arrow(&orig_cursor, true, NUL);
     set_can_cindent(true);
   }
 }
@@ -1176,7 +1181,7 @@ bool cmdline_mousescroll(int dir)
 
   // Only scroll when the mouse is on top of the info popup.
   win_T *wp = mouse_find_win_inner(&grid, &row, &col);
-  if (wp == NULL || !wp->w_float_is_info) {
+  if (wp == NULL || wp->w_kind != kWinInfo) {
     return false;
   }
 
@@ -1246,7 +1251,7 @@ void reset_dragwin(void)
 /// if the mouse is outside the window then the text will scroll, or if the
 /// mouse was previously on a status line, then the status line may be dragged.
 ///
-/// If flags has MOUSE_MAY_VIS, then VIsual mode will be started before the
+/// If flags has MOUSE_MAY_VIS, then Visual mode will be started before the
 /// cursor is moved unless the cursor was on a status line or window bar.
 /// This function returns one of IN_UNKNOWN, IN_BUFFER, IN_STATUS_LINE or
 /// IN_SEP_LINE depending on where the cursor was clicked.
@@ -1368,6 +1373,10 @@ retnomove:
 
   win_T *old_curwin = curwin;
   pos_T old_cursor = curwin->w_cursor;
+  win_T *resolved = NULL;  // Window the click was resolved in.
+  linenr_T lnum = 0;
+  colnr_T vcol = 0;
+  int mouse_fold_flags = 0;
   if (!keep_focus) {
     if (on_winbar) {
       return IN_OTHER_WIN | MOUSE_WINBAR;
@@ -1409,14 +1418,20 @@ retnomove:
 
     // Before jumping to another buffer, or moving the cursor for a left
     // click, stop Visual mode.
-    if (VIsual_active
-        && (wp->w_buffer != curwin->w_buffer
-            || (!status_line_offset
-                && !sep_line_offset
-                && (wp->w_p_rl
-                    ? col < wp->w_view_width - fdc
-                    : col >= fdc)
-                && (flags & MOUSE_MAY_STOP_VIS)))) {
+    bool const stop_visual = Visual.active
+                             && (wp->w_buffer != curwin->w_buffer
+                                 || (!status_line_offset
+                                     && !sep_line_offset
+                                     && (wp->w_p_rl
+                                         ? col < wp->w_view_width - fdc
+                                         : col >= fdc)
+                                     && (flags & MOUSE_MAY_STOP_VIS)));
+    // Ending Visual mode or entering the window can change what is concealed.
+    if (!status_line_offset && !sep_line_offset) {
+      resolved = wp;
+      mouse_past_bottom = mouse_resolve(wp, row, col, &lnum, &vcol, &mouse_fold_flags);
+    }
+    if (stop_visual) {
       end_visual_mode();
       redraw_curbuf_later(UPD_INVERTED);  // delete the inversion
     }
@@ -1444,8 +1459,6 @@ retnomove:
       }
       return IN_SEP_LINE | CURSOR_MOVED;
     }
-
-    curwin->w_cursor.lnum = curwin->w_topline;
   } else if (status_line_offset) {
     if (which_button == MOUSE_LEFT && dragwin != NULL) {
       // Drag the status line
@@ -1559,20 +1572,19 @@ retnomove:
   }
 
 foldclick:;
-  colnr_T col_from_screen = -1;
-  int mouse_fold_flags = 0;
-  mouse_check_grid(&col_from_screen, &mouse_fold_flags);
-
-  // compute the position in the buffer line from the posn on the screen
-  if (mouse_comp_pos(curwin, &row, &col, &curwin->w_cursor.lnum)) {
-    mouse_past_bottom = true;
+  // Compute the position in the buffer line from the posn on the screen, if not resolved above or
+  // autocommands of entering the window switched windows or deleted the line.
+  if (resolved == NULL || resolved != curwin || lnum > curbuf->b_ml.ml_line_count) {
+    mouse_fold_flags = 0;
+    mouse_past_bottom = mouse_resolve(curwin, row, col, &lnum, &vcol, &mouse_fold_flags);
   }
+  curwin->w_cursor.lnum = lnum;
 
   // Start Visual mode before coladvance(), for when 'sel' != "old"
-  if ((flags & MOUSE_MAY_VIS) && !VIsual_active) {
-    VIsual = old_cursor;
-    VIsual_active = true;
-    VIsual_reselect = true;
+  if ((flags & MOUSE_MAY_VIS) && !Visual.active) {
+    Visual.start = old_cursor;
+    Visual.active = true;
+    Visual.reselect = true;
     // if 'selectmode' contains "mouse", start Select mode
     may_start_select('o');
     setmouse();
@@ -1582,13 +1594,9 @@ foldclick:;
     }
   }
 
-  if (col_from_screen >= 0) {
-    col = col_from_screen;
-  }
-
-  curwin->w_curswant = col;
+  curwin->w_curswant = vcol;
   curwin->w_set_curswant = false;       // May still have been true
-  if (coladvance(curwin, col) == FAIL) {        // Mouse click beyond end of line
+  if (coladvance(curwin, vcol) == FAIL) {       // Mouse click beyond end of line
     if (inclusive != NULL) {
       *inclusive = true;
     }
@@ -1769,7 +1777,7 @@ bool mouse_comp_pos(win_T *win, int *rowp, int *colp, linenr_T *lnump)
   col -= win_col_off(win);
   col = MAX(col, 0);
 
-  *colp = col;
+  *colp = disp_vcol2vcol(win, lnum, col);
   *rowp = row;
   *lnump = lnum;
   return retval;
@@ -1887,12 +1895,14 @@ colnr_T vcol2col(win_T *wp, linenr_T lnum, colnr_T vcol, colnr_T *coladdp)
   StrCharInfo ci = utf_ptr2StrCharInfo(line);
   int cur_vcol = 0;
   while (cur_vcol < vcol && *ci.ptr != NUL) {
-    int next_vcol = cur_vcol + win_charsize(cstype, cur_vcol, ci.ptr, ci.chr.value, &csarg).width;
+    ClusterInfo cli = utf_ClusterInfo(ci);
+    int next_vcol = cur_vcol + win_charsize(cstype, cur_vcol, ci.ptr, ci.chr.value, &csarg,
+                                            cli.cells).width;
     if (next_vcol > vcol) {
       break;
     }
     cur_vcol = next_vcol;
-    ci = utfc_next(ci);
+    ci = cli.next;
   }
 
   if (coladdp != NULL) {
@@ -1972,7 +1982,7 @@ static linenr_T find_longest_lnum(void)
 }
 
 /// Check clicked cell on its grid
-static void mouse_check_grid(colnr_T *vcolp, int *flagsp)
+static void mouse_check_grid(win_T *wp, colnr_T *vcolp, int *flagsp)
   FUNC_ATTR_NONNULL_ALL
 {
   int click_grid = mouse_grid;
@@ -1980,15 +1990,15 @@ static void mouse_check_grid(colnr_T *vcolp, int *flagsp)
   int click_col = mouse_col;
 
   // XXX: this doesn't change click_grid if it is 1, even with multigrid
-  if (mouse_find_win_inner(&click_grid, &click_row, &click_col) != curwin
+  if (mouse_find_win_inner(&click_grid, &click_row, &click_col) != wp
       // Only use vcols[] after the window was redrawn.  Mainly matters
       // for tests, a user would not click before redrawing.
-      || curwin->w_redr_type != 0) {
+      || wp->w_redr_type != 0) {
     return;
   }
   int start_row = 0;
   int start_col = 0;
-  ScreenGrid *gp = grid_adjust(&curwin->w_grid, &start_row, &start_col);
+  ScreenGrid *gp = grid_adjust(&wp->w_grid, &start_row, &start_col);
   if (gp->handle != click_grid || gp->chars == NULL) {
     return;
   }
@@ -2013,6 +2023,18 @@ static void mouse_check_grid(colnr_T *vcolp, int *flagsp)
   } else if (col_from_screen == -3) {
     *flagsp |= MOUSE_FOLD_CLOSE;
   }
+}
+
+/// Resolves a click at `row`/`col` of `wp` to a buffer line and vcol, as `wp` is drawn.
+///
+/// @return  Whether the click is below the last line.
+static bool mouse_resolve(win_T *wp, int row, int col, linenr_T *lnump, colnr_T *vcolp, int *flagsp)
+{
+  colnr_T col_from_screen = -1;
+  mouse_check_grid(wp, &col_from_screen, flagsp);
+  bool const past_bottom = mouse_comp_pos(wp, &row, &col, lnump);
+  *vcolp = col_from_screen >= 0 ? disp_vcol2vcol(wp, *lnump, col_from_screen) : col;
+  return past_bottom;
 }
 
 /// "getmousepos()" function

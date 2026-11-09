@@ -32,11 +32,11 @@
 #include "nvim/ex_eval.h"
 #include "nvim/ex_eval_defs.h"
 #include "nvim/garray.h"
-#include "nvim/getchar.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
 #include "nvim/hashtab_defs.h"
+#include "nvim/input.h"
 #include "nvim/lua/executor.h"
 #include "nvim/macros_defs.h"
 #include "nvim/map_defs.h"
@@ -823,7 +823,7 @@ static bool path_is_after(char *buf, size_t buflen)
 {
   // NOTE: we only consider dirs exactly matching "after" to be an AFTER dir.
   // vim8 considers all dirs like "foo/bar_after", "Xafter" etc, as an
-  // "after" dir in SOME codepaths not not in ALL codepaths.
+  // "after" dir in SOME codepaths not in ALL codepaths.
   return buflen >= 5
          && (!(buflen >= 6) || vim_ispathsep(buf[buflen - 6]))
          && strcmp(buf + buflen - 5, "after") == 0;
@@ -1102,7 +1102,7 @@ static int add_pack_dir_to_rtp(char *fname, bool is_pack)
       if (rtp_ffname == NULL) {
         goto theend;
       }
-      if (path_fnamencmp(rtp_ffname, ffname, fname_len) == 0) {
+      if (path_cmp(p_fic, rtp_ffname, ffname, fname_len) == 0) {
         // Insert "ffname" after this entry (and comma).
         insp = entry;
       }
@@ -1183,7 +1183,7 @@ static int add_pack_dir_to_rtp(char *fname, bool is_pack)
   }
 
   bool was_valid = runtime_search_path_valid;
-  set_option_value_give_err(kOptRuntimepath, STRING_OPTVAL(new_rtp), 0);
+  set_option_value_give_err(kOptRuntimepath, STRING_OBJ(new_rtp), 0);
 
   assert(!runtime_search_path_valid);
   // If this is the result of "packadd opt_pack", rebuilding runtime_search_pat
@@ -1283,7 +1283,7 @@ static void add_pack_plugins(bool opt, int num_fnames, char **fnames, bool all, 
       const char *p = p_rtp;
       while (*p != NUL) {
         copy_option_part((char **)&p, buf, MAXPATHL, ",");
-        if (path_fnamecmp(buf, fnames[i]) == 0) {
+        if (path_equal(buf, fnames[i], kPathCmpLiteral)) {
           found = true;
           break;
         }
@@ -2233,7 +2233,11 @@ static int do_source_ext(char *const fname, const bool check_other, const int is
 
   if (str == NULL) {
     // Apply SourceCmd autocommands, they should get the file and source it.
-    if (has_autocmd(EVENT_SOURCECMD, fname_exp, NULL)
+    // When sourcing a file "fname_exp" was made a full path name by
+    // fix_fname() above, avoid expanding it again.
+    if ((fname == NULL
+         ? has_autocmd(EVENT_SOURCECMD, fname_exp, NULL)
+         : has_autocmd_fullname(EVENT_SOURCECMD, fname_exp, NULL))
         && apply_autocmds(EVENT_SOURCECMD, fname_exp, fname_exp,
                           false, curbuf)) {
       retval = aborting() ? FAIL : OK;
@@ -2519,7 +2523,7 @@ int find_script_by_name(char *name)
     // - If a script is deleted and another script is written, with a
     //   different name, the inode may be re-used.
     scriptitem_T *si = SCRIPT_ITEM(sid);
-    if (si->sn_name != NULL && path_fnamecmp(si->sn_name, name) == 0) {
+    if (si->sn_name != NULL && path_equal(si->sn_name, name, kPathCmpLiteral)) {
       return sid;
     }
   }
@@ -2561,19 +2565,6 @@ void ex_scriptnames(exarg_T *eap)
     }
   }
 }
-
-#ifdef BACKSLASH_IN_FILENAME
-/// Fix slashes in the list of script names for 'shellslash'.
-void scriptnames_slash_adjust(void)
-{
-  for (int i = 1; i <= script_items.ga_len; i++) {
-    if (SCRIPT_ITEM(i)->sn_name != NULL) {
-      slash_adjust(SCRIPT_ITEM(i)->sn_name);
-    }
-  }
-}
-
-#endif
 
 /// Get a pointer to a script name.  Used for ":verbose set".
 /// Message appended to "Last set from "
@@ -2787,7 +2778,7 @@ char *getsourceline(int c, void *cookie, int indent, bool do_concat)
 
   // Only concatenate lines starting with a \ when 'cpoptions' doesn't
   // contain the 'C' flag.
-  if (line != NULL && do_concat && (vim_strchr(p_cpo, CPO_CONCAT) == NULL)) {
+  if (line != NULL && do_concat && (vim_strchr(p_cpo, kCpoConcat) == NULL)) {
     char *p;
     // compensate for the one line read-ahead
     sp->sourcing_lnum--;
@@ -2891,8 +2882,9 @@ retry:
     have_read = true;
     ga.ga_len = len;
 
-    // If the line was longer than the buffer, read more.
-    if (ga.ga_maxlen - ga.ga_len == 1 && buf[len - 1] != '\n') {
+    // If reading from a file and the line was longer than the buffer, read more.
+    if (!sp->source_from_buf_or_str
+        && ga.ga_maxlen - ga.ga_len == 1 && buf[len - 1] != '\n') {
       continue;
     }
 

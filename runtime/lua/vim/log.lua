@@ -32,16 +32,16 @@
 ---@field private name string
 ---
 --- Minimum level that will be written.
----@field private current_level integer
+---@field private level integer
 ---
 --- Function used to format a log entry.
----@field private format_func fun(current_level: vim.log.levels, level:vim.log.levels, ...): string?
+---@field private format_func fun(min_level: vim.log.levels, level: vim.log.levels, ...): string?
 ---
 --- Path of the log file.
 ---@field private filename string
 ---
 --- Internal state for the log file handle. `nil` until the file is opened.
----@field private logfile file*?
+---@field private logfile file?
 ---
 --- Internal state for the log file open error.
 ---@field private openerr string?
@@ -89,23 +89,26 @@ local log_date_format = '%F %H:%M:%S'
 --- Formats a message as:
 --- `[LEVEL][YYYY-MM-DD HH:MM:SS] source.lua:line<TAB>arg1<TAB>arg2`
 ---
----@param current_level vim.log.levels
+---@param min_level vim.log.levels
 ---@param level vim.log.levels
 ---@return string?
-local function default_format_func(current_level, level, ...)
-  if level < current_level then
+local function default_format_func(min_level, level, ...)
+  if level < min_level then
     return nil
   end
 
   -- Stack shape:
   --   default_format_func <- create_writer closure <- user callsite
   local info = debug.getinfo(3, 'Sl')
+  -- Full path (`short_src` is truncated), with $VIMRUNTIME abbreviated.
+  local src = info and (info.source:match('^@(.*)') or info.short_src) or '?'
+  local rt_path = vim.env.VIMRUNTIME and vim.fs.relpath(vim.env.VIMRUNTIME, src)
   local header = string.format(
     '[%s][%s] %s:%s',
     level_names[level],
     os.date(log_date_format),
-    info.short_src,
-    info.currentline
+    rt_path and ('$VIMRUNTIME/%s'):format(rt_path) or src,
+    info and info.currentline or -1
   )
   local parts = { header }
   local argc = select('#', ...)
@@ -124,12 +127,12 @@ end
 ---
 --- Minimum level that will be written.
 --- (default: `vim.log.levels.WARN`)
----@field current_level? vim.log.levels
+---@field level? vim.log.levels
 ---
 --- Formatter used for each log entry.
---- Receives the logger's current level, the message level, and the values passed to the writer.
+--- Receives the logger's minimum level, the message level, and the values passed to the writer.
 --- Return a string to write an entry, or `nil` to skip it.
----@field format_func? fun(current_level: vim.log.levels, level: vim.log.levels, ...): string?
+---@field format_func? fun(min_level: vim.log.levels, level: vim.log.levels, ...): string?
 
 --- Creates a logger instance.
 ---
@@ -141,7 +144,7 @@ end
 function M.new(opts)
   vim.validate('opts', opts, 'table')
   vim.validate('opts.name', opts.name, 'string')
-  vim.validate('opts.current_level', opts.current_level, 'number', true)
+  vim.validate('opts.level', opts.level, 'number', true)
   vim.validate('opts.format_func', opts.format_func, 'function', true)
 
   local filename = vim.fs.joinpath(vim.fn.stdpath('log'), opts.name:lower() .. '.log')
@@ -156,7 +159,7 @@ function M.new(opts)
   local log = setmetatable({
     name = opts.name,
     filename = filename,
-    current_level = opts.current_level or M.levels.WARN,
+    level = opts.level or M.levels.WARN,
     format_func = opts.format_func or default_format_func,
   }, { __index = M })
   log.trace = log:create_writer(M.levels.TRACE)
@@ -194,7 +197,7 @@ function M:open_file()
     return false
   end
 
-  self.logfile, self.openerr = io.open(self.filename, 'a+')
+  self.logfile, self.openerr = io.open(self.filename, 'a')
   if not self.logfile then
     local err_msg = string.format('Failed to open %s log file: %s', self.name, self.openerr)
     notify(err_msg, M.levels.ERROR)
@@ -230,11 +233,11 @@ function M:create_writer(level)
     if argc == 0 then
       return true
     end
-    if not self:open_file() then
-      return false
-    end
-    local message = self.format_func(self.current_level, level, ...)
+    local message = self.format_func(self.level, level, ...)
     if message then
+      if not self:open_file() then
+        return false
+      end
       assert(self.logfile)
       self.logfile:write(message)
       self.logfile:flush()
@@ -250,24 +253,24 @@ end
 ---@param level vim.log.levels
 function M.set_level(log, level)
   vim.validate('level', level, 'number')
-  log.current_level = level
+  log.level = level
 end
 
 --- Gets the current log level.
 ---@param log vim.Log
 ---@return vim.log.levels
 function M.get_level(log)
-  return log.current_level
+  return log.level
 end
 
 --- Sets the formatter used to produce log entries.
 ---
---- The formatter receives the logger's current level, the message level,
+--- The formatter receives the logger's minimum level, the message level,
 --- and the values passed to the writer method.
 --- Return a string to write an entry, or `nil` to skip it.
 ---
 ---@param log vim.Log
----@param func fun(current_level: vim.log.levels, level: vim.log.levels, ...): string?
+---@param func fun(min_level: vim.log.levels, level: vim.log.levels, ...): string?
 function M.set_format_func(log, func)
   vim.validate('func', func, function(f)
     return type(f) == 'function' or f == vim.inspect

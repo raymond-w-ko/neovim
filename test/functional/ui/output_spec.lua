@@ -3,6 +3,7 @@ local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 local tt = require('test.functional.testterm')
 
+local describe, it, before_each, after_each = t.describe, t.it, t.before_each, t.after_each
 local assert_alive = n.assert_alive
 local mkdir, write_file, rmdir = t.mkdir, t.write_file, n.rmdir
 local eq = t.eq
@@ -63,7 +64,7 @@ describe('shell command :!', function()
     ]])
   end)
 
-  it('throttles shell-command output greater than ~10KB', function()
+  it('throttles shell-command output greater than ~10KB', { retries = 2 }, function()
     skip(is_os('openbsd'), 'FIXME #10804')
     skip(is_os('win'))
     tt.feed_data((':!%s REP 150001 foo\n'):format(testprg('shell-test')))

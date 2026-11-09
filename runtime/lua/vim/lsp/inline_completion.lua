@@ -63,6 +63,7 @@ local namespace = api.nvim_create_namespace('nvim.lsp.inline_completion')
 ---@field active table<integer, vim.lsp.inline_completion.Completor?>
 ---@field timer? uv.uv_timer_t Timer for debouncing automatic requests
 ---@field current? vim.lsp.inline_completion.Item Currently selected item
+---@field _overlay? boolean Whether `current` replaces buffer text, per its original range
 ---@field client_state table<integer, vim.lsp.inline_completion.ClientState>
 local Completor = {
   name = 'inline_completion',
@@ -92,8 +93,7 @@ end
 function Completor:destroy()
   self:reset_timer()
   api.nvim_buf_clear_namespace(self.bufnr, namespace, 0, -1)
-  api.nvim_del_augroup_by_id(self.augroup)
-  self.active[self.bufnr] = nil
+  Capability.destroy(self)
 end
 
 --- Longest common prefix
@@ -117,7 +117,11 @@ end
 ---@param ctx lsp.HandlerContext
 function Completor:handler(err, result, ctx)
   if err then
-    log.error('inline_completion', err)
+    if err.code == protocol.ErrorCodes.ServerCancelled then
+      log.debug('inline_completion', err)
+    else
+      log.error('inline_completion', err)
+    end
     return
   end
   if not result or not vim.startswith(api.nvim_get_mode().mode, 'i') then
@@ -185,6 +189,8 @@ function Completor:select(index, show_index)
     _filter_text = item.filterText,
     command = item.command,
   }
+  -- Recorded here because `show()` may grow the range over typed characters.
+  self._overlay = range ~= nil and not range:is_empty()
 
   local hint = show_index and (' (%d/%d)'):format(index, self:count_items()) or nil
   self:show(hint)
@@ -233,7 +239,9 @@ function Completor:show(hint)
   -- The first line of the text to be inserted
   -- usually contains characters entered by the user,
   -- which should be skipped before displaying the virtual text.
-  local virt_text = lines[1]
+  -- Splitting on a nonempty separator always yields a line, with its first chunk.
+  local virt_text = assert(lines[1])
+  assert(virt_text[1])
   local skip = lcp(line_text:sub(col + 1), virt_text[1][1])
   local winid = api.nvim_get_current_win()
   -- At least, characters before the cursor should be skipped.
@@ -241,6 +249,14 @@ function Completor:show(hint)
     local cursor_row, cursor_col =
       vim.pos.cursor(self.bufnr, api.nvim_win_get_cursor(winid)):to_extmark()
     if row == cursor_row then
+      -- Characters typed since the request lie past the item's range, so `accept()`
+      -- would leave them behind. `skip` stops where the buffer stops matching.
+      if current.range and col + skip - 1 >= cursor_col then
+        local start_row, start_col, _, end_col = current.range:to_extmark()
+        if end_col < cursor_col then
+          current.range = vim.range.extmark(self.bufnr, start_row, start_col, row, cursor_col)
+        end
+      end
       skip = math.max(skip, cursor_col - col + 1)
     end
   end
@@ -248,10 +264,16 @@ function Completor:show(hint)
   col = col + skip - 1
 
   local virt_lines = { unpack(lines, 2) }
+  for i, s in ipairs(virt_lines) do
+    if #s == 1 and s[1][1] == '' then
+      virt_lines[i] = {}
+    end
+  end
+
   api.nvim_buf_set_extmark(self.bufnr, namespace, row, col, {
     virt_text = virt_text,
     virt_lines = virt_lines,
-    virt_text_pos = (current.range and not current.range:is_empty() and 'overlay') or 'inline',
+    virt_text_pos = (self._overlay and 'overlay') or 'inline',
     hl_mode = 'combine',
   })
 end
@@ -337,6 +359,10 @@ function Completor:accept(item)
   if type(insert_text) == 'string' then
     if item.range then
       local start_row, start_col, end_row, end_col = item.range:to_extmark()
+      -- The line may have shrunk past the range since the item arrived.
+      local end_line = api.nvim_buf_get_lines(self.bufnr, end_row, end_row + 1, true)[1]
+      end_col = math.min(end_col, #end_line)
+
       local lines = vim.split(insert_text, '\n')
       api.nvim_buf_set_text(self.bufnr, start_row, start_col, end_row, end_col, lines)
       local win = api.nvim_get_current_win()
@@ -475,9 +501,9 @@ function M.get(opts)
       -- Note that we do not intend for `on_accept`
       -- to take effect when there is no current item.
       if on_accept then
-        item = on_accept(item)
-        if item then
-          completor:accept(item)
+        local accepted_item = on_accept(item)
+        if accepted_item then
+          completor:accept(accepted_item)
         end
       else
         completor:accept(item)

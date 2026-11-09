@@ -17,6 +17,8 @@
 #include "nvim/bufwrite.h"
 #include "nvim/change.h"
 #include "nvim/channel.h"
+#include "nvim/context.h"
+#include "nvim/dialog.h"
 #include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
@@ -45,6 +47,7 @@
 #include "nvim/quickfix.h"
 #include "nvim/runtime.h"
 #include "nvim/types_defs.h"
+#include "nvim/ui.h"
 #include "nvim/undo.h"
 #include "nvim/vim_defs.h"
 #include "nvim/window.h"
@@ -396,7 +399,9 @@ bool check_changed_any(bool hidden, bool unload)
         && msg_didany) {
       int save = no_wait_return;
       no_wait_return = false;
-      wait_return(false);
+      if (!ui_has(kUIMessages)) {
+        wait_return(false);
+      }
       no_wait_return = save;
     }
   }
@@ -488,7 +493,7 @@ void ex_listdo(exarg_T *eap)
 
   char *save_ei = NULL;
 
-  // Temporarily override SHM_OVER and SHM_OVERALL to avoid that file
+  // Temporarily override kShmOver and kShmOverall to avoid that file
   // message overwrites output from the command.
   msg_listdo_overwrite++;
 
@@ -593,7 +598,7 @@ void ex_listdo(exarg_T *eap)
           break;
         }
         assert(wp);
-        execute = !wp->w_floating || (!wp->w_config.hide && wp->w_config.focusable);
+        execute = !wp->w_floating || win_is_focusable(wp);
         if (execute) {
           win_goto(wp);
           if (curwin != wp) {
@@ -693,7 +698,7 @@ void ex_listdo(exarg_T *eap)
   msg_listdo_overwrite--;
   if (save_ei != NULL) {
     buf_T *bnext;
-    aco_save_T aco = { 0 };
+    CtxSwitch aco = { 0 };
 
     au_event_restore(save_ei);
 
@@ -708,9 +713,9 @@ void ex_listdo(exarg_T *eap)
           apply_autocmds(EVENT_SYNTAX, curbuf->b_p_syn, curbuf->b_fname, true,
                          curbuf);
         } else {
-          aucmd_prepbuf(&aco, buf);
+          ctx_switch(&aco, NULL, NULL, buf, 0);
           apply_autocmds(EVENT_SYNTAX, buf->b_p_syn, buf->b_fname, true, buf);
-          aucmd_restbuf(&aco);
+          ctx_restore(&aco);
         }
 
         // start over, in case autocommands messed things up.

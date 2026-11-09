@@ -5,6 +5,7 @@ const build_lua = @import("src/build_lua.zig");
 const gen = @import("src/gen/gen_steps.zig");
 const runtime = @import("runtime/gen_runtime.zig");
 const tests = @import("test/run_tests.zig");
+const lint = @import("src/lint.zig");
 
 const version = struct {
     const major = 0;
@@ -18,7 +19,6 @@ const version = struct {
 };
 
 pub const SystemIntegrationOptions = packed struct {
-    lpeg: bool,
     lua: bool,
     tree_sitter: bool,
     unibilium: bool,
@@ -96,13 +96,13 @@ pub fn build(b: *std.Build) !void {
     const E = enum { luajit, lua51 };
 
     const sys_opts = SystemIntegrationOptions{
-        .lpeg = b.systemIntegrationOption("lpeg", .{}),
         .lua = b.systemIntegrationOption("lua", .{}),
         .tree_sitter = b.systemIntegrationOption("tree-sitter", .{}),
         .unibilium = b.systemIntegrationOption("unibilium", .{}),
         .utf8proc = b.systemIntegrationOption("utf8proc", .{}),
         .uv = b.systemIntegrationOption("uv", .{}),
     };
+    const ci_build = b.option(bool, "ci-build", "CI build") orelse false;
 
     const ziglua = b.dependency("zlua", .{
         .target = target,
@@ -164,9 +164,7 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
-    const lpeg = if (sys_opts.lpeg) null else b.lazyDependency("lpeg", .{});
-
-    const iconv = if (is_windows or is_darwin) b.lazyDependency("libiconv", .{
+    const iconv = if (is_windows) b.lazyDependency("libiconv", .{
         .target = target,
         .optimize = optimize,
     }) else null;
@@ -203,7 +201,6 @@ pub fn build(b: *std.Build) !void {
         optimize_host,
         host_use_luajit,
         ziglua_host,
-        lpeg,
         libluv_host,
         sys_opts,
     );
@@ -332,7 +329,7 @@ pub fn build(b: *std.Build) !void {
         .HAVE_STRPTIME = modern_unix,
         .HAVE_XATTR = is_linux,
         .HAVE_SYS_SDT_H = false,
-        .HAVE_SYS_UTSNAME_H = modern_unix,
+        .HAVE_SYS_UTSNAME_H = modern_unix or is_wasm,
         .HAVE_SYS_WAIT_H = false, // unused
         .HAVE_TERMIOS_H = modern_unix,
         .HAVE_WORKING_LIBINTL = t.isGnuLibC(),
@@ -495,6 +492,7 @@ pub fn build(b: *std.Build) !void {
         .root_module = nvim_mod,
     }) else b.addExecutable(.{ .name = "nvim", .root_module = nvim_mod });
     nvim_exe.rdynamic = true; // -E
+    nvim_exe.link_gc_sections = false; // prevent linker from gc:ing exported symbols #40622
     if (emscripten_libc_path) |lp| nvim_exe.setLibCFile(lp);
     if (is_wasm) nvim_exe.entry = .disabled;
     if (is_wasm) nvim_exe.linker_allow_shlib_undefined = true;
@@ -511,7 +509,11 @@ pub fn build(b: *std.Build) !void {
         if (libuv) |compile| nvim_mod.linkLibrary(compile);
         if (libluv) |compile| nvim_mod.linkLibrary(compile);
     }
-    if (iconv) |dep| nvim_mod.linkLibrary(dep.artifact("iconv"));
+    if (iconv) |dep| {
+        nvim_mod.linkLibrary(dep.artifact("iconv"));
+    } else if (is_darwin) {
+        nvim_mod.linkSystemLibrary("iconv", .{});
+    }
     if (sys_opts.utf8proc) {
         nvim_mod.linkSystemLibrary("utf8proc", .{});
     } else if (utf8proc) |dep| {
@@ -535,7 +537,7 @@ pub fn build(b: *std.Build) !void {
     nvim_mod.addIncludePath(b.path("src"));
     nvim_mod.addIncludePath(gen_config.getDirectory());
     nvim_mod.addIncludePath(gen_headers.getDirectory());
-    try build_lua.add_lua_modules(b, t, nvim_mod, lpeg, use_luajit, false, sys_opts);
+    try build_lua.add_lua_modules(nvim_mod, use_luajit, false);
 
     var unit_test_sources = try std.ArrayList([]u8).initCapacity(b.allocator, 10);
     if (support_unittests) {
@@ -587,7 +589,8 @@ pub fn build(b: *std.Build) !void {
 
     if (is_wasm) {
         nvim_mod.addCSourceFiles(.{ .files = &.{
-            "src/wasm_stubs.c",
+            "src/wasm/wasm_stubs.c",
+            "src/static_ts_registry.c",
         }, .flags = &flags });
     }
 
@@ -597,6 +600,7 @@ pub fn build(b: *std.Build) !void {
 
     const nvim_exe_step = b.step("nvim_bin", "only the binary (not a fully working install!)");
     const nvim_exe_install = b.addInstallArtifact(nvim_exe, .{ .dest_dir = if (is_wasm) .{ .override = .{ .custom = "wasm" } } else .default });
+    const gen_runtime = try runtime.nvim_gen_runtime(b, nlua0, funcs_data);
 
     if (is_wasm) {
         const s = emscripten_sysroot orelse @panic("-Demscripten-sysroot required for wasm target");
@@ -613,16 +617,31 @@ pub fn build(b: *std.Build) !void {
         if (treesitter) |dep| emcc.addFileArg(dep.artifact("tree-sitter").getEmittedBin());
         emcc.addArg("-Wl,--no-whole-archive");
 
+        const merged_subdir = "wasm-runtime-merged";
+        const merged_path = b.getInstallPath(.prefix, merged_subdir);
+        const install_static_runtime = b.addInstallDirectory(.{
+            .source_dir = b.path("runtime"),
+            .install_dir = .prefix,
+            .install_subdir = merged_subdir,
+        });
+        const install_gen_runtime = b.addInstallDirectory(.{
+            .source_dir = gen_runtime.getDirectory(),
+            .install_dir = .prefix,
+            .install_subdir = merged_subdir,
+        });
+
+        emcc.step.dependOn(&install_static_runtime.step);
+        emcc.step.dependOn(&install_gen_runtime.step);
+
         emcc.addArgs(&.{
             b.fmt("--sysroot={s}", .{s}),
-            "-sALLOW_MEMORY_GROWTH=1",
+            "-lidbfs.js",
             "--profiling-funcs",
             "-sEXPORTED_FUNCTIONS=_nvim_main,_malloc,_free",
             "-Wno-undefined",
-            "-sEXPORTED_RUNTIME_METHODS=stringToUTF8,lengthBytesUTF8,setValue,getValue,UTF8ToString,ENV,FS,HEAPU8",
+            "-sEXPORTED_RUNTIME_METHODS=stringToUTF8,lengthBytesUTF8,setValue,getValue,UTF8ToString,ENV,FS,HEAPU8,IDBFS,ccall,cwrap",
             "-sSTACK_SIZE=8388608",
             "-sINITIAL_MEMORY=268435456",
-            "-sMAXIMUM_MEMORY=2147483648",
             "-sFORCE_FILESYSTEM=1",
             "-sNODERAWFS=0",
             "-sERROR_ON_UNDEFINED_SYMBOLS=1",
@@ -635,19 +654,19 @@ pub fn build(b: *std.Build) !void {
             "-flto",
             "-sSTACK_OVERFLOW_CHECK=2",
             "-sASSERTIONS=1",
-            "-sASYNCIFY=1",
-            "-sASYNCIFY_STACK_SIZE=65536",
+            "-pthread",
+            "-sSHARED_MEMORY=1",
+            b.fmt("--preload-file={s}@/runtime", .{merged_path}),
         });
 
         emcc.addArg("-o");
         const nvim_js = emcc.addOutputFileArg("nvim.js");
         nvim_exe_step.dependOn(&b.addInstallFileWithDir(nvim_js, .bin, "nvim.js").step);
         nvim_exe_step.dependOn(&b.addInstallFileWithDir(nvim_js.dirname().path(b, "nvim.wasm"), .bin, "nvim.wasm").step);
+        nvim_exe_step.dependOn(&b.addInstallFileWithDir(nvim_js.dirname().path(b, "nvim.data"), .bin, "nvim.data").step);
     } else {
         nvim_exe_step.dependOn(&nvim_exe_install.step);
     }
-
-    const gen_runtime = try runtime.nvim_gen_runtime(b, nlua0, funcs_data);
 
     const test_deps = b.step("test_deps", "test prerequisites");
     if (!is_wasm) test_deps.dependOn(&nvim_exe_install.step); // running tests doesn't require copying the static runtime, only the generated stuff
@@ -728,6 +747,9 @@ pub fn build(b: *std.Build) !void {
     const parser_c = b.dependency("treesitter_c", .{ .target = target, .optimize = optimize_ts });
     parser_deps.dependOn(add_ts_parser(b, "c", parser_c.path("."), false, target, optimize_ts));
 
+    const parser_diff = b.dependency("treesitter_diff", .{ .target = target, .optimize = optimize_ts });
+    parser_deps.dependOn(add_ts_parser(b, "diff", parser_diff.path("."), false, target, optimize_ts));
+
     const parser_markdown = b.dependency("treesitter_markdown", .{ .target = target, .optimize = optimize_ts });
     parser_deps.dependOn(add_ts_parser(b, "markdown", parser_markdown.path("tree-sitter-markdown/"), true, target, optimize_ts));
     parser_deps.dependOn(add_ts_parser(b, "markdown_inline", parser_markdown.path("tree-sitter-markdown-inline/"), true, target, optimize_ts));
@@ -744,6 +766,37 @@ pub fn build(b: *std.Build) !void {
     const parser_query = b.dependency("treesitter_query", .{ .target = target, .optimize = optimize_ts });
     parser_deps.dependOn(add_ts_parser(b, "query", parser_query.path("."), false, target, optimize_ts));
 
+    if (is_wasm) {
+        const WasmTsParser = struct {
+            name: []const u8,
+            dir: LazyPath,
+            has_scanner: bool,
+        };
+        const wasm_ts_parsers = [_]WasmTsParser{
+            .{ .name = "lua", .dir = parser_lua.path("."), .has_scanner = true },
+            .{ .name = "c", .dir = parser_c.path("."), .has_scanner = false },
+            .{ .name = "diff", .dir = parser_diff.path("."), .has_scanner = false },
+            .{ .name = "markdown", .dir = parser_markdown.path("tree-sitter-markdown/"), .has_scanner = true },
+            .{ .name = "markdown_inline", .dir = parser_markdown.path("tree-sitter-markdown-inline/"), .has_scanner = true },
+            .{ .name = "vim", .dir = parser_vim.path("."), .has_scanner = true },
+            .{ .name = "vimdoc", .dir = parser_vimdoc.path("."), .has_scanner = false },
+            .{ .name = "query", .dir = parser_query.path("."), .has_scanner = false },
+        };
+
+        for (wasm_ts_parsers) |p| {
+            nvim_mod.addCSourceFile(.{
+                .file = p.dir.path(b, "src/parser.c"),
+                .flags = &flags,
+            });
+            if (p.has_scanner) {
+                nvim_mod.addCSourceFile(.{
+                    .file = p.dir.path(b, "src/scanner.c"),
+                    .flags = &flags,
+                });
+            }
+            nvim_mod.addIncludePath(p.dir.path(b, "src"));
+        }
+    }
     var unit_headers: ?[]const LazyPath = null;
     if (support_unittests) {
         try unittest_include_path.append(b.allocator, gen_headers.getDirectory());
@@ -755,6 +808,17 @@ pub fn build(b: *std.Build) !void {
         test_deps,
         test_config_step.getDirectory(),
         unit_headers,
+    );
+
+    try lint.addSteps(
+        b,
+        target,
+        nvim_exe_install,
+        nvim_sources.items,
+        nvim_headers.items,
+        ci_build,
+        unittest_include_path.items,
+        &flags,
     );
 }
 

@@ -4,6 +4,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each, pending = t.describe, t.it, t.before_each, t.pending
 local clear = n.clear
 local exec = n.exec
 local feed = n.feed
@@ -389,7 +390,7 @@ describe("'spell'", function()
     ]])
     feed('V')
     screen:expect([[
-      {18:^/}{105:/ Here is a }{104:misspeld}{105: word.}                |
+      {105:^// Here is a }{104:misspeld}{105: word.}                |
       {1:~                                          }|
       {5:-- VISUAL LINE --}                          |
     ]])

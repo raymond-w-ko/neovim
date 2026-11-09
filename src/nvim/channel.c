@@ -226,7 +226,8 @@ Channel *channel_alloc(ChannelStreamType type)
   chan->refcount = 1;
   chan->exit_status = -1;
   chan->streamtype = type;
-  chan->detach = false;
+  chan->detach = type != kChannelStreamStdio;
+  chan->trust = true;  // TODO(justinmk): default to false?
   assert(chan->id <= VARNUMBER_MAX);
   pmap_put(uint64_t)(&channels, chan->id, chan);
   return chan;
@@ -311,6 +312,7 @@ static void channel_destroy(Channel *chan)
   callback_free(&chan->on_exit);
 
   multiqueue_free(chan->events);
+  xfree(chan->addr);
   xfree(chan);
 }
 
@@ -480,8 +482,8 @@ Channel *channel_job_start(char **argv, const char *exepath, CallbackReader on_s
   return chan;
 }
 
-uint64_t channel_connect(bool tcp, const char *address, bool rpc, CallbackReader on_output,
-                         int timeout, const char **error)
+uint64_t channel_connect(bool tcp, const char *address, bool rpc, bool trust,
+                         CallbackReader on_output, int timeout, const char **error)
 {
   Channel *channel;
 
@@ -519,6 +521,7 @@ uint64_t channel_connect(bool tcp, const char *address, bool rpc, CallbackReader
   }
 
 end:
+  channel->trust = trust;
   channel_create_event(channel, address);
   return channel->id;
 }
@@ -529,7 +532,12 @@ end:
 void channel_from_connection(SocketWatcher *watcher)
 {
   Channel *channel = channel_alloc(kChannelStreamSocket);
-  socket_watcher_accept(watcher, &channel->stream.socket);
+  int result = socket_watcher_accept(watcher, &channel->stream.socket);
+  if (result != 0) {
+    ELOG("Failed to accept connection: %s", uv_strerror(result));
+    channel_destroy_early(channel);
+    return;
+  }
   channel->stream.socket.s.internal_close_cb = close_cb;
   channel->stream.socket.s.internal_data = channel;
   wstream_init(&channel->stream.socket.s, 0);
@@ -563,24 +571,7 @@ uint64_t channel_from_stdio(bool rpc, CallbackReader on_output, const char **err
   if (embedded_mode && os_has_conpty_working()) {
     stdin_dup_fd = os_dup_cloexec(STDIN_FILENO);
     stdout_dup_fd = os_dup_cloexec(STDOUT_FILENO);
-    // :restart spawns a replacement server that must not borrow the parent
-    // Nvim process console, because that parent process will soon exit.
-    const bool restart_alloc_console = os_env_exists(ENV_RESTART_ALLOC_CONSOLE, true);
-    if (restart_alloc_console) {
-      os_unsetenv(ENV_RESTART_ALLOC_CONSOLE);
-    }
-    if (!GetConsoleWindow()) {
-      // Borrow the parent's console so CONOUT$ resolves to the real terminal,
-      // preserving io.stdout rendering (e.g. SIXEL/Kitty images). Only fall
-      // back to a hidden AllocConsole when there is no parent console (e.g.
-      // launched from a non-console parent), or for the replacement server
-      // spawned by :restart, because the parent Nvim process will soon exit.
-      if (restart_alloc_console || !AttachConsole(ATTACH_PARENT_PROCESS)) {
-        AllocConsole();
-        ShowWindow(GetConsoleWindow(), SW_HIDE);
-      }
-    }
-    os_reattach_console_stdio();
+    os_attach_parent_console();
   }
 #else
   if (embedded_mode) {
@@ -1003,7 +994,7 @@ Dict channel_info(uint64_t id, Arena *arena)
     return (Dict)ARRAY_DICT_INIT;
   }
 
-  Dict info = arena_dict(arena, 9);
+  Dict info = arena_dict(arena, 10);
   PUT_C(info, "id", INTEGER_OBJ((Integer)chan->id));
 
   const char *stream_desc, *mode_desc;
@@ -1046,10 +1037,15 @@ Dict channel_info(uint64_t id, Arena *arena)
     break;
   }
   PUT_C(info, "stream", CSTR_AS_OBJ(stream_desc));
+  if (chan->addr) {
+    PUT_C(info, "addr", CSTR_AS_OBJ(chan->addr));
+  }
 
   if (chan->is_rpc) {
     mode_desc = "rpc";
     PUT_C(info, "client", DICT_OBJ(chan->rpc.info));
+    PUT_C(info, "detach", BOOLEAN_OBJ(chan->detach));
+    PUT_C(info, "trust", BOOLEAN_OBJ(chan->trust));
   } else if (chan->term) {
     mode_desc = "terminal";
     PUT_C(info, "buf", BUFFER_OBJ(terminal_buf(chan->term)));

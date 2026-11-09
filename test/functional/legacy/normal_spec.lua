@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each, finally = t.describe, t.it, t.before_each, t.finally
 local clear = n.clear
 local exec = n.exec
 local feed = n.feed
@@ -157,7 +158,7 @@ describe('normal', function()
       ^4                                       |
       5                                       |
       6                                       |
-      40 more lines         5,1            %8 |
+      40 more lines         5,1             %8|
     ]])
   end)
 end)

@@ -3,8 +3,10 @@ local t = require('test.testutil')
 local t_lsp = require('test.functional.plugin.lsp.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each, after_each = t.describe, t.it, t.before_each, t.after_each
 local clear = n.clear
 local eq = t.eq
+local eq_partial = t.eq_partial
 local neq = t.neq
 local exec_lua = n.exec_lua
 local feed = n.feed
@@ -13,13 +15,15 @@ local Screen = require('test.functional.ui.screen')
 
 local create_server_definition = t_lsp.create_server_definition
 
---- Extract only abbr/word from a list of completion items for assertion
----@param items table
----@return table
-local function extract_word_abbr(items)
-  return vim.tbl_map(function(x)
-    return { abbr = x.abbr, word = x.word }
-  end, items)
+local function completion_match(overrides)
+  return vim.tbl_extend('force', {
+    abbr_hlgroup = '',
+    dup = 1,
+    empty = 1,
+    icase = 1,
+    info = '',
+    menu = '',
+  }, overrides)
 end
 
 --- Convert completion results.
@@ -93,6 +97,7 @@ describe('vim.lsp.completion: item conversion', function()
 
   -- https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_completion
   it('prefers textEdit over label as word', function()
+    n.command('set completeopt=menuone,popup')
     local range0 = {
       start = { line = 0, character = 0 },
       ['end'] = { line = 0, character = 0 },
@@ -125,7 +130,7 @@ describe('vim.lsp.completion: item conversion', function()
       },
       {
         label = '•INT16_C(c)',
-        insertText = 'INT16_C(${1:c})',
+        insertText = 'x$0',
         insertTextFormat = 2,
         filterText = 'INT16_C',
         sortText = 'h',
@@ -133,6 +138,14 @@ describe('vim.lsp.completion: item conversion', function()
           newText = 'INT16_C(${1:c})',
           range = range0,
         },
+      },
+      -- "" is unset
+      {
+        label = 'zoocar_long',
+        sortText = '',
+        insertText = '',
+        insertTextFormat = 2,
+        textEdit = { newText = 'foobar($1)', range = range0 },
       },
     }
     local expected = {
@@ -144,9 +157,11 @@ describe('vim.lsp.completion: item conversion', function()
       { abbr = 'foocar', word = 'foobar' },
       { abbr = 'foocar', word = 'foodar(${1:var1})' }, -- marked as PlainText, text is used as is
       { abbr = '•INT16_C(c)', word = 'INT16_C' },
+      { abbr = 'zoocar_long', word = 'foobar' },
     }
     local result = complete('|', completion_list)
-    eq(expected, extract_word_abbr(result.items))
+    eq_partial(expected, result.items)
+    eq('```\nINT16_C(c)\n```', result.items[8].info)
   end)
 
   local word_sorter = function(a, b)
@@ -166,10 +181,10 @@ describe('vim.lsp.completion: item conversion', function()
     local expected = {
       { abbr = 'foo', word = 'foo' },
     }
-    local got = extract_word_abbr(result.items)
+    local got = result.items
     table.sort(expected, word_sorter)
     table.sort(got, word_sorter)
-    eq(expected, got)
+    eq_partial(expected, got)
   end)
 
   it('generate "■" symbol with highlight group for CompletionItemKind.Color', function()
@@ -177,14 +192,10 @@ describe('vim.lsp.completion: item conversion', function()
       { label = 'text-red-300', kind = 16, documentation = 'color: rgb(252, 165, 165)' },
     }
     local result = complete('|', completion_list)
-    result = vim.tbl_map(function(x)
-      return {
-        word = x.word,
-        kind_hlgroup = x.kind_hlgroup,
-        kind = x.kind,
-      }
-    end, result.items)
-    eq({ { word = 'text-red-300', kind_hlgroup = '@lsp.color.fca5a5', kind = '■' } }, result)
+    eq_partial(
+      { { word = 'text-red-300', kind_hlgroup = '@lsp.color.fca5a5', kind = '■' } },
+      result.items
+    )
   end)
 
   it('uses labelDetails for abbr and menu', function()
@@ -216,10 +227,10 @@ describe('vim.lsp.completion: item conversion', function()
   ---@param items lsp.CompletionItem[]
   ---@param expected table[]
   local assert_completion_matches = function(prefix, items, expected)
-    local got = extract_word_abbr(complete(prefix .. '|', items).items)
+    local got = complete(prefix .. '|', items).items
     table.sort(expected, word_sorter)
     table.sort(got, word_sorter)
-    eq(expected, got)
+    eq_partial(expected, got)
   end
 
   it('uses filterText as word if label/newText would not match', function()
@@ -298,9 +309,9 @@ describe('vim.lsp.completion: item conversion', function()
       })
     end)
 
-    it('fuzzy matches on label when filterText is missing', function()
+    it('fuzzy matches on label when filterText is missing or empty', function()
       assert_completion_matches('fo', {
-        { label = 'foo' },
+        { label = 'foo', filterText = '' },
         { label = 'faz other' },
         { label = 'bar' },
       }, {
@@ -461,13 +472,13 @@ describe('vim.lsp.completion: item conversion', function()
       { label = ' bar', insertText = '->bar', filterText = 'bar', sortText = '2' },
     }
     local result = complete('wp.|', completion_list, 0, 2)
-    eq({
+    eq_partial({
       { abbr = ' foo', word = '->foo' },
       { abbr = ' bar', word = '->bar' },
-    }, extract_word_abbr(result.items))
+    }, result.items)
   end)
 
-  it('trims trailing newline or tab from textEdit', function()
+  it('trims trailing newline or tab from textEdit and insertText', function()
     local range0 = {
       start = { line = 0, character = 0 },
       ['end'] = { line = 0, character = 0 },
@@ -484,11 +495,17 @@ describe('vim.lsp.completion: item conversion', function()
           range = range0,
         },
       },
+      {
+        kind = 7,
+        label = 'ansible.builtin.copy',
+        sortText = '3_ansible.builtin.copy',
+        insertText = 'ansible.builtin.copy:\n	',
+      },
     }
-    eq(
-      { { abbr = 'ansible.builtin.lineinfile', word = 'ansible.builtin.lineinfile:' } },
-      extract_word_abbr(complete('|', items).items)
-    )
+    eq_partial({
+      { abbr = 'ansible.builtin.lineinfile', word = 'ansible.builtin.lineinfile:' },
+      { abbr = 'ansible.builtin.copy', word = 'ansible.builtin.copy:' },
+    }, complete('|', items).items)
   end)
 
   it('handles multiword textEdits', function()
@@ -509,7 +526,7 @@ describe('vim.lsp.completion: item conversion', function()
         },
       },
     }
-    eq({ { abbr = 'abc', word = 'abc: Abc' } }, extract_word_abbr(complete('|', items).items))
+    eq_partial({ { abbr = 'abc', word = 'abc: Abc' } }, complete('|', items).items)
   end)
 
   it('prefers wordlike components for snippets', function()
@@ -579,7 +596,7 @@ describe('vim.lsp.completion: item conversion', function()
       { abbr = 'insert', word = 'insert' },
       { abbr = 'new', word = 'new' },
     }
-    eq(expected, extract_word_abbr(complete('|', completion_list).items))
+    eq_partial(expected, complete('|', completion_list).items)
   end)
 
   it('uses correct start boundary', function()
@@ -605,17 +622,7 @@ describe('vim.lsp.completion: item conversion', function()
       },
     }
     local expected = {
-      {
-        abbr = ' this_thread',
-        dup = 1,
-        empty = 1,
-        icase = 1,
-        info = '',
-        kind = 'Module',
-        menu = '',
-        abbr_hlgroup = '',
-        word = 'this_thread',
-      },
+      completion_match({ abbr = ' this_thread', kind = 'Module', word = 'this_thread' }),
     }
     local result = complete('  std::this|', completion_list)
     eq(7, result.server_start_boundary)
@@ -663,17 +670,11 @@ describe('vim.lsp.completion: item conversion', function()
         },
       },
     }
-    local expected = {
+    local expected = completion_match({
       abbr = ' this_thread',
-      dup = 1,
-      empty = 1,
-      icase = 1,
-      info = '',
       kind = 'Module',
-      menu = '',
-      abbr_hlgroup = '',
       word = 'this_thread',
-    }
+    })
     local result = complete('  std::this|is', completion_list)
     eq(1, #result.items)
     local item = result.items[1]
@@ -707,6 +708,24 @@ describe('vim.lsp.completion: item conversion', function()
     eq(2, item.insertTextFormat)
     eq('item-property-has-priority', item.data)
     eq({ line = 1, character = 1 }, item.textEdit.range.start)
+
+    local default_range = completion_list.itemDefaults.editRange
+    local item_range = vim.deepcopy(default_range)
+    item_range.start.character = 0
+    for _, edit_range in ipairs({
+      default_range,
+      { insert = default_range, replace = default_range },
+    }) do
+      for _, text_edit in ipairs({
+        { range = item_range, newText = 'hello' },
+        { insert = item_range, replace = item_range, newText = 'hello' },
+      }) do
+        completion_list.itemDefaults.editRange = edit_range
+        completion_list.items[1].textEdit = text_edit
+        result = complete('|', completion_list)
+        eq(text_edit, result.items[1].user_data.nvim.lsp.completion_item.textEdit)
+      end
+    end
   end)
 
   it(
@@ -754,6 +773,7 @@ describe('vim.lsp.completion: item conversion', function()
           {
             label = 'hello',
             data = 'item-property-has-priority',
+            insertText = '',
           },
         },
       }
@@ -807,6 +827,52 @@ describe('vim.lsp.completion: item conversion', function()
     local result = complete('foo.f|', completion_list)
     eq(1, #result.items)
     eq('foobar', result.items[1].user_data.nvim.lsp.completion_item.textEdit.newText)
+  end)
+
+  --- @param candidates lsp.CompletionList
+  --- @return table<string, lsp.CompletionItem>
+  local function convert(candidates)
+    local items = {} --- @type table<string, lsp.CompletionItem>
+    for _, match in ipairs(complete('|', candidates).items) do
+      local item = match.user_data.nvim.lsp.completion_item
+      items[item.label] = item
+    end
+    return items
+  end
+
+  it('itemDefaults are replaced by the item by default', function()
+    local items = convert({
+      isIncomplete = false,
+      itemDefaults = { commitCharacters = { '.', ';' }, data = { a = 1 } },
+      items = {
+        { label = 'own', commitCharacters = { '(' }, data = { b = 2 } },
+        { label = 'absent' },
+        { label = 'empty', commitCharacters = {}, data = false },
+      },
+    })
+    eq({ '(' }, items.own.commitCharacters)
+    eq({ b = 2 }, items.own.data)
+    eq({ '.', ';' }, items.absent.commitCharacters)
+    eq({ a = 1 }, items.absent.data)
+    eq({}, items.empty.commitCharacters)
+    eq(false, items.empty.data)
+  end)
+
+  it('applyKind=Merge merges the item with itemDefaults', function()
+    local Merge = 2
+    local items = convert({
+      isIncomplete = false,
+      applyKind = { commitCharacters = Merge, data = Merge },
+      itemDefaults = { commitCharacters = { '.', ';' }, data = { a = 1, nested = { x = 1 } } },
+      items = {
+        { label = 'own', commitCharacters = { '(' }, data = { a = 9, nested = { y = 2 } } },
+        { label = 'absent' },
+      },
+    })
+    eq({ '(', '.', ';' }, items.own.commitCharacters)
+    eq({ a = 9, nested = { y = 2 } }, items.own.data)
+    eq({ '.', ';' }, items.absent.commitCharacters)
+    eq({ a = 1, nested = { x = 1 } }, items.absent.data)
   end)
 end)
 
@@ -901,6 +967,31 @@ describe('vim.lsp.completion: protocol', function()
     end)
   end
 
+  it('does not error on :checktime after client restart', function()
+    local fname = 'Xtest-lsp-completion-reload'
+    t.write_file(fname, 'foo')
+    t.finally(function()
+      os.remove(fname)
+    end)
+    local mtime = os.time() - 10
+    vim.uv.fs_utime(fname, mtime, mtime)
+    n.command('edit ' .. fname)
+    n.command('set autoread')
+
+    local client_id = create_server('dummy', { isIncomplete = false, items = {} })
+    exec_lua(function()
+      vim.lsp.get_client_by_id(client_id):stop(true)
+      vim.wait(1000, function()
+        return vim.lsp.get_client_by_id(client_id) == nil
+      end)
+    end)
+    create_server('dummy', { isIncomplete = false, items = {} })
+
+    t.write_file(fname, 'bar')
+    n.command('checktime')
+    eq({ 'bar' }, n.api.nvim_buf_get_lines(0, 0, -1, true))
+  end)
+
   it('fetches completions and shows them using complete on trigger', function()
     create_server('dummy', {
       isIncomplete = false,
@@ -916,15 +1007,9 @@ describe('vim.lsp.completion: protocol', function()
 
     assert_matches(function(matches)
       eq({
-        {
+        completion_match({
           abbr = 'hello',
-          dup = 1,
-          empty = 1,
-          icase = 1,
-          info = '',
           kind = 'Unknown',
-          menu = '',
-          abbr_hlgroup = '',
           user_data = {
             nvim = {
               lsp = {
@@ -936,15 +1021,10 @@ describe('vim.lsp.completion: protocol', function()
             },
           },
           word = 'hello',
-        },
-        {
+        }),
+        completion_match({
           abbr = 'hercules',
-          dup = 1,
-          empty = 1,
-          icase = 1,
-          info = '',
           kind = 'Unknown',
-          menu = '',
           abbr_hlgroup = 'DiagnosticDeprecated',
           user_data = {
             nvim = {
@@ -957,15 +1037,10 @@ describe('vim.lsp.completion: protocol', function()
             },
           },
           word = 'hercules',
-        },
-        {
+        }),
+        completion_match({
           abbr = 'hero',
-          dup = 1,
-          empty = 1,
-          icase = 1,
-          info = '',
           kind = 'Unknown',
-          menu = '',
           abbr_hlgroup = 'DiagnosticDeprecated',
           user_data = {
             nvim = {
@@ -978,7 +1053,7 @@ describe('vim.lsp.completion: protocol', function()
             },
           },
           word = 'hero',
-        },
+        }),
       }, matches)
     end)
   end)
@@ -997,6 +1072,27 @@ describe('vim.lsp.completion: protocol', function()
       eq('hallo', matches[2].word)
       eq('hallo', matches[3].word)
     end)
+  end)
+
+  it('requests only from the given clients', function()
+    local id1 = create_server('dummy1', { isIncomplete = false, items = { { label = 'hello' } } })
+    local id2 = create_server('dummy2', { isIncomplete = false, items = { { label = 'hallo' } } })
+    local id3 = create_server('dummy3', { isIncomplete = false, items = { { label = 'hola' } } })
+    feed('ih')
+
+    for _, case in ipairs({ { id2, { 'hallo' } }, { { id1, id3 }, { 'hello', 'hola' } } }) do
+      exec_lua(function()
+        vim.lsp.completion.get({ client_id = case[1] })
+      end)
+      assert_matches(function(matches)
+        eq(
+          case[2],
+          vim.tbl_map(function(m)
+            return m.word
+          end, matches)
+        )
+      end)
+    end
   end)
 
   it('insert char triggers clients matching trigger characters', function()
@@ -1019,6 +1115,47 @@ describe('vim.lsp.completion: protocol', function()
     assert_matches(function(matches)
       eq(1, #matches)
       eq('hallo', matches[1].word)
+    end)
+  end)
+
+  it('reads completionProvider from a dynamic registration', function()
+    exec_lua(function()
+      local server = _G._create_server({
+        capabilities = {},
+        handlers = {
+          ['textDocument/completion'] = function(_, _, callback)
+            callback(nil, { isIncomplete = false, items = { { label = 'hello' } } })
+          end,
+        },
+      })
+      local client_id = assert(vim.lsp.start({
+        name = 'dummy',
+        cmd = server.cmd,
+        capabilities = {
+          textDocument = { completion = { dynamicRegistration = true } },
+        },
+      }))
+      assert(vim.lsp.get_client_by_id(client_id)):_register({
+        {
+          id = 'nvim.test.completion',
+          method = 'textDocument/completion',
+          registerOptions = {
+            triggerCharacters = { '.' },
+            resolveProvider = true,
+            allCommitCharacters = { ';' },
+          },
+        },
+      })
+      vim.lsp.completion.enable(true, client_id, 0, { autotrigger = true })
+    end)
+
+    feed('i.')
+
+    assert_matches(function(matches)
+      eq(1, #matches)
+      eq('hello', matches[1].word)
+      eq(';', matches[1].commit_chars)
+      eq(true, matches[1].user_data.nvim.lsp.completion_item_needs_resolving)
     end)
   end)
 
@@ -1165,7 +1302,7 @@ describe('vim.lsp.completion: protocol', function()
     local params = exec_lua(function()
       local params
       local server = _G._create_server({
-        capabilities = { completionProvider = true },
+        capabilities = { completionProvider = {} },
         handlers = {
           ['textDocument/completion'] = function(_, params0, callback)
             params = params0
@@ -1329,6 +1466,34 @@ describe('vim.lsp.completion: integration', function()
     assert_cleanup_after_detach(client_id)
   end)
 
+  it('expands a snippet before a slow resolve answers', function()
+    exec_lua(function()
+      vim.o.completeopt = 'menuone,noselect'
+      local server = _G._create_server({
+        capabilities = { completionProvider = { resolveProvider = true } },
+        handlers = {
+          ['textDocument/completion'] = function(_, _, callback)
+            callback(nil, {
+              isIncomplete = false,
+              items = { { label = 'hello', insertText = 'hello($0)', insertTextFormat = 2 } },
+            })
+          end,
+          ['completionItem/resolve'] = function(_, item, callback)
+            vim.defer_fn(function()
+              callback(nil, item)
+            end, 100)
+          end,
+        },
+      })
+      local client_id = assert(vim.lsp.start({ name = 'dummy', cmd = server.cmd }))
+      vim.lsp.completion.enable(true, client_id, 0)
+    end)
+    feed('S<C-x><C-o>')
+    wait_for_pum()
+    feed('<C-n><C-y>x')
+    eq({ 'hello(x)' }, n.api.nvim_buf_get_lines(0, 0, -1, true))
+  end)
+
   it('clear multiple-lines word', function()
     local completion_list = {
       isIncomplete = false,
@@ -1373,6 +1538,10 @@ describe('vim.lsp.completion: integration', function()
             range = { start = { line = 0, character = 0 }, ['end'] = { line = 0, character = 7 } },
           },
         },
+        {
+          label = 'foobar',
+          insertTextFormat = 1,
+        },
       },
     }
     exec_lua(function()
@@ -1384,6 +1553,12 @@ describe('vim.lsp.completion: integration', function()
     feed('<C-Y>')
     eq('<div class="foo"></div>', n.api.nvim_get_current_line())
     eq({ 1, 17 }, n.api.nvim_win_get_cursor(0))
+
+    feed('<Esc>ccdiv.foo<C-x><C-O>')
+    wait_for_pum()
+    feed('<C-N><C-Y>')
+    eq('div.foobar', n.api.nvim_get_current_line())
+
     assert_cleanup_after_detach(client_id)
   end)
 
@@ -1567,7 +1742,7 @@ describe('vim.lsp.completion: integration', function()
         -- detail is in documentation, should not be duplicated
         detail = '_assert_integer',
         documentation = {
-          kind = 'markdown',
+          kind = 'plaintext',
           value = [[```lua\nmore doc for vim._assert_integer\n```]],
         },
         insertText = '_assert_integer(${1:x}, ${2:base?})',
@@ -1617,11 +1792,10 @@ describe('vim.lsp.completion: integration', function()
         nvim__id_array_1^                                  |
         {12:nvim__id_array_1 Function }{100:(method) nvim__id_array}{1: }|
         {4:nvim__id_array_2 Function }{100:_1(arr: any[]): any[]}{4:  }{1: }|
-        {4:for i = ..       Snippet  }{100:lua\nfunction vim.ap}{4:   }{1: }|
-        {4:for j = ..       Snippet  }{100:i.nvim__id_array_1(arr:}{1: }|
-        {4:_assert_integer  Function }{100: any[])\n  -> any[]\n}{4:  }{1: }|
-        {1:~                         }{4:                       }{1: }|
-        {1:~                                                 }|*12
+        {4:for i = ..       Snippet  }{100:lua\nfunction vim.api.n}{1: }|
+        {4:for j = ..       Snippet  }{100:vim__id_array_1(arr: an}{1: }|
+        {4:_assert_integer  Function }{100:y[])\n  -> any[]\n}{4:     }{1: }|
+        {1:~                                                 }|*13
         {5:-- INSERT --}                                      |
       ]])
       feed('<C-N>')
@@ -1629,11 +1803,10 @@ describe('vim.lsp.completion: integration', function()
         nvim__id_array_2^                                  |
         {4:nvim__id_array_1 Function }{100:(method) nvim__id_array}{1: }|
         {12:nvim__id_array_2 Function }{100:_2(arr: any[]): any[]}{4:  }{1: }|
-        {4:for i = ..       Snippet  }{100:lua\nfunction vim.ap}{4:   }{1: }|
-        {4:for j = ..       Snippet  }{100:i.nvim__id_array_2(arr:}{1: }|
-        {4:_assert_integer  Function }{100: any[])\n  -> any[]\n}{4:  }{1: }|
-        {1:~                         }{4:                       }{1: }|
-        {1:~                                                 }|*12
+        {4:for i = ..       Snippet  }{100:lua\nfunction vim.api.n}{1: }|
+        {4:for j = ..       Snippet  }{100:vim__id_array_2(arr: an}{1: }|
+        {4:_assert_integer  Function }{100:y[])\n  -> any[]\n}{4:     }{1: }|
+        {1:~                                                 }|*13
         {5:-- INSERT --}                                      |
       ]])
       feed('<C-N>')
@@ -1660,22 +1833,26 @@ describe('vim.lsp.completion: integration', function()
       ]])
       feed('<C-N>')
       retry(nil, nil, function()
-        local info = exec_lua(function()
+        local info, ts_highlight, conceallevel = exec_lua(function()
           local data = vim.fn.complete_info({ 'selected' })
           if not data.preview_bufnr or not vim.api.nvim_buf_is_valid(data.preview_bufnr) then
             error('preview not ready')
           end
-          return table.concat(vim.api.nvim_buf_get_lines(data.preview_bufnr, 0, -1, false), '\n')
+          return table.concat(vim.api.nvim_buf_get_lines(data.preview_bufnr, 0, -1, false), '\n'),
+            vim.b[data.preview_bufnr].ts_highlight or false,
+            vim.wo[data.preview_winid].conceallevel
         end)
         neq(nil, info:find('more doc for vim._assert_integer', 1, true))
         local _, count = info:gsub('_assert_integer', '')
         -- item 3: detail '_assert_integer' is in documentation, should not be duplicated
         eq(1, count)
+        eq(false, ts_highlight)
+        eq(0, conceallevel)
       end)
       screen:expect([[
         _assert_integer(x, base)^                          |
-        {4:nvim__id_array_1 Function }{100:lua\nmore doc for vi}{4:   }{1: }|
-        {4:nvim__id_array_2 Function }{100:m._assert_integer\n}{4:    }{1: }|
+        {4:nvim__id_array_1 Function ```lua\nmore doc for vi}{1: }|
+        {4:nvim__id_array_2 Function m._assert_integer\n``` }{1: }|
         {4:for i = ..       Snippet  }{1:                        }|
         {4:for j = ..       Snippet  }{1:                        }|
         {12:_assert_integer  Function }{1:                        }|
@@ -1693,12 +1870,27 @@ describe('vim.lsp.completion: integration', function()
     end)
   end)
 
+  it('ignores non-LSP completion metadata on acceptance', function()
+    n.command('set completeopt=menuone,noselect')
+    create_server('dummy', {})
+    feed('i')
+    exec_lua(function()
+      vim.v.errmsg = ''
+      vim.fn.complete(1, { { word = 'other', user_data = { nvim = {} } } })
+    end)
+    wait_for_pum()
+    feed('<C-n><C-y>')
+    eq('other', n.api.nvim_get_current_line())
+    eq('', n.api.nvim_get_vvar('errmsg'))
+  end)
+
   it('omnifunc works without enable() #38252', function()
     local completion_list = {
       isIncomplete = false,
       items = {
         { label = 'hello' },
-        { label = 'hallo' },
+        -- Empty snippet insertText must fall back to the label on acceptance.
+        { label = 'hallo', insertText = '', insertTextFormat = 2 },
       },
     }
     exec_lua(function()
@@ -1752,6 +1944,63 @@ describe('vim.lsp.completion: integration', function()
       end)
     )
   end)
+
+  it('support commitCharacters', function()
+    n.command('set completeopt=menuone,menu,noinsert')
+    -- from typescript-language-server
+    local completion_list = {
+      isIncomplete = false,
+      items = {
+        {
+          -- Only whole characters are kept: '\0' and '\169x' are dropped, '=>' becomes '='.
+          commitCharacters = { '.', ',', ';', '\0', '(', '=>', '\169x' },
+          data = {
+            cacheId = 1,
+          },
+          filterText = '.bar',
+          kind = 2,
+          label = 'bar',
+          sortText = '11',
+          textEdit = {
+            newText = '.bar',
+            range = {
+              ['end'] = {
+                character = 2,
+                line = 0,
+              },
+              start = {
+                character = 1,
+                line = 0,
+              },
+            },
+          },
+        },
+      },
+    }
+    create_server('dummy', completion_list, { trigger_chars = { '.' } })
+    feed('Sf.')
+    wait_for_pum()
+    feed('(')
+    eq('f.bar(', n.api.nvim_get_current_line())
+
+    n.command('set completeopt+=noselect')
+    feed('<ESC>Sf.')
+    wait_for_pum()
+    feed('(')
+    eq('f.(', n.api.nvim_get_current_line())
+
+    -- Test that a dropped fragment did not leak: 'x' must not commit, '=' must.
+    n.command('set completeopt=menuone,menu,noinsert')
+    feed('<ESC>Sf.')
+    wait_for_pum()
+    feed('x')
+    eq('f.x', n.api.nvim_get_current_line())
+
+    feed('<ESC>Sf.')
+    wait_for_pum()
+    feed('=')
+    eq('f.bar=', n.api.nvim_get_current_line())
+  end)
 end)
 
 describe("vim.lsp.completion: omnifunc + 'autocomplete'", function()
@@ -1785,8 +2034,15 @@ describe("vim.lsp.completion: omnifunc + 'autocomplete'", function()
   end
 
   it('merges with other completions', function()
-    feed('ihillo<cr><esc>ih')
+    exec_lua(function()
+      vim.o.complete = 'o,b'
+      local buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(buf, 'Xcompletion-source')
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'hillo' })
+    end)
+    feed('ih')
     assert_matches({ 'hillo', 'hallo', 'hello' })
+    eq('Xcompletion-source', exec_lua('return vim.fn.complete_info({ "items" })').items[1].menu)
   end)
 
   it('fuzzy matches without duplication', function()

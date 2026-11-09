@@ -51,6 +51,7 @@
 #include "nvim/change.h"
 #include "nvim/channel.h"
 #include "nvim/channel_defs.h"
+#include "nvim/context.h"
 #include "nvim/cursor.h"
 #include "nvim/cursor_shape.h"
 #include "nvim/drawline.h"
@@ -64,12 +65,13 @@
 #include "nvim/event/multiqueue.h"
 #include "nvim/event/time.h"
 #include "nvim/ex_docmd.h"
-#include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
+#include "nvim/input.h"
+#include "nvim/input_cmdatom.h"
 #include "nvim/keycodes.h"
 #include "nvim/macros_defs.h"
 #include "nvim/main.h"
@@ -278,7 +280,7 @@ static void emit_termrequest(void **argv)
         VTERM_TERMINATOR_BEL ? STATIC_CSTR_AS_OBJ("\x07") : STATIC_CSTR_AS_OBJ("\x1b\\"));
 
   term->refcount++;
-  apply_autocmds_group(EVENT_TERMREQUEST, NULL, NULL, true, AUGROUP_ALL, buf, NULL,
+  apply_autocmds_group(EVENT_TERMREQUEST, NULL, NULL, true, AUGROUP_ALL, buf, curwin, NULL,
                        &DICT_OBJ(data), false);
   term->refcount--;
   xfree(sequence);
@@ -504,6 +506,10 @@ static bool term_may_alloc_scrollback(Terminal *term, buf_T *buf)
 Terminal *terminal_alloc(buf_T *buf, TerminalOptions opts)
   FUNC_ATTR_NONNULL_ALL
 {
+  // If win has zero size (hidden float, 'cmdheight'), use the pty_proc_init() default.
+  opts.width = opts.width ? opts.width : 80;
+  opts.height = opts.height ? opts.height : 24;
+
   // Create a new terminal instance and configure it
   Terminal *term = xcalloc(1, sizeof(Terminal));
   term->opts = opts;
@@ -587,8 +593,8 @@ void terminal_open(Terminal **termpp, buf_T *buf)
   Terminal *term = *termpp;
   assert(term != NULL);
 
-  aco_save_T aco = { 0 };
-  aucmd_prepbuf(&aco, buf);
+  CtxSwitch aco = { 0 };
+  ctx_switch(&aco, NULL, NULL, buf, 0);
 
   if (term->sb_buffer != NULL) {
     // If scrollback has been allocated by autocommands between terminal_alloc()
@@ -599,7 +605,7 @@ void terminal_open(Terminal **termpp, buf_T *buf)
   }
   refresh_screen(term, buf);
   buf->b_locked++;
-  set_option_value(kOptBuftype, STATIC_CSTR_AS_OPTVAL("terminal"), OPT_LOCAL);
+  set_option_value(kOptBuftype, STATIC_CSTR_AS_OBJ("terminal"), OPT_LOCAL, true, NULL);
   buf->b_locked--;
 
   if (buf->b_ffname != NULL) {
@@ -615,7 +621,7 @@ void terminal_open(Terminal **termpp, buf_T *buf)
   // allocated anyway if needed.
   apply_autocmds(EVENT_TERMOPEN, NULL, NULL, false, buf);
 
-  aucmd_restbuf(&aco);
+  ctx_restore(&aco);
 
   if (*termpp == NULL || term->buf_handle == 0) {
     return;  // Terminal has already been destroyed.
@@ -685,6 +691,15 @@ void terminal_close(Terminal **termpp, int status)
   } else {
     // flush any pending changes to the buffer
     if (!exiting) {
+      int height, width;
+      vterm_get_size(term->vt, &height, &width);
+      if (status != -1 && term->cursor.row == height - 1) {
+        fetch_row(term, term->cursor.row, width);
+        if (term->textbuf[0] != NUL) {
+          // Start a new line, else "[Process exited]" (line after cursor) hides the last line.
+          terminal_receive(term, "\r\n", 2);
+        }
+      }
       block_autocmds();
       refresh_terminal(term);
       unblock_autocmds();
@@ -727,6 +742,11 @@ void terminal_close(Terminal **termpp, int status)
     return;
   }
 
+  if (status >= 0) {  // The job may have changed files on disk, like `do_shell` (":!cmd").
+    did_check_timestamps = false;
+    need_check_timestamps = true;
+  }
+
   if (buf && !is_autocmd_blocked()) {
     save_v_event_T save_v_event;
     dict_T *dict = get_v_event(&save_v_event);
@@ -737,7 +757,7 @@ void terminal_close(Terminal **termpp, int status)
     PUT_C(data, "pos", INTEGER_OBJ(pos));
 
     apply_autocmds_group(EVENT_TERMCLOSE, NULL, NULL, status >= 0, AUGROUP_ALL,
-                         buf, NULL, &DICT_OBJ(data), false);
+                         buf, curwin, NULL, &DICT_OBJ(data), false);
 
     restore_v_event(dict, &save_v_event);
   }
@@ -783,7 +803,7 @@ void terminal_check_size(Terminal *term)
   // Check if there is a window that displays the terminal and find the maximum width and height.
   // Skip the autocommand window which isn't actually displayed.
   FOR_ALL_TAB_WINDOWS(tp, wp) {
-    if (is_aucmd_win(wp)) {
+    if (is_ctx_win(wp)) {
       continue;
     }
     if (wp->w_buffer && wp->w_buffer->terminal == term) {
@@ -904,13 +924,14 @@ bool terminal_enter(void)
   TerminalState s[1] = { 0 };
   s->term = buf->terminal;
   s->cursor_visible = true;  // Assume visible; may change via refresh_cursor later.
-  stop_insert_mode = false;
+  Ins.stop_insert_mode = false;
 
   // Ensure the terminal is properly sized. Ideally window size management
   // code should always have resized the terminal already, but check here to
   // be sure.
   terminal_check_size(s->term);
 
+  atom_term_enter();
   int save_state = State;
   s->save_rd = RedrawingDisabled;
   State = MODE_TERMINAL;
@@ -1052,7 +1073,7 @@ static int terminal_check(VimState *state)
   // Shouldn't reach here when pressing a key to close the terminal buffer.
   assert(!s->close || (s->term->buf_handle == 0 && s->term != curbuf->terminal));
 
-  if (stop_insert_mode || !terminal_check_focus(s)) {
+  if (Ins.stop_insert_mode || !terminal_check_focus(s)) {
     return 0;
   }
 
@@ -1352,7 +1373,7 @@ static void terminal_send_key(Terminal *term, int c)
     c = Ctrl_AT;
   }
 
-  VTermKey key = convert_key(&c, &mod);
+  VTermKey key = convert_key(&c, mod_mask, &mod);
 
   if (key != VTERM_KEY_NONE) {
     vterm_keyboard_key(term->vt, key, mod);
@@ -1535,7 +1556,7 @@ void terminal_notify_theme(Terminal *term, bool dark)
   }
 
   char buf[10];
-  ssize_t ret = snprintf(buf, sizeof(buf), "\x1b[997;%cn", dark ? '1' : '2');
+  ssize_t ret = snprintf(buf, sizeof(buf), "\x1b[?997;%cn", dark ? '1' : '2');
   assert(ret > 0);
   assert((size_t)ret <= sizeof(buf));
   terminal_send(term, buf, (size_t)ret);
@@ -1828,8 +1849,17 @@ static void term_clipboard_set(void **argv)
     break;
   }
 
-  list_T *lines = tv_list_alloc(1);
-  tv_list_append_allocated_string(lines, data);
+  // Split the payload into readfile()-style list (:h chansend()).
+  // TODO(justinmk): drop this, support Blob in clipboard provider: #41097
+  list_T *lines = tv_list_alloc(kListLenMayKnow);
+  char *start = data;
+  char *end;
+  while ((end = strchr(start, '\n')) != NULL) {
+    tv_list_append_string(lines, start, end - start);
+    start = end + 1;
+  }
+  tv_list_append_string(lines, start, -1);
+  xfree(data);
 
   list_T *args = tv_list_alloc(3);
   tv_list_append_list(args, lines);
@@ -1861,63 +1891,32 @@ static int term_selection_set(VTermSelectionMask mask, VTermStringFragment frag,
 // }}}
 // input handling {{{
 
-static void convert_modifiers(int *key, VTermModifier *statep)
+static void convert_modifiers(int *key, int modifiers, VTermModifier *statep)
 {
-  if (mod_mask & MOD_MASK_SHIFT) {
+  if (modifiers & MOD_MASK_SHIFT) {
     *statep |= VTERM_MOD_SHIFT;
   }
-  if (mod_mask & MOD_MASK_CTRL) {
+  if (modifiers & MOD_MASK_CTRL) {
     *statep |= VTERM_MOD_CTRL;
-    if (!(mod_mask & MOD_MASK_SHIFT) && *key >= 'A' && *key <= 'Z') {
+    if (!(modifiers & MOD_MASK_SHIFT) && *key >= 'A' && *key <= 'Z') {
       // vterm interprets CTRL+A as SHIFT+CTRL, change to CTRL+a
       *key += ('a' - 'A');
     }
   }
-  if (mod_mask & MOD_MASK_ALT) {
+  if (modifiers & MOD_MASK_ALT) {
     *statep |= VTERM_MOD_ALT;
-  }
-
-  switch (*key) {
-  case K_S_TAB:
-  case K_S_UP:
-  case K_S_DOWN:
-  case K_S_LEFT:
-  case K_S_RIGHT:
-  case K_S_HOME:
-  case K_S_END:
-  case K_S_F1:
-  case K_S_F2:
-  case K_S_F3:
-  case K_S_F4:
-  case K_S_F5:
-  case K_S_F6:
-  case K_S_F7:
-  case K_S_F8:
-  case K_S_F9:
-  case K_S_F10:
-  case K_S_F11:
-  case K_S_F12:
-    *statep |= VTERM_MOD_SHIFT;
-    break;
-
-  case K_C_LEFT:
-  case K_C_RIGHT:
-  case K_C_HOME:
-  case K_C_END:
-    *statep |= VTERM_MOD_CTRL;
-    break;
   }
 }
 
-static VTermKey convert_key(int *key, VTermModifier *statep)
+static VTermKey convert_key(int *key, int modifiers, VTermModifier *statep)
 {
-  convert_modifiers(key, statep);
+  *key = unsimplify_key(*key, &modifiers);
+  convert_modifiers(key, modifiers, statep);
 
   switch (*key) {
   case K_BS:
     return VTERM_KEY_BACKSPACE;
-  case K_S_TAB:
-    FALLTHROUGH;
+  case K_TAB:
   case TAB:
     return VTERM_KEY_TAB;
   case Ctrl_M:
@@ -1925,24 +1924,12 @@ static VTermKey convert_key(int *key, VTermModifier *statep)
   case ESC:
     return VTERM_KEY_ESCAPE;
 
-  case K_S_UP:
-    FALLTHROUGH;
   case K_UP:
     return VTERM_KEY_UP;
-  case K_S_DOWN:
-    FALLTHROUGH;
   case K_DOWN:
     return VTERM_KEY_DOWN;
-  case K_S_LEFT:
-    FALLTHROUGH;
-  case K_C_LEFT:
-    FALLTHROUGH;
   case K_LEFT:
     return VTERM_KEY_LEFT;
-  case K_S_RIGHT:
-    FALLTHROUGH;
-  case K_C_RIGHT:
-    FALLTHROUGH;
   case K_RIGHT:
     return VTERM_KEY_RIGHT;
 
@@ -1950,16 +1937,8 @@ static VTermKey convert_key(int *key, VTermModifier *statep)
     return VTERM_KEY_INS;
   case K_DEL:
     return VTERM_KEY_DEL;
-  case K_S_HOME:
-    FALLTHROUGH;
-  case K_C_HOME:
-    FALLTHROUGH;
   case K_HOME:
     return VTERM_KEY_HOME;
-  case K_S_END:
-    FALLTHROUGH;
-  case K_C_END:
-    FALLTHROUGH;
   case K_END:
     return VTERM_KEY_END;
   case K_PAGEUP:
@@ -1968,47 +1947,36 @@ static VTermKey convert_key(int *key, VTermModifier *statep)
     return VTERM_KEY_PAGEDOWN;
 
   case K_K0:
-    FALLTHROUGH;
   case K_KINS:
     return VTERM_KEY_KP_0;
   case K_K1:
-    FALLTHROUGH;
   case K_KEND:
     return VTERM_KEY_KP_1;
   case K_K2:
-    FALLTHROUGH;
   case K_KDOWN:
     return VTERM_KEY_KP_2;
   case K_K3:
-    FALLTHROUGH;
   case K_KPAGEDOWN:
     return VTERM_KEY_KP_3;
   case K_K4:
-    FALLTHROUGH;
   case K_KLEFT:
     return VTERM_KEY_KP_4;
   case K_K5:
-    FALLTHROUGH;
   case K_KORIGIN:
     return VTERM_KEY_KP_5;
   case K_K6:
-    FALLTHROUGH;
   case K_KRIGHT:
     return VTERM_KEY_KP_6;
   case K_K7:
-    FALLTHROUGH;
   case K_KHOME:
     return VTERM_KEY_KP_7;
   case K_K8:
-    FALLTHROUGH;
   case K_KUP:
     return VTERM_KEY_KP_8;
   case K_K9:
-    FALLTHROUGH;
   case K_KPAGEUP:
     return VTERM_KEY_KP_9;
   case K_KDEL:
-    FALLTHROUGH;
   case K_KPOINT:
     return VTERM_KEY_KP_PERIOD;
   case K_KENTER:
@@ -2022,52 +1990,28 @@ static VTermKey convert_key(int *key, VTermModifier *statep)
   case K_KDIVIDE:
     return VTERM_KEY_KP_DIVIDE;
 
-  case K_S_F1:
-    FALLTHROUGH;
   case K_F1:
     return VTERM_KEY_FUNCTION(1);
-  case K_S_F2:
-    FALLTHROUGH;
   case K_F2:
     return VTERM_KEY_FUNCTION(2);
-  case K_S_F3:
-    FALLTHROUGH;
   case K_F3:
     return VTERM_KEY_FUNCTION(3);
-  case K_S_F4:
-    FALLTHROUGH;
   case K_F4:
     return VTERM_KEY_FUNCTION(4);
-  case K_S_F5:
-    FALLTHROUGH;
   case K_F5:
     return VTERM_KEY_FUNCTION(5);
-  case K_S_F6:
-    FALLTHROUGH;
   case K_F6:
     return VTERM_KEY_FUNCTION(6);
-  case K_S_F7:
-    FALLTHROUGH;
   case K_F7:
     return VTERM_KEY_FUNCTION(7);
-  case K_S_F8:
-    FALLTHROUGH;
   case K_F8:
     return VTERM_KEY_FUNCTION(8);
-  case K_S_F9:
-    FALLTHROUGH;
   case K_F9:
     return VTERM_KEY_FUNCTION(9);
-  case K_S_F10:
-    FALLTHROUGH;
   case K_F10:
     return VTERM_KEY_FUNCTION(10);
-  case K_S_F11:
-    FALLTHROUGH;
   case K_F11:
     return VTERM_KEY_FUNCTION(11);
-  case K_S_F12:
-    FALLTHROUGH;
   case K_F12:
     return VTERM_KEY_FUNCTION(12);
 
@@ -2252,7 +2196,7 @@ static bool send_mouse_event(Terminal *term, int c)
     }
 
     VTermModifier mod = VTERM_MOD_NONE;
-    convert_modifiers(&c, &mod);
+    convert_modifiers(&c, mod_mask, &mod);
     mouse_action(term, button, row, col - offset, pressed, mod);
     return false;
   }
@@ -2306,10 +2250,7 @@ end:
     return false;
   }
 
-  int len = ins_char_typebuf(vgetc_char, vgetc_mod_mask, true);
-  if (KeyTyped) {
-    ungetchars(len);
-  }
+  requeue_key(vgetc_char, vgetc_mod_mask, 0, true);
   return true;
 }
 

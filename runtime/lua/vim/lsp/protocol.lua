@@ -1,6 +1,8 @@
 --- @diagnostic disable: duplicate-doc-alias
 
----@param tbl table<string, string|number>
+---@generic T: string|number
+---@param tbl table<string, T>
+---@return T[]
 local function get_value_set(tbl)
   local value_set = {}
   for _, v in pairs(tbl) do
@@ -99,6 +101,7 @@ local constants = {
 
   -- Completion item tags are extra annotations that tweak the rendering of a
   -- completion item
+  ---@type table<string, lsp.CompletionItemTag>
   CompletionTag = {
     -- Render a completion as obsolete, usually using a strike-out.
     Deprecated = 1,
@@ -145,6 +148,7 @@ local constants = {
   },
 
   -- Extra annotations that tweak the rendering of a symbol.
+  ---@type table<string, lsp.SymbolTag>
   SymbolTag = {
     Deprecated = 1,
   },
@@ -241,6 +245,15 @@ local constants = {
     Change = 2,
     -- Interested in delete events
     Delete = 4,
+  },
+
+  -- Defines how values from a set of defaults and an individual item will be merged.
+  ApplyKind = {
+    -- The value from the individual item (if provided and not `null`) will be used
+    -- instead of the default.
+    Replace = 1,
+    -- The value from the item will be merged with the default.
+    Merge = 2,
   },
 
   -- Defines whether the insert text in a completion item should be interpreted as
@@ -366,8 +379,10 @@ function protocol.make_client_capabilities()
           properties = {
             'textEdits',
             'tooltip',
-            'location',
             'command',
+            'label.location',
+            'label.tooltip',
+            'label.command',
           },
         },
       },
@@ -473,7 +488,7 @@ function protocol.make_client_capabilities()
         dynamicRegistration = false,
         completionItem = {
           snippetSupport = true,
-          commitCharactersSupport = false,
+          commitCharactersSupport = true,
           preselectSupport = true,
           deprecatedSupport = true,
           documentationFormat = { constants.MarkupKind.Markdown, constants.MarkupKind.PlainText },
@@ -496,11 +511,13 @@ function protocol.make_client_capabilities()
         },
         completionList = {
           itemDefaults = {
+            'commitCharacters',
             'editRange',
             'insertTextFormat',
             'insertTextMode',
             'data',
           },
+          applyKindSupport = true,
         },
         contextSupport = true,
       },
@@ -570,6 +587,9 @@ function protocol.make_client_capabilities()
       callHierarchy = {
         dynamicRegistration = false,
       },
+      typeHierarchy = {
+        dynamicRegistration = false,
+      },
       colorProvider = {
         dynamicRegistration = true,
       },
@@ -594,9 +614,13 @@ function protocol.make_client_capabilities()
       didChangeConfiguration = {
         dynamicRegistration = false,
       },
+      executeCommand = {
+        dynamicRegistration = false,
+      },
       workspaceFolders = true,
       applyEdit = true,
       workspaceEdit = {
+        documentChanges = true,
         resourceOperations = { 'rename', 'create', 'delete' },
         normalizesLineEndings = true,
         changeAnnotationSupport = { groupsOnLabel = true },
@@ -618,6 +642,9 @@ function protocol.make_client_capabilities()
         refreshSupport = true,
       },
       diagnostics = {
+        refreshSupport = true,
+      },
+      foldingRange = {
         refreshSupport = true,
       },
       fileOperations = {

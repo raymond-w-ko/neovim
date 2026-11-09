@@ -3,13 +3,15 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each, after_each, pending, finally =
+  t.describe, t.it, t.before_each, t.after_each, t.pending, t.finally
 local clear, eval = n.clear, n.eval
 local eq, neq, run, stop = t.eq, t.neq, n.run, n.stop
 local nvim_prog, command, fn = n.nvim_prog, n.command, n.fn
 local source, next_msg = n.source, n.next_msg
 local ok = t.ok
 local api = n.api
-local set_session = n.set_session
+local new_session, set_session = n.new_session, n.set_session
 local pcall_err = t.pcall_err
 local assert_alive = n.assert_alive
 
@@ -279,7 +281,7 @@ describe('server -> client', function()
     end)
   end)
 
-  describe('connecting to another (peer) nvim', function()
+  describe('connecting to a peer Nvim', function()
     local function connect_test(server, mode, address)
       local serverpid = fn.getpid()
       local client = n.new_session(true)
@@ -328,7 +330,19 @@ describe('server -> client', function()
       set_session(server)
       local address = fn.serverlist()[1]
       local first = string.sub(address, 1, 1)
-      ok(first == '/' or first == '\\')
+      ok(first == '/')
+      connect_test(server, 'pipe', address)
+    end)
+
+    it('via named pipe containing backslashes #39382', function()
+      t.skip(not t.is_os('win'), 'N/A for non-Windows')
+      local address = [[\\.\pipe\Xtest]]
+      local server = new_session(false, {
+        args_rm = { '--listen' },
+        args = { '--listen', address },
+      })
+      set_session(server)
+      eq(vim.fs.normalize(address), api.nvim_get_vvar('servername'))
       connect_test(server, 'pipe', address)
     end)
 
@@ -362,27 +376,49 @@ describe('server -> client', function()
       connect_test(server, 'tcp', address)
     end)
 
-    local function start_server_and_client()
+    --- @param opts? table sockconnect() options.
+    local function start_server_and_client(opts)
       local server = n.new_session(false)
       set_session(server)
       local address = fn.serverlist()[1]
       local client = n.new_session(true)
       set_session(client)
 
-      local id = fn.sockconnect('pipe', address, { rpc = true })
+      local id =
+        fn.sockconnect('pipe', address, vim.tbl_extend('force', { rpc = true }, opts or {}))
 
       finally(function()
         server:close()
         client:close()
       end)
 
-      return id
+      return id, server, client
     end
 
     it('does not crash on receiving UI events', function()
       local id = start_server_and_client()
       fn.rpcrequest(id, 'nvim_ui_attach', 80, 24, {})
       assert_alive()
+    end)
+
+    it('security: trust=false rejects API calls from the peer', function()
+      local id, server, client = start_server_and_client({ trust = false })
+      local client_id = fn.rpcrequest(id, 'nvim_get_chan_info', 0).id
+      set_session(server)
+      t.matches(
+        'Rejected API call from untrusted peer: nvim_eval',
+        pcall_err(fn.rpcrequest, client_id, 'nvim_eval', '1')
+      )
+      -- Also nvim_chan_set(): the peer cannot make itself trusted.
+      t.matches(
+        'Rejected API call from untrusted peer: nvim_chan_set',
+        pcall_err(fn.rpcrequest, client_id, 'nvim_chan_set', 0, { trust = true })
+      )
+
+      set_session(client)
+      api.nvim_chan_set(id, { trust = true })
+      set_session(server)
+      eq(1, fn.rpcrequest(client_id, 'nvim_eval', '1'))
     end)
 
     it('does not leak memory with channel closed before response', function()
@@ -435,7 +471,7 @@ describe('server -> client', function()
       call chansend(chan, 0Z71616C6C21)
       let g:statuses = jobwait([chan])
       ]])
-      eq(eval('g:statuses'), { 0 })
+      eq({ 0 }, eval('g:statuses'))
       assert_alive()
     end)
   end)

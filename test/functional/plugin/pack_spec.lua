@@ -1,12 +1,15 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
+local describe, it, before_each, after_each, setup, teardown =
+  t.describe, t.it, t.before_each, t.after_each, t.setup, t.teardown
 local skip_integ = os.getenv('NVIM_TEST_INTEG') ~= '1'
 
 local api = n.api
 local fn = n.fn
 
 local eq = t.eq
+local eq_partial = t.eq_partial
 local matches = t.matches
 local pcall_err = t.pcall_err
 local exec_lua = n.exec_lua
@@ -53,26 +56,6 @@ local function repo_write_file(repo_name, rel_path, text, no_dedent, append)
   t.write_file(path, text, no_dedent, append)
 end
 
---- @return vim.SystemCompleted
-local function system_sync(cmd, opts)
-  return exec_lua(function()
-    local obj = vim.system(cmd, opts)
-
-    if opts and opts.timeout then
-      -- Minor delay before calling wait() so the timeout uv timer can have a headstart over the
-      -- internal call to vim.wait() in wait().
-      vim.wait(10)
-    end
-
-    local res = obj:wait()
-
-    -- Check the process is no longer running
-    assert(not vim.api.nvim_get_proc(obj.pid), 'process still exists')
-
-    return res
-  end)
-end
-
 local function git_cmd(cmd, repo_name)
   local git_cmd_prefix = {
     'git',
@@ -89,7 +72,7 @@ local function git_cmd(cmd, repo_name)
   cmd = vim.list_extend(git_cmd_prefix, cmd)
   local cwd = repo_get_path(repo_name)
   local sys_opts = { cwd = cwd, text = true, clear_env = true }
-  local out = system_sync(cmd, sys_opts)
+  local out = n.system_sync(cmd, sys_opts)
   if out.code ~= 0 then
     error(out.stderr)
   end
@@ -118,7 +101,9 @@ local function git_get_hash(rev, repo_name)
 end
 
 local function git_get_short_hash(rev, repo_name)
-  return git_cmd({ 'rev-list', '-1', '--abbrev-commit', rev }, repo_name)
+  -- Pin `--abbrev`. Git's default abbrev differs across environments, which would shift the
+  -- hard-coded column alignment and LSP link positions in the confirmation-buffer tests.
+  return git_cmd({ 'rev-list', '-1', '--abbrev=7', '--abbrev-commit', rev }, repo_name)
 end
 
 -- Common test repos ----------------------------------------------------------
@@ -260,6 +245,63 @@ function repos_setup.with_subs()
   git_add_commit('Second commit for "with_subs"', 'with_subs')
 end
 
+function repos_setup.with_manifest()
+  init_test_repo('manifest')
+
+  repo_write_file('manifest', 'lua/manifest.lua', 'return "manifest init"')
+
+  local manifest_tbl = {
+    name = 'plug',
+    description = 'Nvim plugin',
+    engine = { nvim = '>=0.12.0', vim = '>=9.1.0' },
+    -- Should handle both `*.lua` and `*.vim` files
+    scripts = {
+      install = 'scripts/install.lua',
+      preupdate = 'scripts/preupdate.vim',
+      update = 'scripts/update.lua',
+      preuninstall = 'scirpts/preuninstall.vim',
+    },
+  }
+  repo_write_file('manifest', 'pkg.json', vim.json.encode(manifest_tbl))
+
+  -- Create scripts that use Lua module from the same plugin
+  local hook_module_text = [[
+    return {
+      hook = function(script_name)
+        -- NOTE: share the log with the one used for watching events to test
+        -- relative order of events and script
+        _G.event_log = _G.event_log or {}
+        local rtp = vim.api.nvim_list_runtime_paths()
+        local data = { kind = script_name, cwd = vim.fs.normalize(vim.uv.cwd()), rtp = rtp }
+        table.insert(_G.event_log, { event = 'script', data = data })
+
+        -- Should handle errors during script exectuion
+        error('Error in ' .. script_name .. ' script')
+      end
+    }
+  ]]
+  repo_write_file('manifest', 'lua/manifest-hook.lua', hook_module_text)
+
+  for name, script_path in pairs(manifest_tbl.scripts) do
+    local text = ("require('manifest-hook').hook('%s')"):format(name)
+    if vim.endswith(script_path, '.vim') then
+      text = 'lua << EOF\n' .. text .. '\nEOF'
+    end
+    repo_write_file('manifest', script_path, text)
+  end
+
+  git_add_commit('Initial commit', 'manifest')
+
+  -- Add extra branch to test script execution in `vim.pack.update()`
+  git_cmd({ 'checkout', '-b', 'other-branch' }, 'manifest')
+  repo_write_file('manifest', 'lua/manifest.lua', 'return "manifest other-branch"')
+  local other_script = "_G.other_script = true\nrequire('manifest-hook').hook('update')"
+  repo_write_file('manifest', 'scripts/update.lua', other_script)
+  git_add_commit('Other commit', 'manifest')
+
+  git_cmd({ 'checkout', 'main' }, 'manifest')
+end
+
 -- Utility --------------------------------------------------------------------
 
 --- Execute `vim.pack.add()` inside `testnvim` instance
@@ -294,6 +336,17 @@ local function assert_packchanged(log_compact)
   eq(expected, log)
 end
 
+local function assert_manifest_scripts(plug_path, ref_log_trimmed)
+  -- Should be sourced in particular order relative to `PackChanged` events
+  local log_trimmed = {} --- @type table[]
+  for i, tbl in ipairs(exec_lua('return _G.event_log')) do
+    local rtp_has_plug = tbl.data.rtp and vim.tbl_contains(tbl.data.rtp, plug_path) or nil
+    local kind, cwd = tbl.data.kind, tbl.data.cwd
+    log_trimmed[i] = { event = tbl.event, kind = kind, cwd = cwd, rtp_has_plug = rtp_has_plug }
+  end
+  eq(ref_log_trimmed, log_trimmed)
+end
+
 local function track_nvim_echo()
   exec_lua(function()
     _G.echo_log = {}
@@ -304,6 +357,17 @@ local function track_nvim_echo()
       return nvim_echo_orig(...)
     end
   end)
+end
+
+local function is_in_echo_log(chunk_substring, chunk_hl)
+  ---@diagnostic disable-next-line: no-unknown
+  for _, msg in ipairs(exec_lua('return _G.echo_log')) do
+    local chunk = msg[1][1] --- @type [string, string]
+    if chunk[1]:find(chunk_substring, 0, true) and chunk[2] == chunk_hl then
+      return true
+    end
+  end
+  return false
 end
 
 --- @param echo_log table[]?
@@ -330,12 +394,12 @@ local function assert_progress_report(echo_log, action, step_names)
     steps_seen[step] = true
 
     -- Should not add intermediate progress report to history
-    eq(echo_args[2], false)
+    eq(false, echo_args[2])
 
     -- Should update a single message by its id (computed after first call)
     progress.id = progress.id or echo_args[3].id ---@type integer
     progress.percent = math.floor(100 * i / n_steps)
-    eq(echo_args[3], progress)
+    eq(progress, echo_args[3])
   end
 
   -- Should report all steps
@@ -385,6 +449,10 @@ local function get_lock_path()
   return vim.fs.joinpath(fn.stdpath('config'), 'nvim-pack-lock.json')
 end
 
+local function get_other_lock_path()
+  return vim.fs.joinpath(fn.stdpath('state'), 'test-pack-lock')
+end
+
 --- @return {plugins:table<string, {rev:string, src:string, version?:string}>}
 local function get_lock_tbl()
   return vim.json.decode(fn.readblob(get_lock_path()))
@@ -407,6 +475,7 @@ describe('vim.pack', function()
   after_each(function()
     local pack_dir = pack_get_dir()
     local lock_path = get_lock_path()
+    local other_lock_path = get_other_lock_path()
     local log_path = vim.fs.joinpath(fn.stdpath('log'), 'nvim-pack.log')
 
     -- Wait for neovim to close before removing directories so it can release
@@ -416,6 +485,7 @@ describe('vim.pack', function()
 
     n.rmdir(pack_dir)
     pcall(vim.fs.rm, lock_path, { force = true })
+    pcall(vim.fs.rm, other_lock_path, { force = true })
     pcall(vim.fs.rm, log_path, { force = true })
   end)
 
@@ -430,11 +500,12 @@ describe('vim.pack', function()
 
       watch_events({ 'PackChanged' })
       vim_pack_add({ repos_src.basic })
-      eq(exec_lua('return #_G.event_log'), 0)
+      eq(0, exec_lua('return #_G.event_log'))
 
       -- Should not create redundant stash entry
       local basic_path = pack_get_plug_path('basic')
-      local stash_list = system_sync({ 'git', 'stash', 'list' }, { cwd = basic_path }).stdout or ''
+      local stash_list = n.system_sync({ 'git', 'stash', 'list' }, { cwd = basic_path }).stdout
+        or ''
       eq('', stash_list)
     end)
 
@@ -632,10 +703,13 @@ describe('vim.pack', function()
       mock_confirm(1)
       -- Should use revision from lockfile (pointing at latest 'feat-branch'
       -- commit) and not use latest `main` commit. Although should report
-      -- `version = 'main'` inside event data to preserve user input as much as possible.
+      -- `version = 'main'` inside event data and write it to the lockfile as
+      -- to preserve user input as much as possible.
       -- Should also preserve `data` field in event data.
       vim_pack_add({ { src = repos_src.basic, version = 'main', data = { 'd' } } })
       pack_assert_content('basic', 'return "basic feat-branch"')
+      ref_lockfile.plugins.basic.version = "'main'"
+      eq(ref_lockfile, get_lock_tbl())
 
       local confirm_log = exec_lua('return _G.confirm_log')
       eq(1, #confirm_log)
@@ -671,6 +745,13 @@ describe('vim.pack', function()
       pcall_err(vim_pack_add, { repos_src.basic, 1 })
       eq(true, pack_exists('basic'))
       eq(true, pack_exists('defbranch'))
+
+      -- Direct install from the lockfile should not write to it
+      n.rmdir(pack_get_dir())
+      n.clear()
+      local lockfile_fs_stat = vim.uv.fs_stat(get_lock_path())
+      vim_pack_add({})
+      eq(lockfile_fs_stat, vim.uv.fs_stat(get_lock_path()))
     end)
 
     it('handles lockfile during install errors', function()
@@ -775,6 +856,29 @@ describe('vim.pack', function()
       assert()
     end)
 
+    it("respects 'packlockfile'", function()
+      local other_lock_path = get_other_lock_path()
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+      exec_lua(function()
+        vim.pack.add({ repos_src.basic })
+      end)
+      local ref_lockfile = {
+        plugins = {
+          basic = { rev = git_get_hash('main', 'basic'), src = repos_src.basic },
+        },
+      }
+      eq(ref_lockfile, vim.json.decode(fn.readblob(other_lock_path)))
+      eq(false, vim.uv.fs_stat(get_lock_path()) ~= nil)
+
+      n.clear()
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+      exec_lua(function()
+        vim.pack.add({ { src = repos_src.basic, version = 'feat-branch' } })
+      end)
+      ref_lockfile.plugins.basic.version = "'feat-branch'"
+      eq(ref_lockfile, vim.json.decode(fn.readblob(other_lock_path)))
+    end)
+
     it('removes unrepairable corrupted data and plugins', function()
       vim_pack_add({ repos_src.basic, repos_src.defbranch, repos_src.semver, repos_src.helptags })
 
@@ -821,7 +925,7 @@ describe('vim.pack', function()
 
       eq('basic feat-branch', out)
 
-      local rtp = vim.tbl_map(t.fix_slashes, api.nvim_list_runtime_paths())
+      local rtp = api.nvim_list_runtime_paths()
       local plug_path = pack_get_plug_path('basic')
       local after_dir = vim.fs.joinpath(plug_path, 'after')
       eq(true, vim.tbl_contains(rtp, plug_path))
@@ -926,6 +1030,30 @@ describe('vim.pack', function()
       })
     end)
 
+    it('sources relevant manifest scripts', function()
+      watch_events({ 'PackChangedPre', 'PackChanged' })
+      track_nvim_echo()
+      local cwd = fn.getcwd()
+      exec_lua(function()
+        vim.pack.add({ repos_src.manifest }, { load = function() end })
+      end)
+
+      -- Should not have side effects after executing script in special context
+      eq(cwd, fn.getcwd())
+      local plug_path = pack_get_plug_path('manifest')
+      eq(false, vim.tbl_contains(api.nvim_list_runtime_paths(), plug_path))
+
+      -- Should execute script in special context after triggering events
+      assert_manifest_scripts(plug_path, {
+        { event = 'PackChangedPre', kind = 'install' },
+        { event = 'PackChanged', kind = 'install' },
+        { event = 'script', kind = 'install', cwd = plug_path, rtp_has_plug = true },
+      })
+
+      -- Should warn on errors during script execution
+      eq(true, is_in_echo_log('Error in install script', 'WarningMsg'))
+    end)
+
     it('recognizes several `version` types', function()
       local prev_commit = git_get_hash('HEAD~', 'defbranch')
       exec_lua(function()
@@ -960,7 +1088,7 @@ describe('vim.pack', function()
         eq(ref, out)
 
         -- Should add necessary directories to runtimepath regardless of `opts.load`
-        local rtp = vim.tbl_map(t.fix_slashes, api.nvim_list_runtime_paths())
+        local rtp = api.nvim_list_runtime_paths()
         local plug_path = pack_get_plug_path('plugin % dirs')
         local after_dir = vim.fs.joinpath(plug_path, 'after')
         eq(true, vim.tbl_contains(rtp, plug_path))
@@ -1093,12 +1221,16 @@ describe('vim.pack', function()
     it('is not affected by special environment variables', function()
       fn.setenv('GIT_WORK_TREE', t.paths.test_source_path)
       fn.setenv('GIT_DIR', vim.fs.joinpath(t.paths.test_source_path, '.git'))
+      local index_path = vim.fs.joinpath(repo_get_path('defbranch'), '.git', 'index')
+      local index = fn.readblob(index_path)
+      fn.setenv('GIT_INDEX_FILE', index_path)
       local ref_environ = fn.environ()
 
       vim_pack_add({ repos_src.basic })
       eq('basic main', exec_lua('return require("basic")'))
 
       eq(ref_environ, fn.environ())
+      eq(index, fn.readblob(index_path))
     end)
 
     it('validates input', function()
@@ -1162,6 +1294,13 @@ describe('vim.pack', function()
       })
       n.clear()
 
+      -- Pin git's short-hash length so the confirmation buffer's `%h` columns are deterministic.
+      exec_lua([[
+        vim.env.GIT_CONFIG_COUNT = '1'
+        vim.env.GIT_CONFIG_KEY_0 = 'core.abbrev'
+        vim.env.GIT_CONFIG_VALUE_0 = '7'
+      ]])
+
       -- Mock remote repo update
       -- - Force push
       repo_write_file('fetch', 'lua/fetch.lua', 'return "fetch new"')
@@ -1204,13 +1343,13 @@ describe('vim.pack', function()
         -- Buffer should be special and shown in a separate tabpage
         eq(2, #api.nvim_list_tabpages())
         eq(2, fn.tabpagenr())
-        eq(api.nvim_get_option_value('filetype', {}), 'nvim-pack')
-        eq(api.nvim_get_option_value('modifiable', {}), false)
-        eq(api.nvim_get_option_value('buftype', {}), 'acwrite')
+        eq('nvim-pack', api.nvim_get_option_value('filetype', {}))
+        eq(false, api.nvim_get_option_value('modifiable', {}))
+        eq('acwrite', api.nvim_get_option_value('buftype', {}))
         local confirm_bufnr = api.nvim_get_current_buf()
         local confirm_winnr = api.nvim_get_current_win()
         local confirm_tabpage = api.nvim_get_current_tabpage()
-        eq(api.nvim_buf_get_name(0), 'nvim-pack://confirm#' .. confirm_bufnr)
+        eq('nvim-pack://confirm#' .. confirm_bufnr, api.nvim_buf_get_name(0))
 
         -- Adjust lines for a more robust screenshot testing
         local fetch_src = repos_src.fetch
@@ -1451,10 +1590,10 @@ describe('vim.pack', function()
 
         local fetch_src = repos_src.fetch
         local fetch_path = pack_get_plug_path('fetch')
-        local fetch_path_uri = vim.uri_from_fname(fetch_path)
+        local fetch_path_uri = vim.uri.from_fname(fetch_path)
         local semver_src = repos_src.semver
         local semver_path = pack_get_plug_path('semver')
-        local semver_path_uri = vim.uri_from_fname(semver_path)
+        local semver_path_uri = vim.uri.from_fname(semver_path)
 
         -- With `file://` sources it can only return "Path:" and "Source:" links
         local ref_file_links = {
@@ -1497,24 +1636,14 @@ describe('vim.pack', function()
         -- textDocument/documentSymbol
         exec_lua('vim.pack.update()')
         exec_lua('vim.lsp.buf.document_symbol()')
-        local loclist = vim.tbl_map(function(x) --- @param x table
-          return {
-            lnum = x.lnum, --- @type integer
-            col = x.col, --- @type integer
-            end_lnum = x.end_lnum, --- @type integer
-            end_col = x.end_col, --- @type integer
-            text = x.text, --- @type string
-          }
-        end, fn.getloclist(0))
-        local ref_loclist = {
+        eq_partial({
           { lnum = 1, col = 1, end_lnum = 9, end_col = 1, text = '[Namespace] Error' },
           { lnum = 3, col = 1, end_lnum = 9, end_col = 1, text = '[Module] defbranch' },
           { lnum = 9, col = 1, end_lnum = 22, end_col = 1, text = '[Namespace] Update' },
           { lnum = 11, col = 1, end_lnum = 22, end_col = 1, text = '[Module] fetch' },
           { lnum = 22, col = 1, end_lnum = 31, end_col = 1, text = '[Namespace] Same' },
           { lnum = 24, col = 1, end_lnum = 31, end_col = 1, text = '[Module] semver (not active)' },
-        }
-        eq(ref_loclist, loclist)
+        }, fn.getloclist(0))
 
         n.exec('lclose')
 
@@ -1524,6 +1653,7 @@ describe('vim.pack', function()
           -- Should not be affected by special environment variables
           fn.setenv('GIT_WORK_TREE', t.paths.test_source_path)
           fn.setenv('GIT_DIR', vim.fs.joinpath(t.paths.test_source_path, '.git'))
+          fn.setenv('GIT_INDEX_FILE', vim.fs.joinpath(repo_get_path('defbranch'), '.git', 'index'))
           api.nvim_win_set_cursor(0, pos)
           exec_lua(function()
             vim.lsp.buf.hover()
@@ -1546,6 +1676,7 @@ describe('vim.pack', function()
 
           exec_lua('vim.uv.os_unsetenv("GIT_WORK_TREE")')
           exec_lua('vim.uv.os_unsetenv("GIT_DIR")')
+          exec_lua('vim.uv.os_unsetenv("GIT_INDEX_FILE")')
         end
 
         assert_hover({ 14, 0 }, 'Commit from `main` to be removed')
@@ -1692,7 +1823,7 @@ describe('vim.pack', function()
         -- - Can still respect `:write` after action
         n.exec('write')
         eq('vim.pack: Nothing to update', n.exec_capture('1messages'))
-        eq(api.nvim_get_option_value('filetype', {}), '')
+        eq('', api.nvim_get_option_value('filetype', {}))
       end)
 
       it('has buffer-local mappings', function()
@@ -1891,7 +2022,7 @@ describe('vim.pack', function()
       local function assert_origin(ref)
         -- Should be in sync both on disk and in lockfile
         local opts = { cwd = pack_get_plug_path('basic') }
-        local real_origin = system_sync({ 'git', 'remote', 'get-url', 'origin' }, opts)
+        local real_origin = n.system_sync({ 'git', 'remote', 'get-url', 'origin' }, opts)
         eq(ref, vim.trim(real_origin.stdout))
 
         eq(ref, get_lock_tbl().plugins.basic.src)
@@ -1985,6 +2116,40 @@ describe('vim.pack', function()
       })
     end)
 
+    it('sources relevant manifest scripts', function()
+      vim_pack_add({ repos_src.manifest })
+      n.clear()
+
+      exec_lua(function()
+        local specs = { { src = repos_src.manifest, version = 'other-branch' } }
+        vim.pack.add(specs, { load = function() end })
+      end)
+
+      watch_events({ 'PackChangedPre', 'PackChanged' })
+      track_nvim_echo()
+      local cwd = fn.getcwd()
+      exec_lua("vim.pack.update({ 'manifest' }, { force = true })")
+
+      -- Should not have side effects after executing script in special context
+      eq(cwd, fn.getcwd())
+      local plug_path = pack_get_plug_path('manifest')
+      eq(false, vim.tbl_contains(api.nvim_list_runtime_paths(), plug_path))
+
+      -- Should execute script in special context after triggering events
+      assert_manifest_scripts(plug_path, {
+        { event = 'PackChangedPre', kind = 'update' },
+        { event = 'script', kind = 'preupdate', cwd = plug_path, rtp_has_plug = true },
+        { event = 'PackChanged', kind = 'update' },
+        { event = 'script', kind = 'update', cwd = plug_path, rtp_has_plug = true },
+      })
+      -- - Should execute update script as it is *after the update*
+      eq(true, exec_lua('return _G.other_script'))
+
+      -- Should warn on errors during script execution
+      eq(true, is_in_echo_log('Error in preupdate script', 'WarningMsg'))
+      eq(true, is_in_echo_log('Error in update script', 'WarningMsg'))
+    end)
+
     it('stashes before applying changes', function()
       local fetch_lua_file = vim.fs.joinpath(pack_get_plug_path('fetch'), 'lua', 'fetch.lua')
       fn.writefile({ 'A text that will be stashed' }, fetch_lua_file)
@@ -1994,7 +2159,8 @@ describe('vim.pack', function()
       n.exec('write')
 
       local fetch_path = pack_get_plug_path('fetch')
-      local stash_list = system_sync({ 'git', 'stash', 'list' }, { cwd = fetch_path }).stdout or ''
+      local stash_list = n.system_sync({ 'git', 'stash', 'list' }, { cwd = fetch_path }).stdout
+        or ''
       matches('vim%.pack: %d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d Stash before checkout', stash_list)
 
       -- Update should still be applied
@@ -2004,6 +2170,9 @@ describe('vim.pack', function()
     it('is not affected by special environment variables', function()
       fn.setenv('GIT_WORK_TREE', t.paths.test_source_path)
       fn.setenv('GIT_DIR', vim.fs.joinpath(t.paths.test_source_path, '.git'))
+      local index_path = vim.fs.joinpath(repo_get_path('defbranch'), '.git', 'index')
+      local index = fn.readblob(index_path)
+      fn.setenv('GIT_INDEX_FILE', index_path)
       local ref_environ = fn.environ()
 
       vim_pack_add({ repos_src.fetch })
@@ -2011,6 +2180,7 @@ describe('vim.pack', function()
       pack_assert_content('fetch', 'return "fetch new 2"')
 
       eq(ref_environ, fn.environ())
+      eq(index, fn.readblob(index_path))
     end)
 
     it('works with out of sync lockfile', function()
@@ -2037,6 +2207,37 @@ describe('vim.pack', function()
       --   after lockfile is deleted.
       eq(nil, lock_plugins.fetch.version)
       pack_assert_content('fetch', 'return "fetch dev"')
+    end)
+
+    it("respects 'packlockfile'", function()
+      n.rmdir(pack_get_dir())
+      pcall(vim.fs.rm, get_lock_path(), { force = true })
+
+      n.clear()
+      local other_lock_path = get_other_lock_path()
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+
+      exec_lua(function()
+        vim.pack.add({ repos_src.basic })
+      end)
+
+      eq(true, vim.uv.fs_stat(other_lock_path) ~= nil)
+      eq(false, vim.uv.fs_stat(get_lock_path()) ~= nil)
+
+      n.clear()
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+
+      exec_lua(function()
+        vim.pack.add({ { src = repos_src.basic, version = 'feat-branch' } })
+        vim.pack.update({ 'basic' }, { force = true })
+      end)
+      pack_assert_content('basic', 'return "basic feat-branch"')
+      local basic_lock = {
+        rev = git_get_hash('feat-branch', 'basic'),
+        src = repos_src.basic,
+        version = "'feat-branch'",
+      }
+      eq({ plugins = { basic = basic_lock } }, vim.json.decode(fn.readblob(other_lock_path)))
     end)
 
     it('validates input', function()
@@ -2164,6 +2365,21 @@ describe('vim.pack', function()
       )
       eq({ basic_data }, exec_lua('return vim.pack.get({ "basic" }, { info = false })'))
       eq({ defbranch_data }, exec_lua('return vim.pack.get({ "defbranch" }, { info = false })'))
+
+      -- Reports manifest
+      vim_pack_add({ repos_src.manifest })
+      local manifest_tbl = {
+        name = 'plug',
+        description = 'Nvim plugin',
+        engine = { nvim = '>=0.12.0', vim = '>=9.1.0' },
+        scripts = {
+          install = 'scripts/install.lua',
+          preupdate = 'scripts/preupdate.vim',
+          update = 'scripts/update.lua',
+          preuninstall = 'scirpts/preuninstall.vim',
+        },
+      }
+      eq(manifest_tbl, exec_lua('return vim.pack.get({ "manifest" })[1].manifest'))
     end)
 
     it('reports potential revision after update', function()
@@ -2287,6 +2503,23 @@ describe('vim.pack', function()
       eq(2, exec_lua('return #vim.pack.get()'))
       eq(2, vim.tbl_count(get_lock_tbl().plugins))
     end)
+
+    it("respects 'packlockfile'", function()
+      n.rmdir(pack_get_dir())
+      pcall(vim.fs.rm, get_lock_path(), { force = true })
+
+      n.clear()
+      local other_lock_path = get_other_lock_path()
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+
+      exec_lua(function()
+        vim.pack.add({ { src = repos_src.basic, version = 'feat-branch' } })
+      end)
+
+      local basic_data = make_basic_data(true, true)
+      eq({ basic_data }, exec_lua('return vim.pack.get()'))
+      eq(false, vim.uv.fs_stat(get_lock_path()) ~= nil)
+    end)
   end)
 
   describe('del()', function()
@@ -2394,6 +2627,49 @@ describe('vim.pack', function()
       exec_lua('vim.pack.del({ "basic" })')
       eq(1, exec_lua('return #vim.pack.get()'))
       eq({ 'plugindirs' }, vim.tbl_keys(get_lock_tbl().plugins))
+    end)
+
+    it("respects 'packlockfile'", function()
+      n.rmdir(pack_get_dir())
+      pcall(vim.fs.rm, get_lock_path(), { force = true })
+
+      n.clear()
+      local other_lock_path = vim.fs.joinpath(fn.stdpath('data'), 'test-pack-lock')
+      api.nvim_set_option_value('packlockfile', other_lock_path, { scope = 'global' })
+
+      exec_lua(function()
+        vim.pack.add({ repos_src.basic })
+      end)
+
+      exec_lua('vim.pack.del({ "basic" }, { force = true })')
+      eq({ plugins = {} }, vim.json.decode(fn.readblob(other_lock_path)))
+      eq(false, pack_exists('basic'))
+      eq(false, vim.uv.fs_stat(get_lock_path()) ~= nil)
+    end)
+
+    it('sources relevant manifest scripts', function()
+      vim_pack_add({ repos_src.manifest })
+      n.clear()
+
+      watch_events({ 'PackChangedPre', 'PackChanged' })
+      track_nvim_echo()
+      local cwd = fn.getcwd()
+      exec_lua("vim.pack.del({ 'manifest' })")
+
+      -- Should not have side effects after executing script in special context
+      eq(cwd, fn.getcwd())
+      local plug_path = pack_get_plug_path('manifest')
+      eq(false, vim.tbl_contains(api.nvim_list_runtime_paths(), plug_path))
+
+      -- Should execute script in special context after triggering events
+      assert_manifest_scripts(plug_path, {
+        { event = 'PackChangedPre', kind = 'delete' },
+        { event = 'script', kind = 'preuninstall', cwd = plug_path, rtp_has_plug = true },
+        { event = 'PackChanged', kind = 'delete' },
+      })
+
+      -- Should warn on errors during script execution
+      eq(true, is_in_echo_log('Error in preuninstall script', 'WarningMsg'))
     end)
 
     it('validates input', function()

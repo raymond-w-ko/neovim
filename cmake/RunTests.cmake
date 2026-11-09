@@ -9,12 +9,15 @@ else()
 endif()
 
 set(ENV{NVIM_TEST} "1")
+# Test runner should use the runtime from the build, not the system install (if any).
+set(ENV{VIMRUNTIME} ${ROOT_DIR}/runtime)
 # Set LC_ALL to meet expectations of some locale-sensitive tests.
 set(ENV{LC_ALL} "en_US.UTF-8")
 set(TEST_XDG_PREFIX ${BUILD_DIR}/Xtest_xdg${TEST_SUFFIX})
 unset(ENV{XDG_DATA_DIRS})
 unset(ENV{NVIM})  # Clear $NVIM in case tests are running from Nvim. #11009
 unset(ENV{TMUX})  # Nvim TUI shouldn't think it's running in tmux. #34173
+unset(ENV{SSH_CONNECTION})  # Default 'statusline' shouldn't show the hostname.
 
 # Prepare for running tests in ${TEST_XDG_PREFIX}.
 file(MAKE_DIRECTORY ${TEST_XDG_PREFIX})
@@ -94,7 +97,6 @@ execute_process(
   ${EXTRA_ARGS})
 
 file(REMOVE_RECURSE ${TEST_XDG_PREFIX})
-file(REMOVE_RECURSE $ENV{NVIM_RPLUGIN_MANIFEST})
 file(REMOVE_RECURSE $ENV{TMPDIR})
 
 macro(PRINT_NVIM_LOG)

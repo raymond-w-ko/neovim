@@ -4,6 +4,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear, exec, exec_lua, feed = n.clear, n.exec, n.exec_lua, n.feed
 
 describe('cmdline2', function()
@@ -179,7 +180,7 @@ describe('cmdline2', function()
       {1:~                                                    }|*12
       {16::}{15:find} ^                                               |
     ]])
-    t.eq(n.eval('v:errmsg'), "E1514: 'findfunc' did not return a List type")
+    t.eq("E1514: 'findfunc' did not return a List type", n.eval('v:errmsg'))
   end)
 
   it('substitution match, empty message does not clear active cmdline', function()
@@ -200,6 +201,24 @@ describe('cmdline2', function()
     screen:expect_unchanged(true)
   end)
 
+  it('keeps the confirmation match highlighted with nohlsearch #41039', function()
+    exec('call setline(1, "test test") | set nohlsearch')
+    feed('/te<CR>')
+    screen:expect([[
+      test ^test                                            |
+      {1:~                                                    }|*12
+      /te                                                  |
+    ]])
+
+    feed(':%s/te/t/gc<CR>')
+    screen:expect([[
+      {2:te}st test                                            |
+      {1:~                                                    }|*11
+      {6:replace with t? (y)es/(n)o/(a)ll/(q)uit/(l)ast/scroll}|
+      {6: up(^E)/down(^Y)}^                                     |
+    ]])
+  end)
+
   it('dialog position is adjusted for toggled non-pum wildmenu', function()
     exec([[
       set wildmode=list:full,full wildoptions-=pum
@@ -209,15 +228,6 @@ describe('cmdline2', function()
       endf
     ]])
     feed(':call Fo<C-Z>')
-    screen:expect([[
-                                                           |
-      {1:~                                                    }|*9
-      {3:                                                     }|
-      Foo()   Fooo()                                       |
-                                                           |
-      {16::}{15:call} Fo^                                             |
-    ]])
-    feed('<C-Z>')
     screen:expect([[
                                                            |
       {1:~                                                    }|*8
@@ -237,7 +247,7 @@ describe('cmdline2', function()
                                                            |
       {16::}{15:call} Foo^                                            |
     ]])
-    feed('<C-Z><C-Z>')
+    feed('<C-Z>')
     screen:expect([[
                                                            |
       {1:~                                                    }|*9
@@ -286,6 +296,22 @@ describe('cmdline2', function()
     ]])
   end)
 
+  it('is empty after backspace', function()
+    feed(':')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*12
+      {16::}^                                                    |
+    ]])
+
+    feed('<BS>')
+    screen:expect([[
+      ^                                                     |
+      {1:~                                                    }|*12
+                                                           |
+    ]])
+  end)
+
   it('matchparen highlights', function()
     exec('source $VIMRUNTIME/plugin/matchparen.lua')
     feed(':call foo(bar())')
@@ -306,6 +332,16 @@ describe('cmdline2', function()
       {1:~                                                    }|*12
       {16::}{15:call} {25:foo}{16:(}{25:bar}{16:(}^                                       |
     ]])
+  end)
+
+  it("doesn't interfere with :$q", function()
+    exec('split b')
+    exec('wincmd J')
+    exec('wincmd p')
+    exec('$q') -- this would close a ui2 window, not the second visible window
+
+    local nwins = vim.fn.winnr('$')
+    assert(nwins == 1)
   end)
 end)
 

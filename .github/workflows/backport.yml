@@ -14,13 +14,13 @@ jobs:
     if: github.event.pull_request.merged
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: true
           # Check out the merged-into base branch by name. Without an explicit
           # ref, checkout resolves to the base tip SHA, which for a _merged_ PR
           # equals pull_request.merge_commit_sha and trips the
-          # actions/checkout@v7 `allow-unsafe-pr-checkout` guard (false
+          # actions/checkout@v7.0.1 `allow-unsafe-pr-checkout` guard (false
           # positive: this is trusted base code, not fork PR code).
           ref: ${{ github.event.pull_request.base.ref }}
 
@@ -32,7 +32,7 @@ jobs:
 
       - name: Create backport PR
         id: backport
-        uses: korthout/backport-action@2e830a1d0b8269505846ddd407a70876913ad1f8 # v4.6.0
+        uses: korthout/backport-action@8560fb503c275d433c56f05a2f64850093baa9f7 # v4.7.0
         with:
           pull_title: "backport: ${pull_title}"
           label_pattern: "^ci:backport ([^ ]+)$"

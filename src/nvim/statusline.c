@@ -13,6 +13,7 @@
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/context.h"
 #include "nvim/digraph.h"
 #include "nvim/drawline.h"
 #include "nvim/drawscreen.h"
@@ -90,14 +91,22 @@ void win_redr_status(win_T *wp)
 
   busy = true;
   wp->w_redr_status = false;
-  if (wp->w_status_height == 0 && !(is_stl_global && wp == curwin)) {
+
+  // curwin may be temporarily switched during autocmds (ctx_switch).
+  win_T *stl_curwin = ctx_saved_curwin();
+  if (stl_curwin == NULL) {
+    stl_curwin = curwin;
+  }
+  bool is_stl_curwin = wp == stl_curwin;
+
+  if (wp->w_status_height == 0 && !(is_stl_global && is_stl_curwin)) {
     // no status line, either global statusline is enabled or the window is a last window
     redraw_cmdline = true;
   } else if (!redrawing()) {
     // Don't redraw right now, do it later. Don't update status line when
     // popup menu is visible and may be drawn over it
     wp->w_redr_status = true;
-  } else if (*wp->w_p_stl != NUL || !wp->w_floating || (is_stl_global && wp == curwin)) {
+  } else if (*wp->w_p_stl != NUL || !wp->w_floating || (is_stl_global && is_stl_curwin)) {
     win_redr_stl_expr(wp, false, false, false);
   }
 
@@ -238,7 +247,7 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
   OptIndex opt_idx = kOptInvalid;
   int opt_scope = 0;
   stl_hlrec_t *hltab;
-  StlClickRecord *tabtab;
+  StlClickDefinition *click_defs;
   bool is_stl_global = global_stl_height() > 0;
 
   ScreenGrid *grid = wp && wp->w_floating && !is_stl_global ? &wp->w_grid_alloc : &default_grid;
@@ -256,7 +265,7 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
   entered = true;
 
   // Restore actual curwin before redrawing.
-  win_T *save_curwin = autocmd_save_curwin ? win_find_by_handle(autocmd_save_curwin) : NULL;
+  win_T *save_curwin = ctx_saved_curwin();
   win_T *restore_curwin = save_curwin != NULL ? curwin : NULL;
   if (save_curwin != NULL) {
     curwin = save_curwin;
@@ -273,6 +282,7 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
     attr = HL_ATTR(group);
     maxwidth = Columns;
     opt_idx = kOptTabline;
+    click_defs = tab_page_click_defs;
   } else if (draw_winbar) {
     opt_idx = kOptWinbar;
     stl = ((*wp->w_p_wbr != NUL) ? wp->w_p_wbr : p_wbr);
@@ -292,57 +302,66 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
     stl_clear_click_defs(wp->w_winbar_click_defs, wp->w_winbar_click_defs_size);
     wp->w_winbar_click_defs = stl_alloc_click_defs(wp->w_winbar_click_defs, maxwidth,
                                                    &wp->w_winbar_click_defs_size);
+    click_defs = wp->w_winbar_click_defs;
+  } else if (draw_ruler && ui_event) {
+    stl = p_ruf;
+    opt_idx = kOptRulerformat;
+    maxwidth = Columns / 2;
+    fillchar = schar_from_ascii(' ');
+    group = HLF_MSG;
+    attr = HL_ATTR(group);
+    click_defs = NULL;
+  } else if (draw_ruler) {
+    stl = p_ruf;
+    opt_idx = kOptRulerformat;
+    // advance past any leading group spec - implicit in ru_col
+    if (*stl == '%') {
+      if (*++stl == '-') {
+        stl++;
+      }
+      if (atoi(stl)) {
+        while (ascii_isdigit(*stl)) {
+          stl++;
+        }
+      }
+      if (*stl++ != '(') {
+        stl = p_ruf;
+      }
+    }
+    row = Rows - 1;
+    col = MAX(ru_col, Columns / 2);
+    grid = grid_adjust(&msg_grid_adj, &row, &col);
+    maxwidth = Columns - col;
+    fillchar = schar_from_ascii(' ');
+    group = HLF_MSG;
+    attr = HL_ATTR(group);
+    click_defs = NULL;
   } else {
-    const bool in_status_line = wp->w_status_height != 0 || is_stl_global;
-    if (wp->w_floating && !is_stl_global && !draw_ruler) {
+    // statusline
+    stl = ((*wp->w_p_stl != NUL) ? wp->w_p_stl : p_stl);
+    opt_idx = kOptStatusline;
+    opt_scope = ((*wp->w_p_stl != NUL) ? OPT_LOCAL : 0);
+    if (is_stl_global) {
+      row = Rows - (int)p_ch - 1;
+      col = 0;
+      maxwidth = Columns;
+    } else if (wp->w_status_height == 0) {
+      goto theend;
+    } else if (wp->w_floating) {
       row = wp->w_winrow_off + wp->w_view_height;
       col = wp->w_wincol_off;
       maxwidth = wp->w_view_width;
     } else {
-      row = is_stl_global ? (Rows - (int)p_ch - 1) : W_ENDROW(wp);
-      maxwidth = in_status_line && !is_stl_global ? wp->w_width : Columns;
+      row = W_ENDROW(wp);
+      col = wp->w_wincol;
+      maxwidth = wp->w_width;
     }
     fillchar = fillchar_status(&group, wp);
+    attr = win_hl_attr(wp, (int)group);
     stl_clear_click_defs(wp->w_status_click_defs, wp->w_status_click_defs_size);
     wp->w_status_click_defs = stl_alloc_click_defs(wp->w_status_click_defs, maxwidth,
                                                    &wp->w_status_click_defs_size);
-
-    if (draw_ruler) {
-      stl = p_ruf;
-      opt_idx = kOptRulerformat;
-      // advance past any leading group spec - implicit in ru_col
-      if (*stl == '%') {
-        if (*++stl == '-') {
-          stl++;
-        }
-        if (atoi(stl)) {
-          while (ascii_isdigit(*stl)) {
-            stl++;
-          }
-        }
-        if (*stl++ != '(') {
-          stl = p_ruf;
-        }
-      }
-      col = MAX(ru_col - (Columns - maxwidth), (maxwidth + 1) / 2);
-      maxwidth -= col;
-      if (!in_status_line) {
-        row = Rows - 1;
-        grid = grid_adjust(&msg_grid_adj, &row, &col);
-        maxwidth--;  // writing in last column may cause scrolling
-        fillchar = schar_from_ascii(' ');
-        group = HLF_MSG;
-      }
-    } else {
-      opt_idx = kOptStatusline;
-      stl = ((*wp->w_p_stl != NUL) ? wp->w_p_stl : p_stl);
-      opt_scope = ((*wp->w_p_stl != NUL) ? OPT_LOCAL : 0);
-    }
-
-    attr = win_hl_attr(wp, (int)group);
-    if (!wp->w_floating && in_status_line && !is_stl_global) {
-      col += wp->w_wincol;
-    }
+    click_defs = wp->w_status_click_defs;
   }
 
   if (maxwidth <= 0) {
@@ -358,8 +377,11 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
   // Make a copy, because the statusline may include a function call that
   // might change the option value and free the memory.
   stl = xstrdup(stl);
-  build_stl_str_hl(ewp, buf, sizeof(buf), stl, opt_idx, opt_scope,
-                   fillchar, maxwidth, &hltab, NULL, &tabtab, NULL);
+
+  StlClickRecord *tabtab = NULL;
+  build_stl_str_hl(ewp, (CharBuf){ buf, sizeof(buf) }, stl, opt_idx, opt_scope,
+                   fillchar, maxwidth, &hltab, NULL, click_defs ? &tabtab : NULL, NULL);
+  stl_fill_click_defs(click_defs, tabtab, buf, maxwidth, wp == NULL);
 
   xfree(stl);
   ewp->w_p_crb = p_crb_save;
@@ -417,6 +439,10 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
     }
   }
 
+  if (p_sc && find_option(p_sloc) == opt_idx) {
+    showcmd_update_clear_state();
+  }
+
   if (ui_event) {
     ui_call_msg_ruler(content);
     did_show_ext_ruler = true;
@@ -429,14 +455,6 @@ static void win_redr_stl_expr(win_T *wp, bool draw_winbar, bool draw_ruler, bool
   // fill up with "fillchar"
   grid_line_fill(col, maxcol, fillchar, curattr);
   grid_line_flush();
-
-  // Fill the tab_page_click_defs, w_status_click_defs or w_winbar_click_defs array for clicking
-  // in the tab page line, status line or window bar
-  StlClickDefinition *click_defs = (wp == NULL) ? tab_page_click_defs
-                                                : draw_winbar ? wp->w_winbar_click_defs
-                                                              : wp->w_status_click_defs;
-
-  stl_fill_click_defs(click_defs, tabtab, buf, maxwidth, wp == NULL);
 
 theend:
   entered = false;
@@ -469,22 +487,21 @@ void win_redr_winbar(win_T *wp)
 
 void redraw_ruler(void)
 {
-  static int did_ruler_col = -1;
+  static bool did_show_ruler = false;
   win_T *wp = !curwin->w_config.hide
               && curwin->w_status_height == 0 ? curwin : lastwin_nofloating(NULL);
   bool is_stl_global = global_stl_height() > 0;
 
   // Check if ruler should be drawn, clear if it was drawn before.
-  if (!p_ru || wp->w_status_height > 0 || is_stl_global || (p_ch == 0 && !ui_has(kUIMessages))) {
+  bool part_of_status = wp->w_status_height != 0 || is_stl_global;
+  if (!p_ru || part_of_status || (p_ch == 0 && !ui_has(kUIMessages))) {
     if (did_show_ext_ruler && ui_has(kUIMessages)) {
       ui_call_msg_ruler((Array)ARRAY_DICT_INIT);
       did_show_ext_ruler = false;
-    } else if (did_ruler_col > 0) {
-      msg_col = did_ruler_col;
-      msg_row = Rows - 1;
+    } else if (did_show_ruler && !ui_has(kUIMessages)) {
       msg_clr_eos();
     }
-    did_ruler_col = -1;
+    did_show_ruler = false;
     return;
   }
 
@@ -500,103 +517,8 @@ void redraw_ruler(void)
     return;
   }
 
-  bool part_of_status = wp->w_status_height || is_stl_global;
-  if (*p_ruf && (p_ch > 0 || (ui_has(kUIMessages) && !part_of_status))) {
-    win_redr_stl_expr(wp, false, true, ui_has(kUIMessages));
-    return;
-  }
-
-  hlf_T group = HLF_MSG;
-  int off = wp->w_status_height ? wp->w_wincol : 0;
-  int width = wp->w_status_height ? wp->w_width : Columns;
-  schar_T fillchar = part_of_status ? fillchar_status(&group, wp) : schar_from_ascii(' ');
-  int attr = part_of_status ? win_hl_attr(wp, (int)group) : HL_ATTR(group);
-
-  // In list mode virtcol needs to be recomputed
-  colnr_T virtcol = wp->w_virtcol;
-  if (wp->w_p_list && wp->w_p_lcs_chars.tab1 == NUL) {
-    wp->w_p_list = false;
-    getvvcol(wp, &wp->w_cursor, NULL, &virtcol, NULL, 0);
-    wp->w_p_list = true;
-  }
-
-  // Check if not in Insert mode and the line is empty (will show "0-1").
-  int empty_line = (State & MODE_INSERT) == 0
-                   && *ml_get_buf(wp->w_buffer, wp->w_cursor.lnum) == NUL;
-
-#define RULER_BUF_LEN 70
-  char buffer[RULER_BUF_LEN];
-
-  // row number, column number is appended
-  // l10n: leave as-is unless a space after the comma is preferred
-  // l10n: do not add any row/column label, due to the limited space
-  int bufferlen = vim_snprintf(buffer, RULER_BUF_LEN, _("%" PRId64 ","),
-                               (wp->w_buffer->b_ml.ml_flags & ML_EMPTY)
-                               ? 0
-                               : (int64_t)wp->w_cursor.lnum);
-  bufferlen += col_print(buffer + bufferlen, RULER_BUF_LEN - (size_t)bufferlen,
-                         empty_line ? 0 : (int)wp->w_cursor.col + 1,
-                         (int)virtcol + 1);
-
-  // Add a "50%" if there is room for it.
-  // On the last line, don't print in the last column (scrolls the
-  // screen up on some terminals).
-  char rel_pos[RULER_BUF_LEN];
-  int rel_poslen = get_rel_pos(wp, rel_pos, RULER_BUF_LEN);
-  int n1 = bufferlen + vim_strsize(rel_pos);
-  if (wp->w_status_height == 0 && !is_stl_global) {  // can't use last char of screen
-    n1++;
-  }
-
-  int this_ru_col = ru_col - (Columns - width);
-  // Never use more than half the window/screen width, leave the other half
-  // for the filename.
-  int n2 = (width + 1) / 2;
-  this_ru_col = MAX(this_ru_col, n2);
-  if (this_ru_col + n1 < width) {
-    // need at least space for rel_pos + NUL
-    while (this_ru_col + n1 < width
-           && RULER_BUF_LEN > bufferlen + rel_poslen + 1) {  // +1 for NUL
-      bufferlen += (int)schar_get(buffer + bufferlen, fillchar);
-      n1++;
-    }
-    bufferlen += vim_snprintf(buffer + bufferlen, RULER_BUF_LEN - (size_t)bufferlen,
-                              "%s", rel_pos);
-  }
-  (void)bufferlen;
-
-  if (ui_has(kUIMessages) && !part_of_status) {
-    MAXSIZE_TEMP_ARRAY(content, 1);
-    MAXSIZE_TEMP_ARRAY(chunk, 3);
-    ADD_C(chunk, INTEGER_OBJ(attr));
-    ADD_C(chunk, CSTR_AS_OBJ(buffer));
-    ADD_C(chunk, INTEGER_OBJ(HLF_MSG));
-    assert(attr == HL_ATTR(HLF_MSG));
-    ADD_C(content, ARRAY_OBJ(chunk));
-    ui_call_msg_ruler(content);
-    did_show_ext_ruler = true;
-    did_ruler_col = 1;
-  } else {
-    if (did_show_ext_ruler) {
-      ui_call_msg_ruler((Array)ARRAY_DICT_INIT);
-      did_show_ext_ruler = false;
-    }
-    // Truncate at window boundary.
-    for (n1 = 0, n2 = 0; buffer[n1] != NUL; n1 += utfc_ptr2len(buffer + n1)) {
-      n2 += utf_ptr2cells(buffer + n1);
-      if (this_ru_col + n2 > width) {
-        bufferlen = n1;
-        buffer[bufferlen] = NUL;
-        break;
-      }
-    }
-
-    grid_line_start(&msg_grid_adj, Rows - 1);
-    did_ruler_col = off + this_ru_col;
-    int w = grid_line_puts(did_ruler_col, buffer, -1, attr);
-    grid_line_fill(did_ruler_col + w, off + width, fillchar, attr);
-    grid_line_flush();
-  }
+  win_redr_stl_expr(wp, false, true, ui_has(kUIMessages));
+  did_show_ruler = !ui_has(kUIMessages);
 }
 
 /// Get the character to use in a status line.  Get its attributes in "*attr".
@@ -661,8 +583,8 @@ static void ui_ext_tabline_update(void)
 void draw_tabline(void)
 {
   win_T *wp;
-  int attr_nosel = HL_ATTR(HLF_TP);
   int attr_fill = HL_ATTR(HLF_TPF);
+  int attr_nosel = hl_combine_attr(attr_fill, HL_ATTR(HLF_TP));
   bool use_sep_chars = (t_colors < 8);
 
   if (default_grid.chars == NULL) {
@@ -717,14 +639,14 @@ void draw_tabline(void)
       }
 
       if (tp->tp_topframe == topframe) {
-        attr = win_hl_attr(cwp, HLF_TPS);
+        attr = hl_combine_attr(attr_fill, win_hl_attr(cwp, HLF_TPS));
       }
       if (use_sep_chars && col > 0) {
         grid_line_put_schar(col++, schar_from_ascii('|'), attr);
       }
 
       if (tp->tp_topframe != topframe) {
-        attr = win_hl_attr(cwp, HLF_TP);
+        attr = hl_combine_attr(attr_fill, win_hl_attr(cwp, HLF_TP));
       }
 
       grid_line_put_schar(col++, schar_from_ascii(' '), attr);
@@ -732,7 +654,7 @@ void draw_tabline(void)
       bool modified = false;
 
       for (wincount = 0; wp != NULL; wp = wp->w_next, wincount++) {
-        if (!wp->w_config.focusable || wp->w_config.hide) {
+        if (!win_is_focusable(wp)) {
           wincount--;
         } else if (bufIsChanged(wp->w_buffer)) {
           modified = true;
@@ -808,6 +730,7 @@ void draw_tabline(void)
         grid_line_puts(Columns - sc_width - (tabcount > 1) * 2,
                        showcmd_buf, sc_width, attr_nosel);
       }
+      showcmd_update_clear_state();
     }
 
     // Put an "X" for closing the current tab if there are several.
@@ -832,7 +755,7 @@ void draw_tabline(void)
 /// the v:lnum and v:relnum variables don't have to be updated.
 ///
 /// @return  The width of the built status column string for line "lnum"
-int build_statuscol_str(win_T *wp, linenr_T lnum, int relnum, int virtnum, char *buf,
+int build_statuscol_str(win_T *wp, linenr_T lnum, int relnum, int virtnum, CharBuf buf,
                         statuscol_T *stcp)
 {
   if (relnum >= 0) {
@@ -843,7 +766,7 @@ int build_statuscol_str(win_T *wp, linenr_T lnum, int relnum, int virtnum, char 
 
   StlClickRecord *clickrec;
   char *stc = xstrdup(wp->w_p_stc);
-  int width = build_stl_str_hl(wp, buf, MAXPATHL, stc, kOptStatuscolumn, OPT_LOCAL, 0,
+  int width = build_stl_str_hl(wp, buf, stc, kOptStatuscolumn, OPT_LOCAL, 0,
                                stcp->width, &stcp->hlrec, NULL, &clickrec, stcp);
   xfree(stc);
 
@@ -852,7 +775,7 @@ int build_statuscol_str(win_T *wp, linenr_T lnum, int relnum, int virtnum, char 
     StcClick *click_defs = map_put_ref(int, StcClick)(clicks, virtnum, NULL, NULL);
     stl_clear_click_defs(click_defs->def, click_defs->size);
     click_defs->def = stl_alloc_click_defs(click_defs->def, width, &click_defs->size);
-    stl_fill_click_defs(click_defs->def, clickrec, buf, width, false);
+    stl_fill_click_defs(click_defs->def, clickrec, buf.data, width, false);
   }
 
   return width;
@@ -1000,12 +923,8 @@ static void stl_expand(int *width, int target_width, StlPadding padding, int rem
                        char *start_p, char **out_p)
 {
   int fillchar_bytes = (int)schar_len(fillchar);
-  int added_cells = target_width - *width;
+  int added_cells = MIN(target_width - *width, remaining_capacity / fillchar_bytes);
   int added_bytes = added_cells * fillchar_bytes;
-  if (added_bytes > remaining_capacity) {
-    added_cells = remaining_capacity / fillchar_bytes;
-    added_bytes = added_cells * fillchar_bytes;
-  }
 
   // First, try to expand at separation markers %=.
   int num_separators = 0;
@@ -1083,7 +1002,6 @@ static void stl_expand(int *width, int target_width, StlPadding padding, int rem
 /// @param wp  The window to build a statusline for
 /// @param out  The output buffer to write the statusline to
 ///             Note: This should not be NameBuff
-/// @param outlen  The length of the output buffer
 /// @param fmt  The statusline format string
 /// @param opt_idx  Index of the option corresponding to "fmt"
 /// @param opt_scope  The scope corresponding to "opt_idx"
@@ -1094,9 +1012,9 @@ static void stl_expand(int *width, int target_width, StlPadding padding, int rem
 /// @param stcp  Status column attributes (can be NULL)
 ///
 /// @return  The final width of the statusline
-int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex opt_idx,
-                     int opt_scope, schar_T fillchar, int maxwidth, stl_hlrec_t **hltab,
-                     size_t *hltab_len, StlClickRecord **tabtab, statuscol_T *stcp)
+int build_stl_str_hl(win_T *wp, CharBuf out, char *fmt, OptIndex opt_idx, int opt_scope,
+                     schar_T fillchar, int maxwidth, stl_hlrec_t **hltab, size_t *hltab_len,
+                     StlClickRecord **tabtab, statuscol_T *stcp)
 {
   static size_t stl_items_len = 20;  // Initial value, grows as needed.
   static stl_item_t *stl_items = NULL;
@@ -1187,6 +1105,8 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
   int groupdepth = 0;
   int evaldepth = 0;
 
+  int curr_hl_pos = -1;
+
   // nvim_eval_statusline() can be called from inside a {-expression item so
   // this may be a recursive call. Keep track of the start index into "stl_items".
   // During post-processing only treat items filled in a certain recursion level.
@@ -1196,26 +1116,29 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
   bool prevchar_isitem = false;
 
   // out_p is the current position in the output buffer
-  char *out_p = out;
+  char *out_p = out.data;
 
   // out_end_p is the last valid character in the output buffer
   // Note: The null termination character must occur here or earlier,
   //       so any user-visible characters must occur before here.
-  char *out_end_p = (out + outlen) - 1;
+  char *out_end_p = (out.data + out.size) - 1;
+
+#define MAY_GROW_STL_ITEMS_LEN() \
+  do { \
+    if (curitem == (int)stl_items_len) { \
+      size_t new_len = stl_items_len * 3 / 2; \
+      stl_items = xrealloc(stl_items, sizeof(stl_item_t) * new_len); \
+      stl_groupitems = xrealloc(stl_groupitems, sizeof(int) * new_len); \
+      stl_hltab = xrealloc(stl_hltab, sizeof(stl_hlrec_t) * (new_len + 1)); \
+      stl_tabtab = xrealloc(stl_tabtab, sizeof(StlClickRecord) * (new_len + 1)); \
+      stl_items_len = new_len; \
+    } \
+  } while (0)
 
   // Proceed character by character through the statusline format string
   // fmt_p is the current position in the input buffer
   for (char *fmt_p = usefmt; *fmt_p != NUL;) {
-    if (curitem == (int)stl_items_len) {
-      size_t new_len = stl_items_len * 3 / 2;
-
-      stl_items = xrealloc(stl_items, sizeof(stl_item_t) * new_len);
-      stl_groupitems = xrealloc(stl_groupitems, sizeof(int) * new_len);
-      stl_hltab = xrealloc(stl_hltab, sizeof(stl_hlrec_t) * (new_len + 1));
-      stl_tabtab = xrealloc(stl_tabtab, sizeof(StlClickRecord) * (new_len + 1));
-
-      stl_items_len = new_len;
-    }
+    MAY_GROW_STL_ITEMS_LEN();
 
     if (*fmt_p != '%') {
       prevchar_isflag = prevchar_isitem = false;
@@ -1276,6 +1199,10 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
         continue;
       }
       groupdepth--;
+      if (stl_items[stl_groupitems[groupdepth]].type != Group) {
+        // it's possible to break assumptions with %{%...%}, which doesn't check syntax
+        continue;
+      }
 
       // Determine how long the group is.
       // Note: We set the current output position to null
@@ -1318,7 +1245,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
           for (n = stl_groupitems[groupdepth] + 1; n < curitem; n++) {
             // do not use the highlighting from the removed group
             if (stl_items[n].type == Highlight || stl_items[n].type == HighlightCombining) {
-              stl_items[n].type = Empty;
+              stl_items[n].type = Disabled;
             }
             // adjust the start position of TabPage to the next
             // item position
@@ -1350,7 +1277,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
       // Deactivate separation/truncation markers for wrapping item groups and top-level.
       for (int n = stl_groupitems[groupdepth] + 1; n < curitem; n++) {
         if (stl_items[n].type == Separate || stl_items[n].type == Trunc) {
-          stl_items[n].type = Empty;
+          stl_items[n].type = Disabled;
         }
       }
 
@@ -1384,6 +1311,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
     // User highlight groups override the min width field
     // to denote the styling to use.
     if (*fmt_p == STL_USER_HL) {
+      curr_hl_pos = curitem;
       stl_items[curitem].type = Highlight;
       stl_items[curitem].start = out_p;
       stl_items[curitem].minwid = minwid > 9 ? 1 : minwid;
@@ -1455,12 +1383,14 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
       fmt_p++;
       if (ascii_isdigit(*fmt_p)) {
         maxwid = getdigits_int(&fmt_p, false, 50);
+        if (maxwid <= 0) {  // overflow or an explicit zero
+          maxwid = 50;
+        }
       }
     }
 
-    // Bound the minimum width at 50.
     // Make the number negative to denote left alignment of the item
-    minwid = (minwid > 50 ? 50 : minwid) * (left_align ? -1 : 1);
+    minwid *= left_align ? -1 : 1;
 
     // Denotes the start of a new group
     if (*fmt_p == '(') {
@@ -1474,11 +1404,70 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
       continue;
     }
 
-    // Denotes end of expanded %{} block
+    // Denotes end of an expanded %{%...%} block
     if (*fmt_p == '}' && evaldepth > 0) {
       fmt_p++;
       evaldepth--;
+      if (groupdepth > 0) {
+        // Look for normal items since the last %{%.
+        // If we find a %{% before any normal item, it must be the start of the current block, since
+        // a nested block would have been marked normal unless it contained normal items itself.
+        bool normal_items = false;
+        for (int i = curitem - 1; i >= evalstart && stl_items[i].type != Expression; i--) {
+          if (stl_items[i].type == Normal || stl_items[i].type == NormalEmpty) {
+            normal_items = true;
+            break;
+          }
+        }
+        if (!normal_items) {
+          // If the expression result contained no normal items, treat the whole result as one.
+          // This prevents a surrounding auto-hiding item group from being hidden.
+          stl_items[curitem].type = Normal;
+          stl_items[curitem].start = out_p;
+          curitem++;
+        }
+      }
       continue;
+    }
+
+    // Denotes a highlight scope
+    if (*fmt_p == STL_HIGHLIGHT) {
+      switch (*(fmt_p + 1)) {
+      case '(':
+        fmt_p += 2;
+        stl_groupitems[groupdepth++] = curitem;
+        stl_items[curitem].type = HighlightScope;
+        stl_items[curitem].start = out_p;
+        stl_items[curitem].minwid = curr_hl_pos;
+        curitem++;
+        continue;
+      case ')':
+        fmt_p += 2;
+        if (groupdepth < 1) {
+          continue;
+        }
+        int scope_start = stl_groupitems[--groupdepth];
+        if (stl_items[scope_start].type != HighlightScope) {
+          // it's possible to break assumptions with %{%...%}, which doesn't check syntax
+          continue;
+        }
+        int hl_pos = stl_items[scope_start].minwid;
+        curr_hl_pos = curitem;
+        stl_items[curitem].type = Highlight;
+        stl_items[curitem].start = out_p;
+        stl_items[curitem].minwid = hl_pos == -1 ? 0 : stl_items[hl_pos].minwid;
+        curitem++;
+        for (int i = hl_pos == -1 ? evalstart : hl_pos + 1; i < scope_start; i++) {
+          MAY_GROW_STL_ITEMS_LEN();
+          if (stl_items[i].type == HighlightCombining) {
+            stl_items[curitem].type = HighlightCombining;
+            stl_items[curitem].start = out_p;
+            stl_items[curitem].minwid = stl_items[i].minwid;
+            curitem++;
+          }
+        }
+        continue;
+      }
     }
 
     // An invalid item was specified.
@@ -1546,7 +1535,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
         break;
       }
       fmt_p++;
-      if (reevaluate && out_p > out) {
+      if (reevaluate && out_p > out.data) {
         out_p[-1] = NUL;  // remove the % at the end of %{% expr %}
       } else {
         *out_p = NUL;
@@ -1566,12 +1555,12 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
 
       buf_T *const save_curbuf = curbuf;
       win_T *const save_curwin = curwin;
-      const int save_VIsual_active = VIsual_active;
+      const int save_VIsual_active = Visual.active;
       curwin = wp;
       curbuf = wp->w_buffer;
       // Visual mode is only valid in the current window.
       if (curwin != save_curwin) {
-        VIsual_active = false;
+        Visual.active = false;
       }
 
       // Note: The result stored in `t` is unused.
@@ -1579,7 +1568,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
 
       curwin = save_curwin;
       curbuf = save_curbuf;
-      VIsual_active = save_VIsual_active;
+      Visual.active = save_VIsual_active;
 
       // Remove the variable we just stored
       do_unlet(S_LEN("g:actual_curbuf"), true);
@@ -1623,6 +1612,9 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
         usefmt = new_fmt;
         fmt_p = usefmt + parsed_usefmt;
         evaldepth++;
+        stl_items[curitem].type = Expression;
+        stl_items[curitem].start = out_p;
+        curitem++;
         continue;
       }
       break;
@@ -1641,6 +1633,7 @@ int build_stl_str_hl(win_T *wp, char *out, size_t outlen, char *fmt, OptIndex op
         if (!left_align_num) {
           stl_items[curitem].type = Separate;
           stl_items[curitem++].start = out_p;
+          MAY_GROW_STL_ITEMS_LEN();
         }
       } else if (stcp == NULL) {
         num = (wp->w_buffer->b_ml.ml_flags & ML_EMPTY) ? 0 : wp->w_cursor.lnum;
@@ -1791,6 +1784,7 @@ stcsign:
           }
         }
         stl_items[curitem++].type = fdc > 0 ? HighlightFold : HighlightSign;
+        MAY_GROW_STL_ITEMS_LEN();
       }
       str = buf_tmp;
       break;
@@ -1869,7 +1863,12 @@ stcsign:
 
       // Create a highlight item based on the name
       if (*fmt_p == opt) {
-        stl_items[curitem].type = opt == STL_HIGHLIGHT_COMB ? HighlightCombining : Highlight;
+        if (opt == STL_HIGHLIGHT) {
+          curr_hl_pos = curitem;
+          stl_items[curitem].type = Highlight;
+        } else {
+          stl_items[curitem].type = HighlightCombining;
+        }
         stl_items[curitem].start = out_p;
         stl_items[curitem].minwid = -syn_name2id_len(t, (size_t)(fmt_p - t));
         curitem++;
@@ -1882,6 +1881,7 @@ stcsign:
     // If we made it this far, the item is normal and starts at
     // our current position in the output buffer.
     // Non-normal items would have `continued`.
+    assert(curitem < (int)stl_items_len);
     stl_items[curitem].start = out_p;
     stl_items[curitem].type = Normal;
 
@@ -2049,7 +2049,7 @@ stcsign:
 
       // Otherwise, there was nothing to print so mark the item as empty
     } else {
-      stl_items[curitem].type = Empty;
+      stl_items[curitem].type = NormalEmpty;
     }
 
     if (num >= 0 || (!itemisflag && str && *str)) {
@@ -2066,10 +2066,12 @@ stcsign:
     curitem++;
     // For a 'statuscolumn' number item that is left aligned, add a separator item.
     if (left_align_num) {
+      MAY_GROW_STL_ITEMS_LEN();
       stl_items[curitem].type = Separate;
       stl_items[curitem++].start = out_p;
     }
   }
+#undef MAY_GROW_STL_ITEMS_LEN
 
   *out_p = NUL;
 
@@ -2081,16 +2083,16 @@ stcsign:
   // We have now processed the entire statusline format string.
   // What follows is post-processing to handle alignment and highlighting.
 
-  int width = vim_strsize(out);
+  int width = vim_strsize(out.data);
   if (maxwidth > 0 && width > maxwidth && (!stcp || width > MAX_STCWIDTH)) {
     // Result is too long, must truncate somewhere.
-    stl_truncate(&width, 0, maxwidth, fillchar, stl_items, evalstart, &curitem, out, &out_p);
+    stl_truncate(&width, 0, maxwidth, fillchar, stl_items, evalstart, &curitem, out.data, &out_p);
 
     // If there is room left in our statusline, and room left in our buffer,
     // add characters at the separation markers (if there are any) to fill up the available space.
   } else if (width < maxwidth) {
     stl_expand(&width, maxwidth, kPaddingNone, (int)(out_end_p - out_p), fillchar, stl_items,
-               evalstart, curitem, out, &out_p);
+               evalstart, curitem, out.data, &out_p);
   }
 
   // Store the info about highlighting.
@@ -2163,7 +2165,9 @@ stcsign:
   // matter?
   // if (called_emsg > called_emsg_before)
   if (opt_idx != kOptInvalid && did_emsg > did_emsg_before) {
-    set_option_direct(opt_idx, get_option_default(opt_idx, opt_scope), opt_scope, SID_ERROR);
+    Object def = get_option_default(opt_idx, opt_scope);
+    set_option_direct(opt_idx, def, opt_scope, SID_ERROR);
+    optval_free_read(opt_idx, def);
   }
 
   // A user function may reset KeyTyped, restore it.

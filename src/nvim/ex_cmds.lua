@@ -193,6 +193,18 @@ M.cmds = {
     func = 'ex_edit',
   },
   {
+    command = 'bcd',
+    flags = bit.bor(BANG, FILE1, TRLBAR, BUFLOCK_OK, LOCK_OK),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_cd',
+  },
+  {
+    command = 'bchdir',
+    flags = bit.bor(BANG, FILE1, TRLBAR, BUFLOCK_OK, LOCK_OK),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_cd',
+  },
+  {
     command = 'bdelete',
     flags = bit.bor(BANG, RANGE, BUFNAME, COUNT, EXTRA, TRLBAR),
     addr_type = 'ADDR_BUFFERS',
@@ -742,8 +754,8 @@ M.cmds = {
   },
   {
     command = 'detach',
-    flags = TRLBAR,
-    addr_type = 'ADDR_NONE',
+    flags = bit.bor(BANG, RANGE, TRLBAR),
+    addr_type = 'ADDR_OTHER',
     func = 'ex_detach',
   },
   {
@@ -961,6 +973,12 @@ M.cmds = {
     flags = bit.bor(RANGE, WHOLEFOLD, BANG, FILE1, ARGOPT, DFLALL, TRLBAR, BUFLOCK_OK, LOCK_OK),
     addr_type = 'ADDR_LINES',
     func = 'ex_exit',
+  },
+  {
+    command = 'exmode',
+    flags = bit.bor(TRLBAR),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_exmode',
   },
   {
     command = 'exusage',
@@ -2540,8 +2558,8 @@ M.cmds = {
     command = 'smagic',
     flags = bit.bor(RANGE, WHOLEFOLD, EXTRA, BUFLOCK_OK, LOCK_OK, PREVIEW),
     addr_type = 'ADDR_LINES',
-    func = 'ex_submagic',
-    preview_func = 'ex_submagic_preview',
+    func = 'ex_substitute',
+    preview_func = 'ex_substitute_preview',
   },
   {
     command = 'smap',
@@ -2571,8 +2589,8 @@ M.cmds = {
     command = 'snomagic',
     flags = bit.bor(RANGE, WHOLEFOLD, EXTRA, BUFLOCK_OK, LOCK_OK, PREVIEW),
     addr_type = 'ADDR_LINES',
-    func = 'ex_submagic',
-    preview_func = 'ex_submagic_preview',
+    func = 'ex_substitute',
+    preview_func = 'ex_substitute_preview',
   },
   {
     command = 'snoremap',

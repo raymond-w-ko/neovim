@@ -15,19 +15,22 @@
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
-#include "nvim/edit.h"
 #include "nvim/errors.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
+#include "nvim/ex_docmd.h"
 #include "nvim/extmark.h"
 #include "nvim/extmark_defs.h"
 #include "nvim/fold.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/highlight_defs.h"
+#include "nvim/insert.h"
+#include "nvim/lua/executor.h"
 #include "nvim/mark.h"
 #include "nvim/mbyte.h"
+#include "nvim/mcursor.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
@@ -48,6 +51,7 @@
 #include "nvim/tag.h"
 #include "nvim/textobject.h"
 #include "nvim/types_defs.h"
+#include "nvim/undo.h"
 #include "nvim/vim_defs.h"
 
 // This file contains routines to maintain and manipulate marks.
@@ -182,6 +186,8 @@ int setmark_pos(int c, pos_T *pos, int fnum, fmarkv_T *view_pt)
   if (ASCII_ISLOWER(c)) {
     i = c - 'a';
     RESET_FMARK(buf->b_namedm + i, *pos, fnum, view);
+    // Moving a mark is not part of the pending change, so undo must not revert it. #5754
+    u_update_named_mark(buf, i);
     do_markset_autocmd((char)c, pos, buf);
     return OK;
   }
@@ -254,8 +260,8 @@ void setpcmark(void)
 {
   xfmark_T *fm;
 
-  // for :global the mark is set only once
-  if (global_busy || listcmd_busy || (cmdmod.cmod_flags & CMOD_KEEPJUMPS)) {
+  // For :global the mark is set only once. Not for multicursor replay (primary owns the jumplist).
+  if (global_busy || listcmd_busy || (cmdmod.cmod_flags & CMOD_KEEPJUMPS) || mc_replaying()) {
     return;
   }
 
@@ -696,7 +702,7 @@ void mark_view_restore(fmark_T *fm)
       set_topline(curwin, topline);
       curwin->w_skipcol = (fm->view.skipcol > 0
                            && !hasFolding(curwin, topline, NULL, NULL)
-                           && fm->view.skipcol < linetabsize_eol(curwin, topline))
+                           && fm->view.skipcol < linetabsize_disp_eol(curwin, topline))
                           ? fm->view.skipcol : 0;
     }
   }
@@ -795,7 +801,7 @@ static void fmarks_check_one(xfmark_T *fm, char *name, buf_T *buf)
 {
   if (fm->fmark.fnum == 0
       && fm->fname != NULL
-      && path_fnamecmp(name, fm->fname) == 0) {
+      && path_equal(name, fm->fname, kPathCmpLiteral)) {
     fm->fmark.fnum = buf->b_fnum;
     XFREE_CLEAR(fm->fname);
   }
@@ -909,104 +915,10 @@ static char *mark_line(pos_T *mp, int lead_len)
   return s;
 }
 
-// print the marks
+/// ":marks {arg}": list marks, or namespace-extmarks.
 void ex_marks(exarg_T *eap)
 {
-  char *arg = eap->arg;
-  char *name;
-  pos_T *posp;
-
-  if (arg != NULL && *arg == NUL) {
-    arg = NULL;
-  }
-
-  msg_ext_set_kind("list_cmd");
-  show_one_mark('\'', arg, &curwin->w_pcmark, NULL, true);
-  for (int i = 0; i < NMARKS; i++) {
-    show_one_mark(i + 'a', arg, &curbuf->b_namedm[i].mark, NULL, true);
-  }
-  for (int i = 0; i < NGLOBALMARKS; i++) {
-    if (namedfm[i].fmark.fnum != 0) {
-      name = fm_getname(&namedfm[i].fmark, 15);
-    } else {
-      name = namedfm[i].fname;
-    }
-    if (name != NULL) {
-      show_one_mark(i >= NMARKS ? i - NMARKS + '0' : i + 'A',
-                    arg, &namedfm[i].fmark.mark, name,
-                    namedfm[i].fmark.fnum == curbuf->b_fnum);
-      if (namedfm[i].fmark.fnum != 0) {
-        xfree(name);
-      }
-    }
-  }
-  show_one_mark('"', arg, &curbuf->b_last_cursor.mark, NULL, true);
-  show_one_mark('[', arg, &curbuf->b_op_start, NULL, true);
-  show_one_mark(']', arg, &curbuf->b_op_end, NULL, true);
-  show_one_mark('^', arg, &curbuf->b_last_insert.mark, NULL, true);
-  show_one_mark('.', arg, &curbuf->b_last_change.mark, NULL, true);
-  if (bt_prompt(curbuf)) {
-    show_one_mark(':', arg, &curbuf->b_prompt_start.mark, NULL, true);
-  }
-
-  // Show the marks as where they will jump to.
-  pos_T *startp = &curbuf->b_visual.vi_start;
-  pos_T *endp = &curbuf->b_visual.vi_end;
-  if ((lt(*startp, *endp) || endp->lnum == 0) && startp->lnum != 0) {
-    posp = startp;
-  } else {
-    posp = endp;
-  }
-  show_one_mark('<', arg, posp, NULL, true);
-  show_one_mark('>', arg, posp == startp ? endp : startp, NULL, true);
-
-  show_one_mark(-1, arg, NULL, NULL, false);
-}
-
-/// @param current  in current file
-static void show_one_mark(int c, char *arg, pos_T *p, char *name_arg, int current)
-{
-  static bool did_title = false;
-  bool mustfree = false;
-  char *name = name_arg;
-
-  if (c == -1) {  // finish up
-    if (did_title) {
-      did_title = false;
-    } else {
-      if (arg == NULL) {
-        msg(_("No marks set"), 0);
-      } else {
-        semsg(_("E283: No marks matching \"%s\""), arg);
-      }
-    }
-  } else if (!got_int
-             && (arg == NULL || vim_strchr(arg, c) != NULL)
-             && p->lnum != 0) {
-    // don't output anything if 'q' typed at --more-- prompt
-    if (name == NULL && current) {
-      name = mark_line(p, 15);
-      mustfree = true;
-    }
-    if (!message_filtered(name)) {
-      if (!did_title) {
-        // Highlight title
-        msg_puts_title(_("\nmark line  col file/text"));
-        did_title = true;
-      }
-      msg_putchar('\n');
-      if (!got_int) {
-        snprintf(IObuff, IOSIZE, " %c %6" PRIdLINENR " %4d ", c, p->lnum, p->col);
-        msg_outtrans(IObuff, 0, false);
-        if (name != NULL) {
-          msg_outtrans(name, current ? HLF_D : 0, false);
-        }
-      }
-    }
-    if (mustfree) {
-      xfree(name);
-    }
-  }
+  nlua_call_excmd("vim._core.marks", "ex_marks", eap, &cmdmod, NULL);
 }
 
 // ":delmarks[!] [marks]"
@@ -1963,6 +1875,9 @@ void get_buf_local_marks(const buf_T *buf, list_T *l)
   add_mark(l, S_LEN("']"), &buf->b_op_end, buf->b_fnum, NULL);
   add_mark(l, S_LEN("'^"), &buf->b_last_insert.mark, buf->b_fnum, NULL);
   add_mark(l, S_LEN("'."), &buf->b_last_change.mark, buf->b_fnum, NULL);
+  if (bt_prompt((buf_T *)buf)) {
+    add_mark(l, S_LEN("':"), &buf->b_prompt_start.mark, buf->b_fnum, NULL);
+  }
   add_mark(l, S_LEN("'<"), &buf->b_visual.vi_start, buf->b_fnum, NULL);
   add_mark(l, S_LEN("'>"), &buf->b_visual.vi_end, buf->b_fnum, NULL);
 }

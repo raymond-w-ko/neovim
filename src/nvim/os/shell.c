@@ -49,7 +49,6 @@
 #include "nvim/ui.h"
 #include "nvim/vim_defs.h"
 
-#define NS_1_SECOND         1000000000U     // 1 second, in nanoseconds
 #define OUT_DATA_THRESHOLD  1024 * 10U      // 10KB, "a few screenfuls" of data.
 
 #define SHELL_SPECIAL "\t \"&'$;<>()\\|\n"
@@ -72,7 +71,7 @@ static void save_patterns(int num_pat, char **pat, int *num_file, char ***file)
 static bool have_wildcard(int num, char **file)
 {
   for (int i = 0; i < num; i++) {
-    if (path_has_wildcard(file[i])) {
+    if (path_has_wildcard(file[i], true)) {
       return true;
     }
   }
@@ -131,7 +130,7 @@ int os_expand_wildcards(int num_pat, char **pat, int *num_file, char ***file, in
   bool ampersand = false;
   // vimglob() function to define for Posix shell
   static char *sh_vimglob_func =
-    "vimglob() { while [ $# -ge 1 ]; do echo \"$1\"; shift; done }; vimglob >";
+    "vimglob() { while [ $# -ge 1 ]; do printf '%s\n' \"$1\"; shift; done }; vimglob >";
   // vimglob() function with globstar setting enabled, only for bash >= 4.X
   static char *sh_globstar_opt =
     "[[ ${BASH_VERSINFO[0]} -ge 4 ]] && shopt -s globstar; ";
@@ -813,7 +812,6 @@ char *get_cmd_output(char *cmd, char *infile, int flags, size_t *ret_len)
   buffer = xmalloc(len + 1);
   size_t i = fread(buffer, 1, len, fd);
   fclose(fd);
-  os_remove(tempname);
   if (i != len) {
     semsg(_(e_cant_read_file_str), tempname);
     XFREE_CLEAR(buffer);
@@ -831,6 +829,7 @@ char *get_cmd_output(char *cmd, char *infile, int flags, size_t *ret_len)
   }
 
 done:
+  os_remove(tempname);
   xfree(tempname);
   return buffer;
 }
@@ -1049,10 +1048,10 @@ static bool out_data_decide_throttle(size_t size)
     started = os_hrtime();
   } else {
     uint64_t since = os_hrtime() - started;
-    if (since < (visit * (NS_1_SECOND / 10))) {
+    if (since < (visit * (NS_PER_SEC / 10))) {
       return true;
     }
-    if (since > (3 * NS_1_SECOND)) {
+    if (since > (3 * NS_PER_SEC)) {
       received = visit = 0;
       return false;
     }

@@ -3,11 +3,15 @@ local iswin = vim.fn.has('win32') == 1
 
 local M = {}
 
+---@param cmd string[]
+---@return boolean
+---@return string
 local function cmd_ok(cmd)
   local result = vim.system(cmd, { text = true }):wait()
-  return result.code == 0, result.stdout
+  return result.code == 0, assert(result.stdout)
 end
 
+---@param cmd string[]
 local function cli_version(cmd)
   local ok, out = cmd_ok(cmd)
   return ok, vim.version.parse(out, { strict = false })
@@ -29,15 +33,17 @@ end
 
 -- Handler for s:system() function.
 --- @param self {output: string, stderr: string, add_stderr_to_output: boolean}
+--- @param data string[]
+--- @param event 'stdout'|'stderr'
 local function system_handler(self, _, data, event)
   if event == 'stderr' then
     if self.add_stderr_to_output then
-      self.output = self.output .. table.concat(data, '')
+      self.output = self.output .. table.concat(data, '\n')
     else
-      self.stderr = self.stderr .. table.concat(data, '')
+      self.stderr = self.stderr .. table.concat(data, '\n')
     end
   elseif event == 'stdout' then
-    self.output = self.output .. table.concat(data, '')
+    self.output = self.output .. table.concat(data, '\n')
   end
 end
 
@@ -58,12 +64,14 @@ local function system(cmd, args)
     add_stderr_to_output = stderr,
     output = '',
     stderr = '',
-    on_stdout = system_handler,
-    on_stderr = system_handler,
     on_exit = function(_, data)
       shell_error_code = data
     end,
   }
+  opts.on_stdout = function(...)
+    system_handler(opts, ...)
+  end
+  opts.on_stderr = opts.on_stdout
   local jobid = vim.fn.jobstart(cmd, opts)
 
   if jobid < 1 then
@@ -77,10 +85,10 @@ local function system(cmd, args)
     vim.fn.chansend(jobid, stdin)
   end
 
-  local res = vim.fn.jobwait({ jobid }, vim.nonnil(args.timeout, 30) * 1000)
+  local res = vim.fn.jobwait({ jobid }, math.floor(vim.nonnil(args.timeout, 30) * 1000))
   if res[1] == -1 then
-    error('Command timed out: ' .. shellify(cmd))
     vim.fn.jobstop(jobid)
+    error('Command timed out: ' .. shellify(cmd))
   elseif shell_error_code ~= 0 and not ignore_error then
     local emsg = string.format(
       'Command error (job=%d, exit code %d): %s (in %s)',
@@ -98,7 +106,7 @@ local function system(cmd, args)
     error(emsg)
   end
 
-  return vim.trim(vim.fn.system(cmd)), shell_error_code
+  return vim.trim(opts.output), shell_error_code
 end
 
 ---@param provider string
@@ -113,6 +121,7 @@ local function provider_disabled(provider)
 end
 
 --- Checks the hygiene of a `g:loaded_xx_provider` variable.
+--- @param var string
 local function check_loaded_var(var)
   if vim.g[var] == 1 then
     health.error(('`g:%s=1` may have been set by mistake.'):format(var), {
@@ -186,7 +195,7 @@ local function node()
 
   local ok, node_v = cli_version({ 'node', '-v' })
   health.info('Node.js: ' .. tostring(node_v))
-  if not ok or vim.version.lt(node_v, '6.0.0') then
+  if not ok or vim.version.lt(assert(node_v), '6.0.0') then
     health.warn('Nvim node.js host does not support Node ' .. node_v)
     -- Skip further checks, they are nonsense if nodejs is too old.
     return
@@ -197,7 +206,7 @@ local function node()
     )
   end
 
-  local node_detect_table = vim.fn['provider#node#Detect']() ---@type string[]
+  local node_detect_table = vim.fn['provider#node#Detect']() ---@type [string, string]
   local host = node_detect_table[1]
   if host:find('^%s*$') then
     health.warn('Missing "neovim" npm (or yarn, pnpm, bun) package.', {
@@ -316,13 +325,13 @@ local function perl()
     return
   elseif latest_cpan[1] == '!' then
     local cpanm_errs = vim.split(latest_cpan, '!')
-    if cpanm_errs[1]:find("Can't write to ") then
+    if assert(cpanm_errs[1]):find("Can't write to ") then
       local advice = {} ---@type string[]
       for i = 2, #cpanm_errs do
         advice[#advice + 1] = cpanm_errs[i]
       end
 
-      health.warn(cpanm_errs[1], advice)
+      health.warn(assert(cpanm_errs[1]), advice)
       -- Last line is the package info
       latest_cpan = cpanm_errs[#cpanm_errs]
     else
@@ -358,6 +367,8 @@ local function perl()
   end
 end
 
+--- @param path string?
+--- @param ty string
 local function is(path, ty)
   if not path then
     return false
@@ -370,16 +381,17 @@ local function is(path, ty)
 end
 
 -- Resolves Python executable path by invoking and checking `sys.executable`.
+--- @param invocation string?
 local function python_exepath(invocation)
   if invocation == '' or invocation == nil then
     return nil
   end
   local p = vim.system({ invocation, '-c', 'import sys; sys.stdout.write(sys.executable)' }):wait()
   if p.code ~= 0 then
-    health.warn(p.stderr)
+    health.warn(assert(p.stderr))
     return nil
   end
-  return vim.fs.normalize(vim.trim(p.stdout))
+  return vim.fs.normalize(vim.trim(assert(p.stdout)))
 end
 
 --- Check if pyenv is available and a valid pyenv root can be found, then return
@@ -409,7 +421,7 @@ local function check_for_pyenv()
       health.warn(message)
       return { '', '' }
     end
-    pyenv_root = vim.trim(p.stdout)
+    pyenv_root = vim.trim(assert(p.stdout))
     health.info('pyenv: $PYENV_ROOT is not set. Infer from `pyenv root`.')
   end
 
@@ -428,6 +440,7 @@ local function check_for_pyenv()
 end
 
 -- Check the Python interpreter's usability.
+--- @param bin string
 local function check_bin(bin)
   if not is(bin, 'file') and (not iswin or not is(bin .. '.exe', 'file')) then
     health.error('"' .. bin .. '" was not found.')
@@ -439,64 +452,24 @@ local function check_bin(bin)
   return true
 end
 
---- Fetch the contents of a URL.
----
---- @param url string
-local function download(url)
-  local has_curl = vim.fn.executable('curl') == 1
-  if has_curl then
-    local ok, out = cmd_ok({ 'curl', '-V' })
-    if ok and out:find('Protocols:.*https') then
-      local content, rc = system({ 'curl', '-sL', url }, { stderr = true, ignore_error = true })
-      if rc ~= 0 then
-        return 'curl error with ' .. url .. ': ' .. rc
-      else
-        return content
-      end
-    end
-  elseif vim.fn.executable('python') == 1 then
-    local script = ([[
-try:
-    from urllib.request import urlopen
-except ImportError:
-    from urllib2 import urlopen
-
-response = urlopen('%s')
-print(response.read().decode('utf8'))
-]]):format(url)
-    local out, rc = system({ 'python', '-c', script })
-    if out == '' and rc ~= 0 then
-      return 'python urllib.request error: ' .. rc
-    else
-      return out
-    end
-  end
-
-  local message = 'missing `curl` '
-
-  if has_curl then
-    message = message .. '(with HTTPS support) '
-  end
-  message = message .. 'and `python`, cannot make web request'
-
-  return message
-end
-
---- Get the latest Nvim Python client (pynvim) version from PyPI.
+--- Gets the latest Nvim Python client (pynvim) version from PyPI.
+---@async
 local function latest_pypi_version()
-  local pypi_version = 'unable to get pypi response'
-  local pypi_response = download('https://pypi.org/pypi/pynvim/json')
-  if pypi_response ~= '' then
-    local pcall_ok, output = pcall(vim.fn.json_decode, pypi_response)
-    if not pcall_ok then
-      return 'error: ' .. pypi_response
-    end
-
-    local pypi_data = output
-    local pypi_element = pypi_data['info'] or {}
-    pypi_version = pypi_element['version'] or 'unable to parse'
+  if vim.fn.executable('curl') == 0 then
+    return 'unable to get pypi response: curl not found'
   end
-  return pypi_version
+  local url = 'https://pypi.org/pypi/pynvim/json'
+  local err, res = vim.async.await(3, vim.net.request, url, {})
+  vim.async.await(vim.schedule) -- Leaves the fast event (the `vim.net.request()` callback).
+  if not res then
+    return ('unable to get pypi response: %s'):format(vim.trim(err or ''))
+  end
+  local ok, json = pcall(vim.json.decode, res.body)
+  if not ok or type(json) ~= 'table' then
+    return ('error: %s'):format(res.body)
+  end
+  local version = vim.tbl_get(json, 'info', 'version')
+  return type(version) == 'string' and version or 'unable to parse'
 end
 
 --- @param s string
@@ -519,6 +492,7 @@ end
 ---     {current pypi nvim status},
 ---     {installed version status}
 --- }
+---@async
 local function version_info(python)
   local pypi_version = latest_pypi_version()
 
@@ -544,10 +518,12 @@ local function version_info(python)
 
   -- Assuming that multiple versions of a package are installed as
   -- `<semver>/<metapath>`, sort them on semantic version in descending order.
+  --- @param metapath1 string
+  --- @param metapath2 string
   local function compare(metapath1, metapath2)
     local dir1 = vim.fs.basename(vim.fs.dirname(vim.fs.abspath(metapath1)))
     local dir2 = vim.fs.basename(vim.fs.dirname(vim.fs.abspath(metapath2)))
-    return vim.version.cmp(dir1, dir2)
+    return vim.version.gt(dir1, dir2)
   end
 
   -- Try to get neovim.VERSION (added in 0.1.11dev).
@@ -559,11 +535,11 @@ local function version_info(python)
   }, { stderr = true, ignore_error = true })
   if rc ~= 0 or nvim_version == '' then
     nvim_version = 'unable to find pynvim module version'
-    local base = vim.fs.basename(nvim_path)
+    local base = vim.fs.dirname(nvim_path)
     local metas = vim.fn.glob(base .. '-*/METADATA', true, true)
     vim.list_extend(metas, vim.fn.glob(base .. '-*/PKG-INFO', true, true))
     vim.list_extend(metas, vim.fn.glob(base .. '.egg-info/PKG-INFO', true, true))
-    metas = table.sort(metas, compare)
+    table.sort(metas, compare)
 
     if metas and next(metas) ~= nil then
       for line in io.lines(metas[1]) do
@@ -591,6 +567,7 @@ local function version_info(python)
   return { python_version, nvim_version, pypi_version, version_status }
 end
 
+---@async
 local function python()
   health.start('Python 3 provider (optional)')
 
@@ -753,7 +730,7 @@ local function python()
     local latest = version_info_table[3]
     local status = version_info_table[4]
 
-    if not vim.version.range('~3'):has(pyversion) then
+    if not assert(vim.version.range('~3')):has(pyversion) then
       health.warn('Unexpected Python version. This could lead to confusing error messages.')
     end
 
@@ -824,13 +801,13 @@ local function python()
           },
         }
         for bintype, bin in pairs(bintable) do
-          if vim.fn.resolve(venv_bin) ~= vim.fn.resolve(bin['path']) then
+          if not bin.path or vim.fn.resolve(venv_bin) ~= vim.fn.resolve(bin.path) then
             local type_of_path = bintype == 'subshell' and '$PATH' or '$PATH in subshell'
             errors[#errors + 1] = type_of_path
               .. ' yields this '
               .. py_bin_basename
               .. ' executable: '
-              .. bin['path']
+              .. tostring(bin.path)
             hints[bin['hint']] = true
           end
         end
@@ -945,6 +922,7 @@ local function ruby()
   end
 end
 
+---@async
 function M.check()
   clipboard()
   node()

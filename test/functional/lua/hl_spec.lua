@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local exec_lua = n.exec_lua
 local eq = t.eq
 local eval = n.eval
@@ -107,7 +108,7 @@ describe('vim.hl.range', function()
       ^asdf{10:ghjkl}{100:$}                                                  |
       {10:«口=口»}{100:$}                                                    |
       qwerty{10:uiop}{100:$}                                                 |
-      {10:口口=口口}{1:$}                                                  |
+      {10:口口=口口}{100:$}                                                  |
       zxcvbnm{1:$}                                                    |
                                                                   |
     ]])

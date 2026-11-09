@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local feed = n.feed
 local fn = n.call
 local source = n.source
@@ -542,10 +543,11 @@ describe('prompt buffer', function()
       {5:-- INSERT --}             |
     ]])
     feed('<Esc>u')
+    -- Nvim: the cursor returns to its pre-"S" position (|restore-undo-cursor|).
     screen:expect([[
       cmd: tests-initial       |
       Command: "tests-initial" |
-      ^cmd: hello               |
+      cmd: hell^o               |
       {1:~                        }|
       {3:[Prompt]                 }|
       other buffer             |
@@ -560,7 +562,7 @@ describe('prompt buffer', function()
     screen:expect([[
       cmd: tests-initial       |
       Command: "tests-initial" |
-      c^md > hello              |
+      cmd > hell^o              |
       {1:~                        }|
       {3:[Prompt]                 }|
       other buffer             |

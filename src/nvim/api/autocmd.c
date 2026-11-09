@@ -309,6 +309,7 @@ ArrayOf(DictAs(get_autocmds__ret)) nvim_get_autocmds(Dict(get_autocmds) *opts, A
         case kCallbackPartial:
           PUT_C(autocmd_info, "callback", CSTR_AS_OBJ(callback_to_string(cb, arena)));
           break;
+        case kCallbackExpr:
         case kCallbackNone:
           abort();
         }
@@ -364,25 +365,28 @@ cleanup:
 /// pattern = vim.fn.expand('~') .. '/some/path/*.py'
 /// ```
 ///
-/// @param event Event(s) that will trigger the handler (`callback` or `command`).
+/// @param event Event(s) that will trigger the handler (`callback` or `command`): one handler is
+///        created for each event name.
 /// @param opts Options dict:
 ///        - buf (`integer?`) Buffer id for buffer-local autocommands |autocmd-buflocal|.
 ///          Not allowed with {pattern}.
 ///        - callback (`function|string?`) Lua function (or Vimscript function name, if string)
 ///          called when the event(s) is triggered. Lua callback can return |lua-truthy| to delete
 ///          the autocommand. Callback receives one argument, a table with keys: [event-args]()
-///            - buf: (`number`) [<abuf>]
+///            - buf: (`integer`) [<abuf>]
 ///            - data: (`any`) Arbitrary data passed from [nvim_exec_autocmds()] [event-data]()
 ///            - event: (`vim.api.keyset.events`) Name of the triggered event |autocmd-events|
 ///            - file: (`string`) [<afile>] (not expanded to a full path)
-///            - group: (`number?`) Group id, if any
-///            - id: (`number`) Autocommand id
+///            - group: (`integer?`) Group id, if any
+///            - id: (`integer`) Autocommand id
 ///            - match: (`string`) [<amatch>] (expanded to a full path)
+///            - win: (`integer`) id of the window for the event, see |window-ID|
 ///        - command (string?) Vim command executed on event. Not allowed with {callback}.
 ///        - desc (`string?`) Description (for documentation and troubleshooting).
 ///        - group (`string|integer?`) Group name or id to match against.
 ///        - nested (`boolean?`, default: false) Run nested autocommands |autocmd-nested|.
-///        - once (`boolean?`, default: false) Handle the event only once |autocmd-once|.
+///        - once (`boolean?`, default: false) Handle the event only once |autocmd-once|. If {event}
+///          is a list, each handler will fire once.
 ///        - pattern (`string|array?`) Pattern(s) to match literally |autocmd-pattern|.
 ///
 /// @return Autocommand id (number)
@@ -391,6 +395,7 @@ cleanup:
 Integer nvim_create_autocmd(uint64_t channel_id, Object event, Dict(create_autocmd) *opts,
                             Arena *arena, Error *err)
   FUNC_API_SINCE(9)
+  FUNC_API_FAST
 {
   int64_t autocmd_id = -1;
   char *desc = NULL;
@@ -659,8 +664,7 @@ void nvim_del_augroup_by_id(Integer id, Error *err)
   FUNC_API_SINCE(9)
 {
   TRY_WRAP(err, {
-    char *name = id == 0 ? NULL : augroup_name((int)id);
-    augroup_del(name, false);
+    augroup_del_by_id((int)id);
   });
 }
 
@@ -674,7 +678,7 @@ void nvim_del_augroup_by_name(String name, Error *err)
   FUNC_API_SINCE(9)
 {
   TRY_WRAP(err, {
-    augroup_del(name.data, false);
+    augroup_del(name.data, -1, false);
   });
 }
 
@@ -761,8 +765,8 @@ void nvim_exec_autocmds(Object event, Dict(exec_autocmds) *opts, Arena *arena, E
 
     FOREACH_ITEM(patterns, pat, {
       char *fname = !has_buf ? pat.data.string.data : NULL;
-      did_aucmd |= apply_autocmds_group(event_nr, fname, NULL, true, au_group, b, NULL, data,
-                                        has_buf);
+      did_aucmd |= apply_autocmds_group(event_nr, fname, NULL, true, au_group, b, curwin, NULL,
+                                        data, has_buf);
     })
   })
 

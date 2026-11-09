@@ -14,6 +14,7 @@
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
+#include "nvim/context.h"
 #include "nvim/cursor_shape.h"
 #include "nvim/drawscreen.h"
 #include "nvim/event/multiqueue.h"
@@ -64,7 +65,7 @@ static bool pending_mode_update = false;
 static handle_T cursor_grid_handle = DEFAULT_GRID_HANDLE;
 
 static PMap(uint32_t) ui_event_cbs = MAP_INIT;
-bool ui_cb_ext[kUIExtCount];  ///< Internalized UI capabilities.
+static bool ui_cb_ext[kUIExtCount];  ///< Internalized UI capabilities.
 
 static bool has_mouse = false;
 static int pending_has_mouse = -1;
@@ -220,7 +221,7 @@ void ui_refresh(void)
   // Reset 'cmdheight' for all tabpages when ext_messages toggles.
   if (had_message != ui_ext[kUIMessages]) {
     if (ui_refresh_cmdheight) {
-      set_option_value(kOptCmdheight, NUMBER_OPTVAL(had_message), 0);
+      set_option_value(kOptCmdheight, INTEGER_OBJ(had_message), 0, true, NULL);
       FOR_ALL_TABS(tp) {
         tp->tp_ch_used = had_message;
       }
@@ -327,11 +328,11 @@ void ui_busy_stop(void)
 /// val is one of the OptBoFlags values, e.g., kOptBoFlagOperator
 void vim_beep(unsigned val)
 {
-  called_vim_beep = true;
-
   if (emsg_silent != 0 || in_assert_fails) {
+    did_beep_silent++;
     return;
   }
+  did_beep++;
 
   if (!((bo_flags & val) || (bo_flags & kOptBoFlagAll))) {
     static int beeps = 0;
@@ -617,15 +618,15 @@ void ui_check_mouse(void)
     return;
   }
 
-  int checkfor = MOUSE_NORMAL;  // assume normal mode
-  if (VIsual_active) {
-    checkfor = MOUSE_VISUAL;
+  int checkfor = kMouseNormal;  // assume normal mode
+  if (Visual.active) {
+    checkfor = kMouseVisual;
   } else if (State == MODE_HITRETURN || State == MODE_ASKMORE || State == MODE_SETWSIZE) {
-    checkfor = MOUSE_RETURN;
+    checkfor = kMouseReturn;
   } else if (State & MODE_INSERT) {
-    checkfor = MOUSE_INSERT;
+    checkfor = kMouseInsert;
   } else if (State & MODE_CMDLINE) {
-    checkfor = MOUSE_COMMAND;
+    checkfor = kMouseCommand;
   } else if (State == MODE_EXTERNCMD) {
     checkfor = ' ';  // don't use mouse for ":!cmd"
   }
@@ -652,8 +653,8 @@ bool ui_mouse_has(int mode)
       }
 
       break;
-    case MOUSE_HELP:
-      if (mode != MOUSE_RETURN && curbuf->b_help) {
+    case kMouseHelp:
+      if (mode != kMouseReturn && curbuf->b_help) {
         return true;
       }
 
@@ -789,11 +790,16 @@ static void ui_attach_error(uint32_t ns_id, const char *name, const char *msg)
 
 void ui_call_event(char *name, Array args)
 {
+  Context ctx = CONTEXT_INIT;
+  ctx_save(&ctx, kCtxCount);
   // Don't impose textlock restrictions upon UI event handlers.
   int save_expr_map_lock = expr_map_lock;
   int save_textlock = textlock;
   expr_map_lock = 0;
   textlock = 0;
+  // Caller may still be using `IObuff`, e.g. as the message being shown.
+  char save_iobuff[IOSIZE];
+  memcpy(save_iobuff, IObuff, IOSIZE);
 
   bool handled = false;
   bool fast = msg_ext_fast && strcmp("msg_show", name) == 0;
@@ -812,8 +818,12 @@ void ui_call_event(char *name, Array args)
     }
     api_clear_error(&err);
   })
+
   expr_map_lock = save_expr_map_lock;
   textlock = save_textlock;
+  memcpy(IObuff, save_iobuff, IOSIZE);
+  ctx_load(&ctx, kCtxCount, 0);
+  ctx_free(&ctx);
 
   if (!handled) {
     UI_CALL(true, event, ui, name, args);

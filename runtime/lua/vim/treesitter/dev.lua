@@ -12,7 +12,6 @@ local M = {}
 ---@field named vim.treesitter.dev.Node[]
 local TSTreeView = {}
 
----@private
 ---@class (private) vim.treesitter.dev.TSTreeViewOpts
 ---@field anon boolean If true, display anonymous nodes.
 ---@field lang boolean If true, display the language alongside each node.
@@ -148,9 +147,8 @@ function TSTreeView:new(buf, lang)
     },
   }
 
-  setmetatable(t, self)
   self.__index = self
-  return t
+  return setmetatable(t, self)
 end
 
 local decor_ns = api.nvim_create_namespace('nvim.treesitter.dev')
@@ -191,7 +189,7 @@ end
 --- Updates the cursor position in the inspector to match the node under the cursor.
 ---
 --- @param treeview vim.treesitter.dev.TSTreeView
---- @param lang string
+--- @param lang string?
 --- @param source_buf integer
 --- @param inspect_buf integer
 --- @param inspect_win integer
@@ -314,6 +312,8 @@ end
 ---@return integer
 ---@package
 function TSTreeView:iter()
+  -- TODO(lewis6991): EmmyLua 0.25.1's ipairs annotation omits the table and initial index.
+  --- @diagnostic disable-next-line: missing-return-value
   return ipairs(self.opts.anon and self.nodes or self.named)
 end
 
@@ -337,7 +337,7 @@ end
 ---
 --- Title of the window. If a function, it accepts the buffer number of the
 --- source buffer as its only argument and should return a string.
---- @field title (string|fun(bufnr:integer):string|nil)
+--- @field title? string|fun(bufnr:integer):string
 
 --- @nodoc
 --- @param opts vim.treesitter.dev.inspect_tree.Opts?
@@ -353,7 +353,7 @@ function M.inspect_tree(opts)
   local win = api.nvim_get_current_win()
   local treeview, err = TSTreeView:new(buf, opts.lang)
   if err and err:match('no parser for lang') then
-    api.nvim_echo({ { err, 'WarningMsg' } }, true, {})
+    api.nvim_echo({ { err, 'WarningMsg' } }, true)
     return
   elseif not treeview then
     error(err)
@@ -391,6 +391,8 @@ function M.inspect_tree(opts)
     title = ('Syntax tree for %s'):format(vim.fs.relpath('.', bufname) or bufname)
   elseif type(opts_title) == 'function' then
     title = opts_title(buf)
+  else
+    title = opts_title
   end
 
   assert(type(title) == 'string', 'Window title must be a string')
@@ -407,7 +409,7 @@ function M.inspect_tree(opts)
     nowait = true,
     callback = function()
       local row = api.nvim_win_get_cursor(w)[1]
-      local lnum, col = treeview:get(row).node:start()
+      local lnum, col = assert(treeview:get(row)).node:start()
 
       -- update source window if original was closed
       if not api.nvim_win_is_valid(win) then
@@ -468,7 +470,7 @@ function M.inspect_tree(opts)
     nowait = true,
   })
 
-  local group = api.nvim_create_augroup('nvim.treesitter.dev', {})
+  local group = api.nvim_create_augroup('nvim.treesitter.dev')
 
   nvim_on('CursorMoved', group, { buf = b }, function()
     if not api.nvim_buf_is_loaded(buf) then
@@ -478,7 +480,7 @@ function M.inspect_tree(opts)
     w = api.nvim_get_current_win()
     api.nvim_buf_clear_namespace(buf, treeview.ns, 0, -1)
     local row = api.nvim_win_get_cursor(w)[1]
-    local lnum, col, end_lnum, end_col = treeview:get(row).node:range()
+    local lnum, col, end_lnum, end_col = assert(treeview:get(row)).node:range()
     api.nvim_buf_set_extmark(buf, treeview.ns, lnum, col, {
       end_row = end_lnum,
       end_col = math.max(0, end_col),
@@ -639,7 +641,7 @@ function M.edit_query(lang)
   local query_buf = api.nvim_win_get_buf(query_win)
 
   vim.b[buf].dev_edit = query_win
-  vim.bo[query_buf].omnifunc = 'v:lua.vim.treesitter.query.omnifunc'
+  vim.bo[query_buf].omnifunc = vim.treesitter.query.omnifunc
   set_dev_options(query_win, query_buf)
 
   -- Note that omnifunc guesses the language based on the containing folder,
@@ -647,7 +649,7 @@ function M.edit_query(lang)
   -- can infer the language later.
   api.nvim_buf_set_name(query_buf, string.format('%s/query_editor.scm', lang))
 
-  local group = api.nvim_create_augroup('nvim.treesitter.dev_edit', {})
+  local group = api.nvim_create_augroup('nvim.treesitter.dev_edit')
   nvim_on({ 'TextChanged', 'InsertLeave' }, group, {
     buf = query_buf,
     desc = 'Update query editor diagnostics when the query changes',

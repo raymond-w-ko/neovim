@@ -1,7 +1,10 @@
 local M = {}
 local s_err ---@type string?
-local s_host ---@type string?
+local s_host ---@type integer?
 
+--- @param host { name: string, orig_name: string }
+--- @param prog string
+--- @return integer
 function M.require(host, prog)
   local args = { prog, '-e', 'use Neovim::Ext; start_host();' }
 
@@ -36,6 +39,8 @@ function M.detect()
   return prog, nil
 end
 
+--- @param method string
+--- @param args any[]
 function M.call(method, args)
   if s_err then
     return
@@ -46,12 +51,15 @@ function M.call(method, args)
     local ok, result = pcall(vim.fn['remote#host#Require'], 'legacy-perl-provider') ---@type any, any
     if not ok then
       s_err = result
-      vim.api.nvim_echo({ { result, 'WarningMsg' } }, true, {})
+      vim.api.nvim_echo({ { result, 'WarningMsg' } }, true)
       return
     end
+    --- @cast result integer
     s_host = result
   end
 
+  -- Handles host requests in the caller's scope (see eval_call_provider()).
+  ---@diagnostic disable-next-line: deprecated
   return vim.fn.rpcrequest(s_host, 'perl_' .. method, unpack(args))
 end
 

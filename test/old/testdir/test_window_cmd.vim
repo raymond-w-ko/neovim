@@ -1979,6 +1979,34 @@ func Test_splitkeep_screen_cursor_pos()
   set splitkeep&
 endfunc
 
+func Test_splitkeep_phantom_jump()
+  set splitbelow
+  call setline(1, range(1, 100))
+  split
+
+  " Move cursor to last visible line so it is at risk of being pushed off
+  normal! L
+  let old = getcurpos()
+
+  " No jumps, just 3 header lines
+  call assert_equal(3, execute('jumps')->split('\n')->len())
+
+  " Switching to "screen" was causing vim to not update relevant variables
+  set splitkeep=screen
+
+  " Reduce window 2's space, and so bump up the cursor
+  set cmdheight=2
+
+  " Cursor has moved up a single line in the buffer, respecting splitkeep
+  call assert_equal(4, execute('jumps')->split('\n')->len())
+
+  let old[1] = old[1] - 1
+  call assert_equal(old, getcurpos())
+
+  %bwipeout!
+  set splitbelow& splitkeep& cmdheight&
+endfunc
+
 func Test_splitkeep_cmdheight()
   set splitkeep=screen
   call setline(1, range(&lines))
@@ -1987,6 +2015,28 @@ func Test_splitkeep_cmdheight()
   call assert_equal(&lines - 1, line('.'))
   %bwipeout!
   set splitkeep& cmdheight&
+endfunc
+
+func Test_aucmd_win_scroll_multibyte()
+  " Using the autocommand window must not scroll the current window when the
+  " cursor is behind multi-byte characters.
+  set splitkeep=cursor
+  " Use a window with a fixed size, the size of the screen may change while
+  " the test is running.
+  call NewWindow(11, 40)
+  call setline(1, repeat([repeat(nr2char(0x3042), 100)], 20))
+  normal! G050l
+  redraw
+  let topline = line('w0')
+
+  for i in range(3)
+    call bufload(bufadd(''))
+  endfor
+  call assert_equal(topline, line('w0'))
+
+  %bwipeout!
+  only!
+  set splitkeep&
 endfunc
 
 func Test_splitkeep_cursor()
@@ -2434,6 +2484,56 @@ func Test_winfixheight_resize_wmh_zero()
 
   cclose
   set winminheight& laststatus&
+endfunc
+
+" Splitting the only window while it has 'winfixheight' set and 'laststatus' is
+" one must not leave a screen line unused.
+func Test_winfixheight_split_only_window()
+  set laststatus=1
+  new
+  only!
+  setlocal winfixheight
+  split
+  " Two windows, both with a status line, and the command line.
+  call assert_equal(&lines - &cmdheight - 2, winheight(1) + winheight(2))
+
+  only!
+  setlocal winfixheight&
+  set laststatus&
+  bwipe!
+endfunc
+
+" Test that closing a window respects 'winfixwidth' and 'winfixheight'
+" when the freed space goes to a group of windows.
+func Test_winfixsize_close_non_leaf_frame()
+  for vertical in [v:true, v:false]
+    let opt = vertical ? 'winfixwidth' : 'winfixheight'
+    let split = vertical ? 'vertical ' : ''
+    let other = vertical ? '' : 'vertical '
+    let move = vertical ? 'l' : 'j'
+    let Size = {id -> vertical ? winwidth(win_id2win(id))
+          \                     : winheight(win_id2win(id))}
+
+    exe split .. 'split | ' .. split .. 'resize ' .. (vertical ? 30 : 5)
+    exe 'setlocal ' .. opt
+    let b = win_getid()
+    exe 'wincmd ' .. move
+    let c = win_getid()
+    exe 'botright ' .. other .. 'split'
+    exe 'topleft ' .. split .. 'split | ' .. split .. 'resize 4'
+    let a = win_getid()
+
+    let b0 = Size(b)
+    let c0 = Size(c)
+    let a0 = Size(a)
+    close
+
+    call assert_equal(b0, Size(b), opt)
+    call assert_equal(c0 + a0 + 1, Size(c), opt)
+
+    call win_execute(b, 'setlocal no' .. opt)
+    only!
+  endfor
 endfunc
 
 func Test_window_w_locked_bypass()

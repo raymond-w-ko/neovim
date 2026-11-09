@@ -1,6 +1,7 @@
 -- Test suite for vim.range
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
+local describe, it, before_each = t.describe, t.it, t.before_each
 local eq = t.eq
 
 local clear = n.clear
@@ -52,7 +53,20 @@ describe('vim.range', function()
         return vim.range(vim.pos(buf1, 3, 5), vim.pos(buf2, 4, 6))
       end)
     end)
-    eq(success, false)
+    eq(false, success)
+  end)
+
+  it('is modifiable', function()
+    local range, buf = exec_lua(function()
+      local range = vim.range(-1, 5, 5, 5, 5)
+      range.buf = 0
+      range.start_row = 4
+      range.start_col = 2
+      range.end_row = 6
+      range.end_col = 8
+      return range, vim.api.nvim_get_current_buf()
+    end)
+    eq({ 4, 2, 6, 8, buf }, range)
   end)
 
   it('converts between vim.Range and lsp.Range', function()
@@ -90,6 +104,17 @@ describe('vim.range', function()
     end)
     eq({ 0, 0, 0, 4 }, range)
     eq({ 1, 0, 1, 0 }, mark_range)
+  end)
+
+  it('uses the preceding line for inclusive marks ending at column zero', function()
+    insert('abcdef\nx')
+    eq(
+      { 1, 0, 1, 5 },
+      exec_lua(function()
+        vim.o.selection = 'inclusive'
+        return { vim.range(0, 0, 0, 1, 0):to_mark() }
+      end)
+    )
   end)
 
   it("converts between vim.Range and extmark on buffer's last line", function()
@@ -177,6 +202,17 @@ describe('vim.range', function()
       false,
       exec_lua(function()
         return vim.range(0, 1, 0, 1, 0):has(vim.range(0, 0, 0, 1, 0))
+      end)
+    )
+  end)
+
+  it('preserves single-character intersections', function()
+    insert('abc')
+    eq(
+      { 0, 1, 0, 2 },
+      exec_lua(function()
+        local overlap = vim.range(0, 0, 0, 0, 2):intersect(vim.range(0, 0, 1, 0, 3))
+        return overlap and { overlap:to_extmark() } or nil
       end)
     )
   end)

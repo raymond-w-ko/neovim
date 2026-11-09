@@ -3,6 +3,7 @@ local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 local tt = require('test.functional.testterm')
 
+local describe, it, before_each, finally = t.describe, t.it, t.before_each, t.finally
 local assert_alive = n.assert_alive
 local feed, clear = n.feed, n.clear
 local poke_eventloop = n.poke_eventloop
@@ -16,6 +17,7 @@ local testprg = n.testprg
 local write_file = t.write_file
 local command = n.command
 local matches = t.matches
+local not_matches = t.not_matches
 local exec_lua = n.exec_lua
 local sleep = vim.uv.sleep
 local fn = n.fn
@@ -239,6 +241,9 @@ describe(':terminal buffer', function()
 
   it('requires bang (!) to close a running job #15402', function()
     eq('Vim(wqall):E948: Job still running (add ! to end the job)', pcall_err(command, 'wqall'))
+    command('redir => g:wqall_out | silent! wqall | redir END')
+    matches('E948:', api.nvim_get_var('wqall_out'))
+    not_matches('E676:', api.nvim_get_var('wqall_out'))
     for _, cmd in ipairs({ 'bdelete', '%bdelete', 'bwipeout', 'bunload' }) do
       matches(
         '^Vim%('
@@ -306,7 +311,10 @@ describe(':terminal buffer', function()
     screen:expect_unchanged()
     for i = 1, 10 do
       eq({ mode = 't', blocking = true }, api.nvim_get_mode())
-      vim.uv.sleep(15) -- Wait for the previously scheduled refresh timer to arrive
+      -- Wait for the previously scheduled refresh timer to arrive. Must comfortably exceed
+      -- terminal.c REFRESH_DELAY *plus* PTY echo round-trip; else the refresh isn't queued before
+      -- the next key and, since a partial mapping never drains main_loop.events, screen is stale.
+      vim.uv.sleep(50)
       feed('j') -- Refresh scheduled for the last 'j' and processed for the one before
       screen:expect(([[
         tty ready                                         |
@@ -339,7 +347,10 @@ describe(':terminal buffer', function()
     screen:expect_unchanged()
     for i = 1, 10 do
       eq({ mode = 'nt', blocking = true }, api.nvim_get_mode())
-      vim.uv.sleep(15) -- Wait for the previously scheduled refresh timer to arrive
+      -- Wait for the previously scheduled refresh timer to arrive. Must comfortably exceed
+      -- terminal.c REFRESH_DELAY *plus* PTY echo round-trip; else the refresh isn't queued before
+      -- the next key and, since a partial mapping never drains main_loop.events, screen is stale.
+      vim.uv.sleep(50)
       feed('j') -- Refresh scheduled for the last 'j' and processed for the one before
       screen:expect(([[
         tty ready                                         |
@@ -588,7 +599,7 @@ describe(':terminal buffer', function()
       api.nvim_input_mouse('right', 'release', '', 0, 1, 27)
       screen:expect([[
         rows: 6, cols: 25       │rows: 6, cols: 25        |
-        mo{108:use enabled}           │mo^u{108:se enabled}            |
+        mo{108:use enabled}           │mo{108:^use enabled}            |
         {108: }                       │{108: }                        |*3
         [Process suspended]     │[Process suspended]      |
         {5:-- VISUAL --}                                      |
@@ -627,6 +638,23 @@ end)
 
 describe(':terminal buffer', function()
   before_each(clear)
+
+  it('exit emits FileChangedShell #41759', function()
+    local path = t.tmpname()
+    write_file(path, 'foo\n')
+    command('edit ' .. path)
+    command('set noautoread') -- Disable 'autoread' to exercise :checktime specifically.
+    api.nvim_buf_set_lines(0, 0, -1, true, { 'local change' })
+    n.exec('let g:fcs = 0 | autocmd FileChangedShell * let g:fcs = 1')
+    write_file(path, 'external change\n')
+
+    -- Terminal in another tab, so returning to the buffer is not what triggers the check.
+    command('tabnew')
+    fn.jobstart({ testprg('shell-test'), 'EXIT', '0' }, { term = true })
+    retry(nil, 10000, function()
+      eq(1, api.nvim_get_var('fcs'))
+    end)
+  end)
 
   it('can resume suspended PTY process running in fish', function()
     skip(is_os('win'), 'N/A for Windows')
@@ -967,6 +995,20 @@ describe(':terminal buffer', function()
       {5:-- TERMINAL --}                                    |
     ]])
     eq('🏴‍☠️ yarrr', api.nvim_get_current_line())
+  end)
+
+  it('[Process exited] message does not hide last line #42334', function()
+    local screen = Screen.new(50, 7)
+    local chan = api.nvim_open_term(0, {})
+    api.nvim_chan_send(chan, ('meow\r\n'):rep(10) .. 'LAST LINE')
+    fn.chanclose(chan)
+    feed('i')
+    screen:expect([[
+      meow                                              |*4
+      LAST LINE                                         |
+      ^[Terminal closed]                                 |
+      {5:-- TERMINAL --}                                    |
+    ]])
   end)
 
   it('handles split UTF-8 sequences #16245', function()
@@ -1466,6 +1508,15 @@ describe(':terminal buffer', function()
     eq(oldbuf, buffilepost_bufs[1][1])
     matches('^term://', buffilepost_bufs[1][2])
   end)
+
+  it('double width char does not crash 1-wide terminal #41856', function()
+    command('botright vnew')
+    local screen = Screen.new(50, 7)
+    local chan = api.nvim_open_term(0, {})
+    screen:try_resize(25, 7)
+    api.nvim_chan_send(chan, 'キ')
+    assert_alive()
+  end)
 end)
 
 describe('on_lines does not emit out-of-bounds line indexes when', function()
@@ -1594,7 +1645,9 @@ describe('terminal input', function()
       '<BS>',
       '<S-Tab>',
       '<Insert>',
+      '<S-Insert>',
       '<Del>',
+      '<S-Del>',
       '<PageUp>',
       '<PageDown>',
       '<S-Up>',
@@ -1618,30 +1671,40 @@ describe('terminal input', function()
       '<C-LeftMouse><0,0>',
       '<C-LeftDrag><0,1>',
       '<C-LeftRelease><0,1>',
+      '<LeftMouse><0,1>',
+      '<LeftRelease><0,1>',
       '<2-LeftMouse><0,1>',
       '<2-LeftDrag><0,0>',
       '<2-LeftRelease><0,0>',
       '<M-MiddleMouse><0,0>',
       '<M-MiddleDrag><0,1>',
       '<M-MiddleRelease><0,1>',
+      '<MiddleMouse><0,1>',
+      '<MiddleRelease><0,1>',
       '<2-MiddleMouse><0,1>',
       '<2-MiddleDrag><0,0>',
       '<2-MiddleRelease><0,0>',
       '<S-RightMouse><0,0>',
       '<S-RightDrag><0,1>',
       '<S-RightRelease><0,1>',
+      '<RightMouse><0,1>',
+      '<RightRelease><0,1>',
       '<2-RightMouse><0,1>',
       '<2-RightDrag><0,0>',
       '<2-RightRelease><0,0>',
       '<S-X1Mouse><0,0>',
       '<S-X1Drag><0,1>',
       '<S-X1Release><0,1>',
+      '<X1Mouse><0,1>',
+      '<X1Release><0,1>',
       '<2-X1Mouse><0,1>',
       '<2-X1Drag><0,0>',
       '<2-X1Release><0,0>',
       '<S-X2Mouse><0,0>',
       '<S-X2Drag><0,1>',
       '<S-X2Release><0,1>',
+      '<X2Mouse><0,1>',
+      '<X2Release><0,1>',
       '<2-X2Mouse><0,1>',
       '<2-X2Drag><0,0>',
       '<2-X2Release><0,0>',
@@ -1656,6 +1719,7 @@ describe('terminal input', function()
     }
     -- FIXME: The escape sequence to enable kitty keyboard mode doesn't work on Windows
     if not is_os('win') then
+      table.insert(keys, '<S-BS>')
       table.insert(keys, '<C-I>')
       table.insert(keys, '<C-M>')
       table.insert(keys, '<C-[>')
@@ -1744,7 +1808,7 @@ end
 describe('termopen() (deprecated alias to `jobstart(…,{term=true})`)', function()
   before_each(clear)
 
-  it('disallowed when textlocked and in cmdwin buffer', function()
+  it('disallowed when textlocked', function()
     command("autocmd TextYankPost <buffer> ++once call termopen('foo')")
     matches(
       'Vim%(call%):E565: Not allowed to change text or change window$',
@@ -1752,10 +1816,7 @@ describe('termopen() (deprecated alias to `jobstart(…,{term=true})`)', functio
     )
 
     feed('q:')
-    eq(
-      'Vim:E11: Invalid in command-line window; <CR> executes, CTRL-C quits',
-      pcall_err(fn.termopen, 'bar')
-    )
+    eq('Vim:jobstart(...,{term=true}) requires unmodified buffer', pcall_err(fn.termopen, 'bar'))
   end)
 end)
 

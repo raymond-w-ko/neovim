@@ -2,8 +2,8 @@
 
                             NVIM REFERENCE MANUAL
 
-                                Extending Nvim
-
+==============================================================================
+Extending Nvim
 
                                        Type |gO| to see the table of contents.
 
@@ -224,15 +224,15 @@ semver convention `v<major>.<minor>.<patch>` (with or without `v` prefix).
 Like `v1.2.0` or `1.2.0`, but not `1.2` or `v1`.
 
 The latest state of all managed plugins is stored inside a *vim.pack-lockfile*
-located at `$XDG_CONFIG_HOME/nvim/nvim-pack-lock.json`. It is a JSON file that
-is used to persistently track data about plugins. For a more robust config
-treat lockfile like its part: put under version control, etc. In this case all
-plugins from the lockfile will be installed at once (in alphabetical order)
-and at lockfile's revision (instead of inferring from `version`). This is done
-on the very first `vim.pack` function call to ensure that lockfile is aligned
-with what is actually on the disk. Lockfile should not be edited by hand.
-Corrupted data for installed plugins is repaired (including after deleting
-whole file), but `version` fields will be missing for not yet added plugins.
+located at |'packlockfile'|. It is a JSON file that is used to persistently
+track data about plugins. For a more robust config treat lockfile like its
+part: put under version control, etc. In this case all plugins from the
+lockfile will be installed at once (in alphabetical order) and at lockfile's
+revision (instead of inferring from `version`). This is done on the very first
+`vim.pack` function call to ensure that lockfile is aligned with what is
+actually on the disk. Lockfile should not be edited by hand. Corrupted data
+for installed plugins is repaired (including after deleting whole file), but
+`version` fields will be missing for not yet added plugins.
 
                                                            *vim.pack-examples*
 
@@ -355,6 +355,10 @@ Check for pending updates ~
   with different `rev` and `rev_to` fields. To not download new updates from
   source, use plain `vim.pack.get()`.
 
+Check for issues ~
+• Run `:checkhealth vim.pack` and follow recommendations in case of detected
+  issues.
+
 Commands                                             *vim.pack-commands* *E5807*
 
                                                     *:packu* *:packupdate* *E5808*
@@ -423,8 +427,89 @@ These events can be used to execute plugin hooks. For example: >lua
     vim.api.nvim_create_autocmd('PackChanged', { callback = hooks })
 <
 
+                                                           *vim.pack-manifest*
 
-*vim.pack.Spec*
+Plugins can come with a special top level `pkg.json` manifest file with extra
+information. If present, `vim.pack` uses it for improved user experience:
+• Apply |:source| for scripts after triggering corresponding
+  |vim.pack-events|. This allows plugins to define hooks that will be executed
+  during plugin's lifetime. Sourcing is done with special context:
+  • The |current-directory| is temporarily set to plugin's root (to make it
+    easier to run |vim.system()| commands).
+  • Plugin's path is temporarily ensured to be inside |'runtimepath'| (so
+    script can use |require()| with plugin's module, possibly with explicit
+    |package.loaded| reset inside `"update"` scripts).
+• Running |:checkhealth| for `vim.pack` will perform extra checks to ensure
+  healthy plugin installation.
+
+Full specification see at https://packspec.org/. See also |vim.pack.Manifest|.
+A simple example: >json
+    {
+     "name": "best-plugin.nvim",
+     "description": "The best plugin for Neovim",
+     "version": "1.0.0",
+     "engines": {
+         "nvim": ">=0.13.0",
+         "vim": ">=9.1.0"
+     },
+     "scripts": {
+       "install": "scripts/install.lua",
+       "preupdate": "scripts/preupdate.vim",
+       "update": "scripts/update.vim",
+       "preuninstall": "scripts/preuninstall.lua"
+     },
+     "dependencies": [
+       {
+         "src": "https://github.com/user/plugin1"
+       },
+       {
+         "src": "https://github.com/user/plugin2",
+         "version": ">=1.0.0"
+       },
+       {
+         "src": "https://github.com/user/plugin3",
+         "version": "'branch'"
+       }
+     ]
+    }
+<
+
+
+vim.pack.Manifest                                          *vim.pack.Manifest*
+
+    Fields: ~
+      • {dependencies}?  (`table[]`) A list of data that plugin declares as
+                         its plugin dependencies. All should be installable
+                         with |vim.pack.add()|. Each data has the following
+                         fields:
+                         • {src} (`string`) Source to install from. Must match
+                           exactly the |vim.pack.Spec| source in
+                           |vim.pack.add()|.
+                         • {version}? (`string`) Suggested version. If
+                           describes a version constraint, used
+                           |vim.pack.Spec| `version` should be a
+                           |vim.VersionRange| that entirely fits into the
+                           constraint. If quoted string, describes the
+                           branch/tag/commit and |vim.pack.Spec| `version`
+                           should define the string exactly. If missing, no
+                           version is suggested.
+      • {description}?   (`string`) Plugin description
+      • {engines}?       (`table`) Supported engine versions. Values should be
+                         |vim.version.range()| compatible specs.
+                         • {nvim}? (`string`) Version range for Nvim.
+                         • {vim}? (`string`) Version range for Vim.
+      • {name}?          (`string`) Plugin name
+      • {scripts}?       (`table`) Script locations (relative to plugin's
+                         root) to |:source| after triggering corresponding
+                         |vim.pack-events|.
+                         • {install}? (`string`) Post install script.
+                         • {preuninstall}? (`string`) Pre delete script.
+                         • {preupdate}? (`string`) Pre update script.
+                         • {update}? (`string`) Post update script.
+      • {version}?       (`string`) Plugin version as a semver string (like
+                         "1.0.0", "0.0.1-dev").
+
+vim.pack.Spec                                                  *vim.pack.Spec*
 
     Fields: ~
       • {data}?     (`any`) Arbitrary data associated with a plugin.
@@ -506,6 +591,8 @@ get({names}, {opts})                                          *vim.pack.get()*
           to current session.
         • {branches}? (`string[]`) Available Git branches (first is default).
           Missing if `info=false`.
+        • {manifest}? (`vim.pack.Manifest`) Data from the |vim.pack-manifest|.
+          Empty in case of reading error. Missing if `info=false`.
         • {path} (`string`) Plugin's path on disk.
         • {rev} (`string`) Current Git revision. Taken from
           |vim.pack-lockfile| if `info=false`.

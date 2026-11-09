@@ -4,6 +4,7 @@
                             NVIM REFERENCE MANUAL
 
 
+==============================================================================
 Notable changes since Nvim 0.11                                 *news-0.12*
 
 For changes in the previous release, see |news-0.11|.
@@ -24,7 +25,7 @@ DIAGNOSTICS
 
 • |diagnostic-signs| can no longer be configured with |:sign-define| or
   |sign_define()| (deprecated in Nvim 0.10 |deprecated-0.10|).
-• Removed |vim.diagnostic.disable()| and |vim.diagnostic.is_disabled()|
+• Removed vim.diagnostic.disable() and vim.diagnostic.is_disabled()
   (deprecated in Nvim 0.10 |deprecated-0.10|).
 • The legacy signature of |vim.diagnostic.enable()| (deprecated in Nvim 0.10
   |deprecated-0.10|) is no longer supported.

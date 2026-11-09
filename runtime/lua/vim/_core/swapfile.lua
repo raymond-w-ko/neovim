@@ -62,7 +62,7 @@ function M.select_swap(items)
     -- Queue ":recover! <swapfile>" as user input, so the recursive recovery runs via the normal
     -- input-dispatch loop. Using vim.schedule + vim.cmd can hang bc of "Press ENTER".
     vim.fn.feedkeys(
-      vim.keycode(('<Cmd>recover! %s<CR>'):format(vim.fn.fnameescape(items[idx]))),
+      vim.keycode(('<Cmd>recover! %s<CR>'):format(vim.fn.fnameescape(assert(items[idx])))),
       'in'
     )
   end)
@@ -80,7 +80,7 @@ function M.list_swaps(items)
       lines[#lines + 1] = { ('%d. %s\n'):format(i, format_swap(path)) }
     end
   end
-  api.nvim_echo(lines, false, {})
+  api.nvim_echo(lines, false)
 end
 
 return M

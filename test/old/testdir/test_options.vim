@@ -682,7 +682,7 @@ func Test_set_completion_string_values()
   " call assert_equal("\"set hl=8bi i", @:)
 
   " messagesopt
-  call assert_equal(['history:', 'hit-enter', 'progress:', 'wait:'],
+  call assert_equal(['history:', 'hit-enter', 'maxheight:', 'pager:', 'progress:', 'timeout:', 'wait:'],
         \ getcompletion('set messagesopt+=', 'cmdline')->sort())
 
   "
@@ -972,6 +972,32 @@ func Test_set_option_errors()
   call assert_fails('call setwinvar(0, "&nosuchoption", 0)', ['E355:', 'E355:'])
   call assert_fails('call setwinvar(0, "&nosuchoption", "")', ['E355:', 'E355:'])
   call assert_fails('call setwinvar(0, "&nosuchoption", [])', ['E355:', 'E355:'])
+endfunc
+
+func Test_set_encoding()
+  throw 'skipped: Nvim supports ''utf8'' encoding only'
+  let save_encoding = &encoding
+
+  set enc=iso8859-1
+  call assert_equal('latin1', &enc)
+  set enc=iso8859_1
+  call assert_equal('latin1', &enc)
+  set enc=iso-8859-1
+  call assert_equal('latin1', &enc)
+  set enc=iso_8859_1
+  call assert_equal('latin1', &enc)
+  set enc=iso88591
+  call assert_equal('latin1', &enc)
+  set enc=iso8859
+  call assert_equal('latin1', &enc)
+  set enc=iso-8859
+  call assert_equal('latin1', &enc)
+  set enc=iso_8859
+  call assert_equal('latin1', &enc)
+  call assert_fails('set enc=iso8858', 'E474:')
+  call assert_equal('latin1', &enc)
+
+  let &encoding = save_encoding
 endfunc
 
 func CheckWasSet(name)
@@ -2232,7 +2258,7 @@ func Test_opt_winminheight()
 endfunc
 
 func Test_opt_winminheight_term()
-  " See test/functional/legacy/options_spec.lua
+  " See test/functional/options/options_spec.lua
   CheckRunVimInTerminal
 
   " The tabline should be taken into account.
@@ -2253,7 +2279,7 @@ func Test_opt_winminheight_term()
 endfunc
 
 func Test_opt_winminheight_term_tabs()
-  " See test/functional/legacy/options_spec.lua
+  " See test/functional/options/options_spec.lua
   CheckRunVimInTerminal
 
   " The tabline should be taken into account.
@@ -2295,7 +2321,7 @@ endfunc
 
 " Test that resetting laststatus does change scroll option
 func Test_opt_reset_scroll()
-  " See test/functional/legacy/options_spec.lua
+  " See test/functional/options/options_spec.lua
   CheckRunVimInTerminal
   let vimrc =<< trim [CODE]
     set scroll=2
@@ -2628,7 +2654,7 @@ func Test_string_option_revert_on_failure()
         \ ['nrformats', 'alpha', 'a123'],
         \ ['omnifunc', 'MyOmniFunc', '1a-'],
         \ ['operatorfunc', 'MyOpFunc', '1a-'],
-        "\ ['previewpopup', 'width:20', 'a123'],
+        \ ['previewpopup', 'width:20', 'a123'],
         "\ ['printoptions', 'paper:A4', 'a123:'],
         \ ['quickfixtextfunc', 'MyQfFunc', '1a-'],
         \ ['rulerformat', '%l', '%['],
@@ -3115,6 +3141,124 @@ func Test_comma_option_key_value()
   call assert_equal('multispace:AB,eol:$,space:x', &lcs)
 
   set lcs&
+endfunc
+
+func Test_insecure_flag_copied_to_new_buffer_indentexpr()
+  let modeline = &modeline
+  let modelineexpr = &modelineexpr
+  "let modelinestrict = &modelinestrict
+
+  func! Xindentexprpwn(findstart, base)
+    if a:findstart
+      sandbox setglobal indentexpr=writefile(['leak'],\ 'Xindentexpr_proof')
+      return 0
+    endif
+    return []
+  endfunc
+
+  try
+    set modeline modelineexpr "nomodelinestrict
+
+    call writefile([
+          \ 'vim: set complete=FXindentexprpwn :',
+          \ 'body',
+          \ ], 'Xindentexpr_attack', 'D')
+    call delete('Xindentexpr_proof')
+    edit Xindentexpr_attack
+    call cursor(2, 1)
+    call feedkeys("i\<C-N>\<Esc>", 'xt')
+    bwipe!
+
+    " A brand new buffer now inherits the poisoned 'indentexpr' via
+    " buf_copy_options().  It must still be evaluated in the sandbox.
+    enew!
+    call setline(1, ['{', 'x', '}'])
+    normal! 2G==
+    call assert_false(filereadable('Xindentexpr_proof'))
+    bwipe!
+  finally
+    let &modeline = modeline
+    let &modelineexpr = modelineexpr
+    "let &modelinestrict = modelinestrict
+    set indentexpr&
+    call delete('Xindentexpr_proof')
+    delfunc Xindentexprpwn
+  endtry
+endfunc
+
+func Test_insecure_flag_not_cleared_by_other_buffer_complete()
+  let modeline = &modeline
+  let modelineexpr = &modelineexpr
+  "let modelinestrict = &modelinestrict
+
+  func! Xcompletepwn(findstart, base)
+    if a:findstart
+      call writefile(['leak'], 'Xcomplete_cross_proof')
+      return 0
+    endif
+    return ['match']
+  endfunc
+
+  try
+    set modeline modelineexpr "nomodelinestrict
+
+    call writefile([
+          \ 'vim: set complete=FXcompletepwn :',
+          \ 'body',
+          \ ], 'Xcomplete_cross_attack', 'D')
+    call delete('Xcomplete_cross_proof')
+    edit Xcomplete_cross_attack
+    let bufA = bufnr('%')
+
+    " An unrelated buffer does a completely ordinary, trusted reset.
+    new
+    setlocal complete=.,w,b,u,t
+    bwipe!
+
+    " Back in the modeline-tainted buffer: must still be sandboxed.
+    exe 'buffer ' .. bufA
+    call cursor(2, 1)
+    call assert_fails('call feedkeys("i\<C-N>\<Esc>", "xt")', 'E48:')
+    call assert_false(filereadable('Xcomplete_cross_proof'))
+    bwipe!
+  finally
+    let &modeline = modeline
+    let &modelineexpr = modelineexpr
+    "let &modelinestrict = modelinestrict
+    call delete('Xcomplete_cross_proof')
+    delfunc Xcompletepwn
+  endtry
+endfunc
+
+func Test_formatexpr_insecure_copied_to_new_buffer()
+  new
+  sandbox setglobal formatexpr=writefile(['leak'],\ 'Xleak_fex')
+  enew!
+  call setline(1, ['some text to format'])
+  set textwidth=10
+  silent! normal! gqq
+  call assert_false(filereadable('Xleak_fex'))
+  call delete('Xleak_fex')
+  set formatexpr& textwidth&
+  bwipe!
+endfunc
+
+" includeexpr: triggered via gf / find_pattern_in_path (used by [i, gf, etc.)
+func Test_includeexpr_insecure_copied_to_new_buffer()
+  func Xleakinclude(fname)
+    call writefile(['leak'], 'Xleak_inex')
+    return a:fname
+  endfunc
+  new
+  sandbox setglobal includeexpr=Xleakinclude(v:fname)
+  enew!
+  call setline(1, ['#include "foo.h"'])
+  silent! normal! [i
+  call assert_false(filereadable('Xleak_inex'))
+  call delete('Xleak_inex')
+  set includeexpr&
+  delfunc Xleakinclude
+  bwipe!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

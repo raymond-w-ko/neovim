@@ -9,7 +9,7 @@ local current_buf = api.nvim_get_current_buf
 local get_mode = api.nvim_get_mode
 
 local ns = api.nvim_create_namespace('nvim.lsp.on_type_formatting')
-local augroup = api.nvim_create_augroup('nvim.lsp.on_type_formatting', {})
+local augroup = api.nvim_create_augroup('nvim.lsp.on_type_formatting')
 
 local M = {}
 
@@ -37,14 +37,14 @@ local function on_type_formatting(err, result, ctx)
     return
   end
 
-  local client = assert(vim.lsp.get_client_by_id(ctx.client_id))
+  local client = assert(lsp.get_client_by_id(ctx.client_id))
 
-  util.apply_text_edits(result, ctx.bufnr, client.offset_encoding)
+  util.apply_text_edits(result, bufnr, client.offset_encoding)
 end
 
 ---@param bufnr integer
 ---@param typed string
----@param triggered_clients vim.lsp.Client[]
+---@param triggered_clients table<integer, vim.lsp.Client>
 ---@param idx integer?
 ---@param client vim.lsp.Client?
 local function format_iter(bufnr, typed, triggered_clients, idx, client)
@@ -199,7 +199,7 @@ local function toggle_globally(enable)
   end
 
   -- If disabling, only clear the attachment autocmd. If enabling, create it as well.
-  local group = api.nvim_create_augroup('nvim.lsp.on_type_formatting', { clear = true })
+  local group = api.nvim_create_augroup('nvim.lsp.on_type_formatting.enable', { clear = true })
   if enable then
     nvim_on('LspAttach', group, {
       desc = 'Enable on-type formatting for ALL clients by default.',
@@ -246,8 +246,10 @@ function M.enable(enable, filter)
   filter = filter or {}
 
   if filter.client_id then
-    local client =
-      assert(lsp.get_client_by_id(filter.client_id), 'Client not found for id ' .. filter.client_id)
+    local client = lsp.get_client_by_id(filter.client_id)
+    if not client then
+      error('Client not found for id ' .. filter.client_id)
+    end
     toggle_for_client(enable, client)
   else
     toggle_globally(enable)

@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local assert_visible = n.assert_visible
 local assert_alive = n.assert_alive
 local dedent = t.dedent
@@ -740,6 +741,18 @@ describe('autocmd', function()
     eq('flarb', fn.bufname())
   end)
 
+  it('no use-after-free when closing new curwin during CTRL-W_x #41373', function()
+    exec([[
+      tabnew
+      vsplit
+      autocmd WinLeave * ++once bwipe!
+    ]])
+    eq(2, #api.nvim_list_tabpages())
+    feed('<C-W>x')
+    eq(1, #api.nvim_list_tabpages())
+    assert_alive()
+  end)
+
   it('does not ignore comma-separated patterns after a buffer-local pattern', function()
     exec [[
       edit baz  " reuses buffer 1
@@ -854,5 +867,31 @@ describe('autocmd', function()
           fly]]),
       fn.execute('autocmd User ,,,there,is,,a,fly,,')
     )
+  end)
+
+  it('normalizes path sep (slashes) in env var `pattern` #39382', function()
+    local path = t.is_os('win') and [[C:\foo\bar]] or 'C:/foo/bar'
+    fn.setenv('FOOBAR', path)
+    exec [[
+      autocmd User ~,$FOOBAR "
+    ]]
+    local cmds = exec_lua(function()
+      return vim.api.nvim_get_autocmds({ event = 'User' })
+    end)
+    eq(vim.fs.normalize('~'), cmds[1].pattern)
+    eq(vim.fs.normalize(path), cmds[2].pattern)
+  end)
+
+  it('exists() consults &fileignorecase', function()
+    command([[autocmd User foo/bar echo]])
+    eq(0, fn.exists([[#User#foo/bar/]]))
+    eq(1, fn.exists([[#User#foo/bar]]))
+    -- Even on Windows, `/` should be used as the path sep
+    eq(0, fn.exists([[#User#foo\bar]]))
+
+    command([[set fileignorecase]])
+    eq(1, fn.exists([[#User#Foo/Bar]]))
+    command([[set nofileignorecase]])
+    eq(0, fn.exists([[#User#Foo/Bar]]))
   end)
 end)

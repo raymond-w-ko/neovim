@@ -1,6 +1,7 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local assert_log = t.assert_log
 local assert_nolog = t.assert_nolog
 local clear = n.clear
@@ -60,7 +61,7 @@ describe('vim.log', function()
     eq(
       { true, true, true, true, true, false },
       exec_lua(function()
-        local logger = vim.log.new({ name = 'NoArgs', current_level = vim.log.levels.TRACE })
+        local logger = vim.log.new({ name = 'NoArgs', level = vim.log.levels.TRACE })
         local logfile = vim.fs.joinpath(vim.fn.stdpath('log'), 'noargs.log')
         return {
           logger.trace(),
@@ -74,13 +75,13 @@ describe('vim.log', function()
     )
   end)
 
-  it('new() respects current_level and format_func opts', function()
+  it('new() respects level and format_func opts', function()
     exec_lua(function()
       local logger = vim.log.new({
         name = 'CustomFormat',
-        current_level = vim.log.levels.INFO,
-        format_func = function(current_level, level, ...)
-          if level < current_level then
+        level = vim.log.levels.INFO,
+        format_func = function(min_level, level, ...)
+          if level < min_level then
             return nil
           end
           return tostring(select(1, ...)) .. '\n'
@@ -126,14 +127,18 @@ describe('vim.log', function()
     exec_lua(function()
       local logger = vim.log.new({
         name = 'SetFormat',
-        current_level = vim.log.levels.TRACE,
+        level = vim.log.levels.TRACE,
         format_func = function()
-          return 'old\n'
+          return nil
         end,
       })
+      local logfile = vim.fs.joinpath(vim.fn.stdpath('log'), 'setformat.log')
+      vim.fn.delete(logfile)
+      logger.error('skip-first')
+      assert(vim.uv.fs_stat(logfile) == nil)
 
-      vim.log.set_format_func(logger, function(current_level, level, ...)
-        return table.concat({ 'new', current_level, level, tostring(select(1, ...)) }, '|') .. '\n'
+      vim.log.set_format_func(logger, function(min_level, level, ...)
+        return table.concat({ 'new', min_level, level, tostring(select(1, ...)) }, '|') .. '\n'
       end)
 
       logger.error('formatted')
@@ -148,21 +153,37 @@ describe('vim.log', function()
     local logfile = get_logfile('SetFormat')
     assert_log('%[START%]%[.+%] SetFormat logging initiated', logfile, 10)
     assert_log('formatted', logfile, 10)
-    assert_nolog('old', logfile, 10)
+    assert_nolog('skip%-first', logfile, 10)
     assert_nolog('skip%-me', logfile, 10)
   end)
 
-  it('default formatter logs the real caller source and line', function()
+  it('default formatter logs the caller source and line', function()
     caller_script = t.tmpname(false) .. '.lua'
     write_file(
       caller_script,
-      "local logger = vim.log.new({ name = 'Caller', current_level = vim.log.levels.TRACE })\n"
+      "local logger = vim.log.new({ name = 'Caller', level = vim.log.levels.TRACE })\n"
         .. "logger.info('from-script')\n",
       true
     )
 
     exec_lua(function(path)
       vim.cmd('source ' .. vim.fn.fnameescape(path))
+      -- Caller in $VIMRUNTIME.
+      vim.env.VIMRUNTIME = vim.fs.dirname(path)
+      vim.cmd('source ' .. vim.fn.fnameescape(path))
+
+      -- Fast context (e.g. LSP rpc).
+      local logger = vim.log.new({ name = 'Caller' })
+      local done = false
+      local timer = assert(vim.uv.new_timer())
+      timer:start(0, 0, function()
+        timer:close()
+        logger.warn('from-fast')
+        done = true
+      end)
+      vim.wait(1000, function()
+        return done
+      end)
     end, caller_script)
 
     local logfile = get_logfile('Caller')
@@ -170,7 +191,9 @@ describe('vim.log', function()
       return vim.pesc(vim.fn.fnamemodify(path, ':t'))
     end, caller_script)
     assert_log(expected .. ':2', logfile, 10)
+    assert_log('%$VIMRUNTIME/' .. expected .. ':2', logfile, 10)
     assert_log('from%-script', logfile, 10)
+    assert_log('from%-fast', logfile, 10)
     assert_nolog('runtime/lua/vim/log%.lua', logfile, 10)
   end)
 end)

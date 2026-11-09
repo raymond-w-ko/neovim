@@ -23,10 +23,11 @@
 #include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
 #include "nvim/change.h"
+#include "nvim/context.h"
 #include "nvim/cursor.h"
+#include "nvim/dialog.h"
 #include "nvim/diff.h"
 #include "nvim/drawscreen.h"
-#include "nvim/edit.h"
 #include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/vars.h"
@@ -36,15 +37,17 @@
 #include "nvim/fold.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
-#include "nvim/getchar.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/iconv_defs.h"
+#include "nvim/input.h"
+#include "nvim/insert.h"
 #include "nvim/log.h"
 #include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/mbyte_defs.h"
+#include "nvim/mcursor.h"
 #include "nvim/memfile.h"
 #include "nvim/memfile_defs.h"
 #include "nvim/memline.h"
@@ -105,7 +108,11 @@ static const char *e_auchangedbuf = N_("E812: Autocommands changed buffer or buf
 // non-ASCII bytes (high bit set) in multiple bytes at once.
 #define NONASCII_MASK (((uint64_t)(-1) / 0xFF) * 0x80)
 
-void filemess(buf_T *buf, char *name, char *s)
+/// Shows a message about file `name`, e.g. `"foo.txt" [New]`.
+///
+/// @param s Info appended to the filename, e.g. "[New]".
+/// @param msg_id Emit as a "bufwrite" message with this id, or NULL for a plain message.
+static void filemess(buf_T *buf, char *name, char *s, const char *msg_id)
 {
   int prev_msg_col = msg_col;
 
@@ -122,7 +129,7 @@ void filemess(buf_T *buf, char *name, char *s)
   // For further ones overwrite the previous one, reset msg_scroll before
   // calling filemess().
   int msg_scroll_save = msg_scroll;
-  if (shortmess(SHM_OVERALL) && !msg_listdo_overwrite && !exiting && p_verbose == 0) {
+  if (shortmess(kShmOverall) && !msg_listdo_overwrite && !exiting && p_verbose == 0) {
     msg_scroll = false;
   }
   if (!msg_scroll) {    // wait a bit when overwriting an error msg
@@ -135,16 +142,38 @@ void filemess(buf_T *buf, char *name, char *s)
   msg_scroll = msg_scroll_save;
   msg_scrolled_ign = true;
   // may truncate the message to avoid a hit-return prompt
-  if (*s == NUL) {
-    // Append the filename (without trailing char) to the message ID.
-    char msg_id[IOSIZE + 14] = "nvim.bufwrite ";
-    xstrlcat(msg_id, IObuff, 14 + strlen(IObuff));
-    msg_progress(IObuff, msg_id, "running", 0, false, true);
+  if (msg_id != NULL) {
+    msg_with_id(IObuff, (char *)msg_id, "bufwrite", NULL, 0, false, true, false);
   } else {
     msg_outtrans(msg_may_trunc(false, IObuff), 0, false);
   }
   msg_clr_eos();
   msg_scrolled_ign = false;
+}
+
+/// Shows file `name` before writing it, as a "bufwrite" message with `msg_id`, which buf_write()
+/// replaces when done (or with a progress-message, if slow).
+void filemess_bufwrite(buf_T *buf, char *name, const char *msg_id)
+{
+  filemess(buf, name, "", msg_id);
+}
+
+/// If a file read/write is slower than this, emit a progress-message.
+uint64_t slow_io_ns(void)
+{
+  // XXX: combine v:testing + $NVIM_TEST. this is a shitty hack but i dont want another gd flag.
+  return nvim_testing && get_vim_var_nr(VV_TESTING) ? 0 : NS_PER_SEC / 2;
+}
+
+/// Shows the progress-message of a slow readfile(). Locks `curbuf` so Progress handlers cannot
+/// accidentally unload it while it is loading.
+static char *readfile_progress(char *s, char *msg_id, char *status, int percent, bool hist)
+{
+  buf_T *buf = curbuf;
+  buf->b_locked++;
+  char *rv = msg_progress(s, msg_id, status, percent, 0, hist, s != NULL, false);
+  buf->b_locked--;
+  return rv;
 }
 
 /// Read lines from file "fname" into the buffer after line "from".
@@ -258,7 +287,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   if (curbuf->b_ffname == NULL
       && !filtering
       && fname != NULL
-      && vim_strchr(p_cpo, CPO_FNAMER) != NULL
+      && vim_strchr(p_cpo, kCpoFnamer) != NULL
       && !(flags & READ_DUMMY)) {
     if (set_rw_fname(fname, sfname) == FAIL) {
       goto theend;
@@ -274,10 +303,6 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   old_b_fname = curbuf->b_fname;
   using_b_ffname = (fname == curbuf->b_ffname) || (sfname == curbuf->b_ffname);
   using_b_fname = (fname == curbuf->b_fname) || (sfname == curbuf->b_fname);
-
-  // After reading a file the cursor line changes but we don't want to
-  // display the line.
-  ex_no_reprint = true;
 
   // don't display the file info for another buffer now
   need_fileinfo = false;
@@ -315,6 +340,12 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
         // consider this to work like ":edit", thus reset the
         // BF_NOTEDITED flag.  Then ":write" will work to overwrite the
         // same file.
+        if (retval == OK && !curbuf->b_au_did_filetype && *curbuf->b_p_ft != NUL) {
+          apply_autocmds(EVENT_FILETYPE, curbuf->b_p_ft, curbuf->b_fname, true, curbuf);
+          if (aborting()) {
+            retval = FAIL;
+          }
+        }
         if (retval == OK) {
           curbuf->b_flags &= ~BF_NOTEDITED;
         }
@@ -336,7 +367,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
     }
   }
 
-  if (((shortmess(SHM_OVER) && !msg_listdo_overwrite) || curbuf->b_help) && p_verbose == 0) {
+  if (((shortmess(kShmOver) && !msg_listdo_overwrite) || curbuf->b_help) && p_verbose == 0) {
     msg_scroll = false;         // overwrite previous file message
   } else {
     msg_scroll = true;          // don't overwrite previous file message
@@ -347,7 +378,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
 
     // If the name is too long we might crash further on, quit here.
     if (fnamelen >= MAXPATHL) {
-      filemess(curbuf, fname, _("Illegal file name"));
+      filemess(curbuf, fname, _("Illegal file name"), NULL);
       msg_end();
       msg_scroll = msg_save;
       goto theend;
@@ -358,7 +389,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
     // swap file may destroy it!  Reported on MS-DOS and Win 95.
     if (after_pathsep(fname, fname + fnamelen)) {
       if (!silent) {
-        filemess(curbuf, fname, _(msg_is_a_directory));
+        filemess(curbuf, fname, _(msg_is_a_directory), NULL);
       }
       msg_end();
       msg_scroll = msg_save;
@@ -388,11 +419,11 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
       // check for it before os_open().
       if (S_ISDIR(perm)) {
         if (!silent) {
-          filemess(curbuf, fname, _(msg_is_a_directory));
+          filemess(curbuf, fname, _(msg_is_a_directory), NULL);
         }
         retval = NOTDONE;
       } else {
-        filemess(curbuf, fname, _("is not a file"));
+        filemess(curbuf, fname, _("is not a file"), NULL);
       }
       msg_end();
       msg_scroll = msg_save;
@@ -481,9 +512,9 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
       }
       if (!silent) {
         if (dir_of_file_exists(fname)) {
-          filemess(curbuf, sfname, _("[New]"));
+          filemess(curbuf, sfname, _("[New]"), NULL);
         } else {
-          filemess(curbuf, sfname, _("[New DIRECTORY]"));
+          filemess(curbuf, sfname, _("[New DIRECTORY]"), NULL);
         }
       }
       // Even though this is a new file, it might have been
@@ -504,17 +535,15 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
       goto theend;
     }
 #if defined(UNIX) && defined(EOVERFLOW)
-    filemess(curbuf, sfname, ((fd == UV_EFBIG) ? _("[File too big]")
-                                               :
-                              // libuv only returns -errno
-                              // in Unix and in Windows
-                              // open() does not set
-                              // EOVERFLOW
-                              (fd == -EOVERFLOW) ? _("[File too big]")
-                                                 : _("[Permission Denied]")));
+    filemess(curbuf, sfname,
+             ((fd == UV_EFBIG)
+              ? _("[File too big]")
+              // libuv only returns -errno in Unix; Windows open() does not set EOVERFLOW.
+              : (fd == -EOVERFLOW) ? _("[File too big]") : _("[Permission Denied]")),
+             NULL);
 #else
-    filemess(curbuf, sfname, ((fd == UV_EFBIG) ? _("[File too big]")
-                                               : _("[Permission Denied]")));
+    filemess(curbuf, sfname, ((fd == UV_EFBIG) ? _("[File too big]") : _("[Permission Denied]")),
+             NULL);
 #endif
     curbuf->b_p_ro = true;                  // must use "w!" now
 
@@ -670,11 +699,19 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   // Autocommands may add lines to the file, need to check if it is empty
   wasempty = (curbuf->b_ml.ml_flags & ML_EMPTY);
 
-  if (!recoverymode && !filtering && !(flags & READ_DUMMY) && !silent) {
-    if (!read_stdin && !read_buffer) {
-      filemess(curbuf, sfname, "");
-    }
+  // `silent` ('shortmess=F') skips file msg, but not the progress-message of a slow read.
+  const bool show_msg = !recoverymode && !filtering && !(flags & READ_DUMMY)
+                        && !read_stdin && !read_buffer && msg_silent == 0;
+  if (show_msg && !silent) {
+    filemess(curbuf, sfname, "", NULL);
   }
+
+  // Slow read: progress-message id, and last shown percent.
+  char msg_id[MAXPATHL + 32];
+  fname_msg_id(msg_id, sizeof(msg_id), "nvim.bufread", curbuf, sfname);
+  bool progress = false;
+  int percent = -1;  // -1: unknown size (fifo).
+  const uint64_t read_start = os_hrtime();
 
   msg_scroll = false;                   // overwrite the file message
 
@@ -840,7 +877,7 @@ retry:
 
     // Use the 'charconvert' expression when conversion is required
     // and we can't do it internally or with iconv().
-    if (fio_flags == 0 && !read_stdin && !read_buffer && *p_ccv != NUL
+    if (fio_flags == 0 && !read_stdin && !read_buffer && p_ccv.type != kCallbackNone
         && !read_fifo && iconv_fd == (iconv_t)-1) {
       did_iconv = false;
       // Skip conversion when it's already done (retry for wrong
@@ -1429,7 +1466,7 @@ retry:
           // Detected a UTF-8 error.
 rewind_retry:
           // Retry reading with another conversion.
-          if (*p_ccv != NUL && iconv_fd != (iconv_t)-1) {
+          if (p_ccv.type != kCallbackNone && iconv_fd != (iconv_t)-1) {
             // iconv() failed, try 'charconvert'
             did_iconv = true;
           } else {
@@ -1625,6 +1662,20 @@ rewind_retry:
       size = -1;
     }
     linerest = (ptr - line_start);
+
+    // Slow read: show a progress-message (with updated %).
+    if (show_msg && (progress || os_hrtime() - read_start > slow_io_ns())) {
+      FileInfo info;
+      const uint64_t total = os_fileinfo_fd(fd, &info) ? os_fileinfo_size(&info) : 0;
+      const int pct = total > 0 ? (int)MIN((uint64_t)filesize * 100 / total, 100) : -1;
+      if (!progress || pct != percent) {
+        progress = true;
+        percent = pct;
+        add_quoted_fname(IObuff, IOSIZE, curbuf, sfname);
+        readfile_progress(IObuff, msg_id, "running", percent, false);
+      }
+    }
+
     os_breakcheck();
   }
 
@@ -1677,7 +1728,7 @@ failed:
     save_file_ff(curbuf);
     // If editing a new file: set 'fenc' for the current buffer.
     // Also for ":read ++edit file".
-    set_option_direct(kOptFileencoding, CSTR_AS_OPTVAL(fenc), OPT_LOCAL, 0);
+    set_option_direct(kOptFileencoding, CSTR_AS_OBJ(fenc), OPT_LOCAL, 0);
   }
   if (fenc_alloced) {
     xfree(fenc);
@@ -1740,8 +1791,11 @@ failed:
     }
 
     if (got_int) {
+      if (progress) {
+        readfile_progress(NULL, msg_id, "cancel", -1, false);
+      }
       if (!(flags & READ_DUMMY)) {
-        filemess(curbuf, sfname, _(e_interr));
+        filemess(curbuf, sfname, _(e_interr), NULL);
         if (newfile) {
           curbuf->b_p_ro = true;                // must use "w!" now
         }
@@ -1775,7 +1829,7 @@ failed:
 #endif
       if (curbuf->b_p_ro) {
         buflen += snprintf(IObuff + buflen, (size_t)(IOSIZE - buflen), "%s",
-                           shortmess(SHM_RO) ? _("[RO]") : _("[readonly]"));
+                           shortmess(kShmRo) ? _("[RO]") : _("[readonly]"));
         c = true;
       }
       if (read_no_eol_lnum) {
@@ -1823,7 +1877,9 @@ failed:
         if (msg_col > 0) {
           msg_putchar('\r');  // overwrite previous message
         }
-        p = (uint8_t *)msg_trunc(IObuff, false, 0);
+        p = (uint8_t *)(progress
+                        ? readfile_progress(IObuff, msg_id, error ? "failed" : "success", -1, true)
+                        : msg_trunc(IObuff, false, 0));
       }
 
       if (read_stdin || read_buffer || restart_edit != 0
@@ -1836,6 +1892,8 @@ failed:
         set_keep_msg((char *)p, 0);
       }
       msg_scrolled_ign = false;
+    } else if (progress) {
+      readfile_progress(NULL, msg_id, error ? "failed" : "success", -1, false);
     }
 
     // with errors writing the file requires ":w!"
@@ -1847,13 +1905,8 @@ failed:
 
     u_clearline(curbuf);   // cannot use "U" command after adding lines
 
-    // In Ex mode: cursor at last new line.
-    // Otherwise: cursor at first new line.
-    if (exmode_active) {
-      curwin->w_cursor.lnum = from + linecnt;
-    } else {
-      curwin->w_cursor.lnum = from + 1;
-    }
+    // Cursor at first new line.
+    curwin->w_cursor.lnum = from + 1;
     check_cursor_lnum(curwin);
     beginline(BL_WHITE | BL_FIX);           // on first non-blank
 
@@ -1908,12 +1961,19 @@ failed:
       apply_autocmds_exarg(EVENT_FILTERREADPOST, NULL, sfname,
                            false, curbuf, eap);
     } else if (newfile || (read_buffer && sfname != NULL)) {
-      apply_autocmds_exarg(EVENT_BUFREADPOST, NULL, sfname,
-                           false, curbuf, eap);
+      // 'filetype' detection is triggered by BufReadPost.
+      bool did_bufrp = apply_autocmds_exarg(EVENT_BUFREADPOST, NULL, sfname, false, curbuf, eap);
+
       if (!curbuf->b_au_did_filetype && *curbuf->b_p_ft != NUL) {
         // EVENT_FILETYPE was not triggered but the buffer already has a
         // filetype.  Trigger EVENT_FILETYPE using the existing filetype.
         apply_autocmds(EVENT_FILETYPE, curbuf->b_p_ft, curbuf->b_fname, true, curbuf);
+      }
+
+      if (!did_bufrp && *curbuf->b_p_ft == NUL && augroup_exists("filetypedetect")) {
+        // BufReadPost was skipped, and 'filetype' is empty. Retry filetype-detection now.
+        apply_autocmds_group(EVENT_BUFREADPOST, sfname, NULL, true, augroup_find("filetypedetect"),
+                             curbuf, curwin, NULL, NULL, false);
       }
     } else {
       apply_autocmds_exarg(EVENT_FILEREADPOST, sfname, sfname,
@@ -2024,7 +2084,7 @@ void set_forced_fenc(exarg_T *eap)
   }
 
   char *fenc = enc_canonize(eap->cmd + eap->force_enc);
-  set_option_direct(kOptFileencoding, CSTR_AS_OPTVAL(fenc), OPT_LOCAL, 0);
+  set_option_direct(kOptFileencoding, CSTR_AS_OBJ(fenc), OPT_LOCAL, 0);
   xfree(fenc);
 }
 
@@ -2171,6 +2231,17 @@ void add_quoted_fname(char *const ret_buf, const size_t bufsize, const buf_T *co
   xstrlcpy(ret_buf + len, "\" ", bufsize - len);
 }
 
+/// Sets progress-message id of reading/writing file `fname`, e.g. `nvim.bufread "foo.txt"`.
+/// Call this once per read/write, so its messages share a msg-id.
+void fname_msg_id(char *msg_id, size_t size, const char *prefix, const buf_T *buf,
+                  const char *fname)
+  FUNC_ATTR_NONNULL_ARG(1, 3)
+{
+  size_t len = (size_t)snprintf(msg_id, size, "%s ", prefix);
+  add_quoted_fname(msg_id + len, size - len, buf, fname);
+  msg_id[strlen(msg_id) - 1] = NUL;  // add_quoted_fname() appends a space, for display only.
+}
+
 /// Append message for text mode to IObuff.
 ///
 /// @param eol_type line ending type
@@ -2202,7 +2273,7 @@ void msg_add_lines(int insert_space, linenr_T lnum, off_T nchars)
 {
   size_t len = strlen(IObuff);
 
-  if (shortmess(SHM_LINES)) {
+  if (shortmess(kShmLines)) {
     snprintf(IObuff + len, IOSIZE - len,
              _("%s%" PRId64 "L, %" PRId64 "B"),  // l10n: L as in line, B as in byte
              insert_space ? " " : "", (int64_t)lnum, (int64_t)nchars);
@@ -2358,43 +2429,59 @@ static char *check_for_bom(const char *p_in, int size, int *lenp, int flags)
 ///
 /// For buffers that have buftype "nofile" or "scratch": never change the file
 /// name.
-void shorten_buf_fname(buf_T *buf, char *dirname, int force)
+///
+/// @return  True if `b_fname` changed.
+bool shorten_buf_fname(buf_T *buf, char *dirname, int force)
 {
-  if (buf->b_fname != NULL
-      && !bt_nofilename(buf)
-      && !path_with_url(buf->b_fname)
-      && (force
-          || buf->b_sfname == NULL
-          || path_is_absolute(buf->b_sfname))) {
-    if (buf->b_sfname != buf->b_ffname) {
-      XFREE_CLEAR(buf->b_sfname);
-    }
-    char *p = path_shorten_fname(buf->b_ffname, dirname);
-    if (p != NULL) {
-      buf->b_sfname = xstrdup(p);
-      buf->b_fname = buf->b_sfname;
-    }
-    if (p == NULL) {
-      buf->b_fname = buf->b_ffname;
-    }
+  if (buf->b_fname == NULL
+      || bt_nofilename(buf)
+      || path_with_url(buf->b_fname)
+      || !(force || buf->b_sfname == NULL || path_is_absolute(buf->b_sfname))) {
+    return false;
   }
+
+  char *p = path_shorten_fname(buf->b_ffname, dirname);
+  bool shorten = p != NULL && *p != NUL;
+  if (shorten && buf->b_sfname != NULL && strcmp(p, buf->b_sfname) == 0) {
+    // Same name: keep the allocation. Callers (readfile()) alias `b_fname` across autocommands and
+    // check the pointer to detect a rename. Very cool... #41454
+    return false;
+  }
+
+  // Decide now, the old name may be freed below.
+  char *new_fname = shorten ? p : buf->b_ffname;
+  bool changed = new_fname == NULL || strcmp(new_fname, buf->b_fname) != 0;
+
+  if (buf->b_sfname != buf->b_ffname) {
+    XFREE_CLEAR(buf->b_sfname);
+  }
+  if (shorten) {
+    buf->b_sfname = xstrdup(p);
+    buf->b_fname = buf->b_sfname;
+  } else {
+    buf->b_fname = buf->b_ffname;
+  }
+  return changed;
 }
 
-/// Shorten filenames for all buffers.
+/// Shortens filenames for all buffers. Schedules a statusline redraw if any name changed.
 void shorten_fnames(int force)
 {
   char dirname[MAXPATHL];
+  bool changed = false;
 
   os_dirname(dirname, MAXPATHL);
   FOR_ALL_BUFFERS(buf) {
-    shorten_buf_fname(buf, dirname, force);
+    changed |= shorten_buf_fname(buf, dirname, force);
 
     // Always make the swap file name a full path, a "nofile" buffer may
     // also have a swap file.
     mf_fullname(buf->b_ml.ml_mfp);
   }
-  status_redraw_all();
-  redraw_tabline = true;
+  if (changed) {
+    status_redraw_all();
+    redraw_tabline = true;
+  }
 }
 
 /// Get new filename ended by given extension.
@@ -2687,7 +2774,9 @@ static int rename_with_tmp(const char *const from, const char *const to)
         }
         // Strange, the second step failed.  Try moving the
         // file back and return failure.
-        os_rename(tempname, from);
+        if (os_rename(tempname, from) != OK) {
+          ELOG("failed to restore %s, file is at: %s", from, tempname);
+        }
         return -1;
       }
       // If it fails for one temp name it will most likely fail
@@ -2710,7 +2799,7 @@ int vim_rename(const char *from, const char *to)
   // When the names are identical, there is nothing to do.  When they refer
   // to the same file (ignoring case and slash/backslash differences) but
   // the file name differs we need to go through a temp file.
-  if (path_fnamecmp(from, to) == 0) {
+  if (path_equal(from, to, kPathCmpLiteral)) {
     if (p_fic && (strcmp(path_tail(from), path_tail(to)) != 0)) {
       use_tmp_file = true;
     } else {
@@ -2736,14 +2825,13 @@ int vim_rename(const char *from, const char *to)
     return rename_with_tmp(from, to);
   }
 
-  // Delete the "to" file, this is required on some systems to make the
-  // os_rename() work, on other systems it makes sure that we don't have
-  // two files when the os_rename() fails.
-
-  os_remove(to);
-
-  // First try a normal rename, return if it works.
+  // First try a normal rename without removing "to".
   if (os_rename(from, to) == OK) {
+    return 0;
+  }
+
+  // Retry after removing "to", e.g. when renaming a directory over a file.
+  if (os_remove(to) == 0 && os_rename(from, to) == OK) {
     return 0;
   }
 
@@ -3140,11 +3228,13 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
   buf_T *savebuf;
   bufref_T bufref;
   int saved = OK;
-  aco_save_T aco = { 0 };
+  CtxSwitch aco = { 0 };
   int flags = READ_NEW;
 
   // Set curwin/curbuf for "buf" and save some things.
-  aucmd_prepbuf(&aco, buf);
+  ctx_switch(&aco, NULL, NULL, buf, 0);
+
+  mc_buf_clear(buf);  // Multicursor: file-reload invalidates the extmarks.
 
   // Unless reload_options is set, we only want to read the text from the
   // file, not reset the syntax highlighting, clear marks, diff status, etc.
@@ -3197,7 +3287,7 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
     curbuf->b_flags |= BF_CHECK_RO;           // check for RO again
     curbuf->b_keep_filetype = true;           // don't detect 'filetype'
     if (readfile(buf->b_ffname, buf->b_fname, 0, 0,
-                 (linenr_T)MAXLNUM, &ea, flags, shortmess(SHM_FILEINFO)) != OK) {
+                 (linenr_T)MAXLNUM, &ea, flags, shortmess(kShmFileinfo)) != OK) {
       if (!aborting()) {
         semsg(_("E321: Could not reload \"%s\""), buf->b_fname);
       }
@@ -3260,7 +3350,7 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
   do_modelines(0);
 
   // restore curwin/curbuf and a few other things
-  aucmd_restbuf(&aco);
+  ctx_restore(&aco);
   // Careful: autocommands may have made "buf" invalid!
 }
 
@@ -3281,22 +3371,6 @@ void write_lnum_adjust(linenr_T offset)
     curbuf->b_no_eol_lnum += offset;
   }
 }
-
-#ifdef BACKSLASH_IN_FILENAME
-/// Convert all backslashes in fname to forward slashes in-place,
-/// unless when it looks like a URL.
-void forward_slash(char *fname)
-{
-  if (path_with_url(fname)) {
-    return;
-  }
-  for (char *p = fname; *p != NUL; p++) {
-    if (*p == '\\') {
-      *p = '/';
-    }
-  }
-}
-#endif
 
 /// Path to Nvim's own temp dir. Ends in a slash.
 static char *vim_tempdir = NULL;

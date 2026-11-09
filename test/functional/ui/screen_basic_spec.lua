@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local set_session, clear, assert_alive = n.set_session, n.clear, n.assert_alive
 local feed, command = n.feed, n.command
 local exec, exec_lua = n.exec, n.exec_lua
@@ -365,7 +366,7 @@ local function screen_tests(linegrid)
         0123^456                                              |
         789                                                  |
         {1:~                                                    }|*11
-                                           1,5           All |
+                                           1,5            All|
       ]])
     end)
   end)

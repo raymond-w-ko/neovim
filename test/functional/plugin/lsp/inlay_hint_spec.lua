@@ -3,6 +3,7 @@ local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 local t_lsp = require('test.functional.plugin.lsp.testutil')
 
+local describe, it, before_each, after_each = t.describe, t.it, t.before_each, t.after_each
 local eq = t.eq
 local pcall_err = t.pcall_err
 local dedent = t.dedent
@@ -448,6 +449,20 @@ test text
       {1:01234}before^ test text                             |
                                                         |*2
     ]])
+  end)
+
+  it('keeps hints until refresh response arrives', function()
+    exec_lua([[vim.lsp.inlay_hint.enable(true, { bufnr = bufnr })]])
+    screen:expect({ grid = grid_with_inlay_hints })
+    exec_lua(function()
+      vim.lsp.handlers['textDocument/inlayHint'] = function() end
+      vim.lsp.inlay_hint.on_refresh(
+        nil,
+        nil,
+        { method = 'workspace/inlayHint/refresh', client_id = client_id }
+      )
+    end)
+    screen:expect({ grid = grid_with_inlay_hints, unchanged = true })
   end)
 
   after_each(function()

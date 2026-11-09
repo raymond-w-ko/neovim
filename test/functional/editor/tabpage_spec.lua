@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear = n.clear
 local command = n.command
 local eq = t.eq
@@ -9,6 +10,7 @@ local neq = t.neq
 local feed = n.feed
 local eval = n.eval
 local exec = n.exec
+local exec_lua = n.exec_lua
 local fn = n.fn
 local api = n.api
 local curwin = n.api.nvim_get_current_win
@@ -172,4 +174,28 @@ describe('tabpage', function()
       quit
     ]])
   end)
+
+  it(
+    'no crash when :tabclose/:tabonly and WinClosed autocmd wipes buf and switches to closing tab',
+    function()
+      exec_lua(function()
+        local win1 = vim.api.nvim_get_current_win()
+        vim.cmd('botright new')
+        local win2 = vim.api.nvim_get_current_win()
+        local buf2 = vim.api.nvim_get_current_buf()
+        vim.cmd('tabedit')
+        vim.api.nvim_create_autocmd('WinClosed', {
+          pattern = tostring(win2),
+          callback = function()
+            -- Wipe the closing window's buffer and switch back to the original window,
+            -- so `curtab == tp` in tabpage_close_other's loop.
+            vim.api.nvim_buf_delete(buf2, { force = true })
+            vim.api.nvim_set_current_win(win1)
+          end,
+        })
+        vim.cmd('tabonly')
+      end)
+      assert_alive()
+    end
+  )
 end)

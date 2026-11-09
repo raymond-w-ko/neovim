@@ -102,9 +102,12 @@ function vim.rpcnotify(channel, method, ...) end
 --- Example: see [nvim_exec_lua()]
 ---
 --- @param channel integer
+--- @param opts? table Optional parameters (can be omitted):
+---   - timeout: (integer) Max milliseconds to wait for the response, else raise an error.
 --- @param method string
 --- @param ...? any
-function vim.rpcrequest(channel, method, ...) end
+--- @overload fun(channel: integer, method: string, ...: any): any
+function vim.rpcrequest(channel, opts, method, ...) end
 
 --- Compares strings case-insensitively.
 --- @param a string
@@ -198,9 +201,29 @@ function vim._core.loop_poll(timeout, fast_only) end
 function vim._core.ui_flush() end
 
 --- @nodoc
+--- (C function: `path_with_url()`) Checks if `name` is a URL (not a file path): "deno:/a" and
+--- "fugitive:///a" are URLs, "C:/a" and "mailto:a" are not.
+--- @param name string
+--- @return boolean
+function vim._core.path_is_url(name) end
+
+--- @nodoc
 --- Checks for interrupt, clears it, and consumes input if present.
 --- @return boolean
 function vim._core.check_interrupt() end
+
+--- @nodoc
+--- Executes one Ex command line obtained from `getline`, which is also called for any
+--- continuation lines (`:append` text, `:function` body, heredoc, …). See `vim._core.exmode`.
+--- @param getline fun(): string?
+--- @return boolean # false if {getline} returned nil before any line was read (EOF).
+function vim._core.ex_docmd(getline) end
+
+--- @nodoc
+--- Parses `keys` (internal representation) into a list of key chords. See |vim.keycode()|.
+--- @param keys string
+--- @return vim.keycode.chord[]
+function vim._core.keyparse(keys) end
 
 --- Subscribe to |ui-events|, similar to |nvim_ui_attach()| but receive events in a Lua callback.
 --- Used to implement screen elements like popupmenu or message handling in Lua.

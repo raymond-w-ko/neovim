@@ -535,11 +535,69 @@ func Test_normal09c_operatorfunc()
   new
   call setline(1, ['first', 'first', 'third', 'third', 'second'])
   normal! 1GVjg@
-  normal! 5G.
   normal! 3G.
-  call assert_equal(['_____', '_____', '_____', '_____', '______'], getline(1, '$'))
+  " Nvim: "." re-executes the captured keysequence ("Vjg@"), not an equal-size
+  " reselect. At the last line the replayed "j" fails, aborting the replay:
+  " nothing is applied (and the pending Visual mode is left active).
+  normal! 5G.
+  exe "normal! \<Esc>"
+  call assert_equal(['_____', '_____', '_____', '_____', 'second'], getline(1, '$'))
   bwipe!
   set operatorfunc=
+endfunc
+
+func OpfuncMarks(type)
+  let g:opfunc_marks = [a:type, getpos("'[")[1:2], getpos("']")[1:2]]
+endfunc
+
+" Test that '] is on the last character of a forced blockwise motion
+func Test_normal09d_operatorfunc_forced_block()
+  new
+  set operatorfunc=OpfuncMarks
+  " An exclusive motion: the block includes the end, as in Visual block mode.
+  for [line, keys, text, marks] in [
+        \ ['abcd', "02|y\<C-V>l", 'bc', [[1, 2], [1, 3]]],
+        \ ['abcd', "03|y\<C-V>h", 'bc', [[1, 2], [1, 3]]],
+        \ ['ab cd', "0y\<C-V>w", 'ab c', [[1, 1], [1, 4]]],
+        \ ['ab cd', "04|y\<C-V>b", 'ab c', [[1, 1], [1, 4]]],
+        \ ]
+    call setline(1, line)
+    exe 'normal! ' .. keys
+    call assert_equal(text, @", keys)
+    call assert_equal(marks, [getpos("'[")[1:2], getpos("']")[1:2]], keys)
+    exe 'normal! ' .. substitute(keys, 'y', 'g@', '')
+    call assert_equal(['block'] + marks, g:opfunc_marks, keys)
+  endfor
+
+  " With 'selection' exclusive, the block does not include the end.
+  set selection=exclusive
+  call setline(1, 'abcd')
+  exe "normal! 02|y\<C-V>l"
+  call assert_equal('b', @")
+  call assert_equal([1, 2], getpos("']")[1:2])
+  exe "normal! 02|g@\<C-V>l"
+  call assert_equal(['block', [1, 2], [1, 2]], g:opfunc_marks)
+  set selection&
+
+  " A characterwise exclusive motion still excludes the end.
+  call setline(1, 'abcd')
+  normal! 02|yl
+  call assert_equal([1, 2], getpos("']")[1:2])
+  normal! 02|g@l
+  call assert_equal(['char', [1, 2], [1, 2]], g:opfunc_marks)
+
+  " A block over several lines, with an exclusive mark motion.
+  call setline(1, ['abcd', 'efgh'])
+  call setpos("'a", [0, 2, 3, 0])
+  exe "normal! gg02|y\<C-V>`a"
+  call assert_equal("bc\nfg", @")
+  call assert_equal([[1, 2], [2, 3]], [getpos("'[")[1:2], getpos("']")[1:2]])
+  exe "normal! gg02|g@\<C-V>`a"
+  call assert_equal(['block', [1, 2], [2, 3]], g:opfunc_marks)
+
+  bwipe!
+  set operatorfunc=
+  unlet g:opfunc_marks
 endfunc
 
 " Test for different ways of setting the 'operatorfunc' option
@@ -937,7 +995,7 @@ endfunc
 " Test for errors with z command
 func Test_normal_z_error()
   call assert_beeps('normal! z2p')
-  call assert_beeps('normal! zq')
+  call assert_beeps('normal! zK')
   call assert_beeps('normal! cz1')
 endfunc
 
@@ -2798,6 +2856,7 @@ func Test_normal33_g_cmd2()
 endfunc
 
 func Test_normal_ex_substitute()
+  throw 'Skipped: Nvim "gQ" restores multicursors (not Ex-mode)'
   " This was hanging on the substitute prompt.
   new
   call setline(1, 'a')
@@ -2909,7 +2968,7 @@ func Test_normal_8g8()
   " With invalid byte.
   call setline(1, "___\xff___")
   norm! 1G08g8g
-  call assert_equal([0, 1, 4, 0, 1], getcurpos())
+  call assert_equal([0, 1, 4, 0, 4], getcurpos())
 
   " With invalid byte before the cursor.
   call setline(1, "___\xff___")
@@ -2919,12 +2978,12 @@ func Test_normal_8g8()
   " With truncated sequence.
   call setline(1, "___\xE2\x82___")
   norm! 1G08g8g
-  call assert_equal([0, 1, 4, 0, 1], getcurpos())
+  call assert_equal([0, 1, 4, 0, 4], getcurpos())
 
   " With overlong sequence.
   call setline(1, "___\xF0\x82\x82\xAC___")
   norm! 1G08g8g
-  call assert_equal([0, 1, 4, 0, 1], getcurpos())
+  call assert_equal([0, 1, 4, 0, 4], getcurpos())
 
   " With valid utf8.
   call setline(1, "café")
@@ -4409,13 +4468,18 @@ func Test_single_line_filler_zb()
 endfunc
 
 " Test for zb with fewer buffer lines than window height, non-zero 'scrolloff'
-" and cursor on fold.
-func Test_zb_with_cursor_on_fold()
+" and cursor on or just above a fold.
+func Test_zb_with_cursor_on_or_just_above_fold()
   15new
   call setline(1, range(1, 5) + ['', 'foo{{{', 'bar}}}', '', 'baz'])
   setlocal foldmethod=marker scrolloff=1
   call assert_equal(8, foldclosedend(7))
+
   call cursor(7, 1)
+  normal! zb
+  call assert_equal(1, line('w0'))
+
+  call cursor(6, 1)
   normal! zb
   call assert_equal(1, line('w0'))
 

@@ -30,11 +30,11 @@
 #include "nvim/ex_getln.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
-#include "nvim/getchar.h"
-#include "nvim/getchar_defs.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
+#include "nvim/input.h"
+#include "nvim/input_defs.h"
 #include "nvim/insexpand.h"
 #include "nvim/keycodes.h"
 #include "nvim/lua/executor.h"
@@ -1009,7 +1009,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
   proftime_T call_start;
   bool started_profiling = false;
   bool did_save_redo = false;
-  save_redo_T save_redo;
+  RedoState save_redo;
   ESTACK_CHECK_DECLARATION;
 
   // If depth of calling is getting too high, don't execute the function
@@ -1023,7 +1023,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
   // Save search patterns and redo buffer.
   save_search_patterns();
   if (!ins_compl_active()) {
-    saveRedobuff(&save_redo);
+    save_redobuff(&save_redo);
     did_save_redo = true;
   }
   fp->uf_calls++;
@@ -1368,7 +1368,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
   }
   // restore search patterns and redo buffer
   if (did_save_redo) {
-    restoreRedobuff(&save_redo);
+    restore_redobuff(&save_redo);
   }
   restore_search_patterns();
 }
@@ -1407,7 +1407,7 @@ static int call_user_func_check(ufunc_T *fp, int argcount, typval_T *argvars, ty
   FUNC_ATTR_NONNULL_ARG(1, 3, 4, 5)
 {
   if (fp->uf_flags & FC_LUAREF) {
-    return typval_exec_lua_callable(fp->uf_luaref, argcount, argvars, rettv);
+    return nlua_exec_typval_callable(fp->uf_luaref, argcount, argvars, rettv);
   }
 
   if ((fp->uf_flags & FC_RANGE) && funcexe->fe_doesrange != NULL) {
@@ -1741,7 +1741,7 @@ int call_func(const char *funcname, int len, typval_T *rettv, int argcount_in, t
       if (len > 0) {
         error = FCERR_NONE;
         argv_add_base(funcexe->fe_basetv, &argvars, &argcount, argv, &argv_base);
-        nlua_call_typval(funcname, (size_t)len, argvars, argcount, rettv);
+        nlua_call_vlua(funcname, (size_t)len, argvars, argcount, rettv);
       } else {
         // v:lua was called directly; show its name in the emsg
         XFREE_CLEAR(name);
@@ -1827,7 +1827,7 @@ int call_simple_luafunc(const char *funcname, size_t len, typval_T *rettv)
 
   typval_T argvars[1];
   argvars[0].v_type = VAR_UNKNOWN;
-  nlua_call_typval(funcname, len, argvars, 0, rettv);
+  nlua_call_vlua(funcname, len, argvars, 0, rettv);
   return OK;
 }
 
@@ -2917,7 +2917,7 @@ void ex_function(exarg_T *eap)
         p = vim_strchr(scriptname, '/');
         int plen = (int)strlen(p);
         int slen = (int)strlen(SOURCING_NAME);
-        if (slen > plen && path_fnamecmp(p, SOURCING_NAME + slen - plen) == 0) {
+        if (slen > plen && path_equal(p, SOURCING_NAME + slen - plen, kPathCmpLiteral)) {
           j = OK;
         }
         xfree(scriptname);
@@ -3944,14 +3944,29 @@ funccall_T *get_funccal(void)
   return funccal;
 }
 
+/// Get the function call environment to use for the l: and a: variables, based
+/// on the backtrace debug level.
+/// Returns NULL if there is no current funccal.
+static funccall_T *get_funccal_for_vars(void)
+{
+  funccall_T *funccal = NULL;
+
+  if (current_funccal == NULL) {
+    return NULL;
+  }
+  funccal = get_funccal();
+  if (funccal == NULL || funccal->fc_l_vars.dv_refcount == 0) {
+    return NULL;
+  }
+  return funccal;
+}
+
 /// @return  dict used for local variables in the current funccal or
 ///          NULL if there is no current funccal.
 dict_T *get_funccal_local_dict(void)
 {
-  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
-    return NULL;
-  }
-  return &get_funccal()->fc_l_vars;
+  funccall_T *funccal = get_funccal_for_vars();
+  return funccal == NULL ? NULL : &funccal->fc_l_vars;
 }
 
 /// @return  hashtable used for local variables in the current funccal or
@@ -3966,20 +3981,16 @@ hashtab_T *get_funccal_local_ht(void)
 ///           NULL if there is no current funccal.
 dictitem_T *get_funccal_local_var(void)
 {
-  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
-    return NULL;
-  }
-  return (dictitem_T *)&get_funccal()->fc_l_vars_var;
+  funccall_T *funccal = get_funccal_for_vars();
+  return funccal == NULL ? NULL : (dictitem_T *)&funccal->fc_l_vars_var;
 }
 
 /// @return  the dict used for argument in the current funccal or
 ///          NULL if there is no current funccal.
 dict_T *get_funccal_args_dict(void)
 {
-  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
-    return NULL;
-  }
-  return &get_funccal()->fc_l_avars;
+  funccall_T *funccal = get_funccal_for_vars();
+  return funccal == NULL ? NULL : &funccal->fc_l_avars;
 }
 
 /// @return  the hashtable used for argument in the current funccal or
@@ -3994,10 +4005,8 @@ hashtab_T *get_funccal_args_ht(void)
 ///          NULL if there is no current funccal.
 dictitem_T *get_funccal_args_var(void)
 {
-  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
-    return NULL;
-  }
-  return (dictitem_T *)&get_funccal()->fc_l_avars_var;
+  funccall_T *funccal = get_funccal_for_vars();
+  return funccal == NULL ? NULL : (dictitem_T *)&funccal->fc_l_avars_var;
 }
 
 /// List function variables, if there is a function.
@@ -4099,6 +4108,21 @@ bool set_ref_in_previous_funccal(int copyID)
   return false;
 }
 
+/// Set "copyID" in the arguments of the deferred functions of "fc".
+/// Returns true if setting references failed somehow.
+static bool set_ref_in_defer(funccall_T *fc, int copyID)
+{
+  for (int idx = 0; idx < fc->fc_defer.ga_len; idx++) {
+    defer_T *dr = ((defer_T *)fc->fc_defer.ga_data) + idx;
+    for (int i = 0; i < dr->dr_argcount; i++) {
+      if (set_ref_in_item(&dr->dr_argvars[i], copyID, NULL, NULL)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static bool set_ref_in_funccal(funccall_T *fc, int copyID)
 {
   if (fc->fc_copyID != copyID) {
@@ -4106,6 +4130,7 @@ static bool set_ref_in_funccal(funccall_T *fc, int copyID)
     if (set_ref_in_ht(&fc->fc_l_vars.dv_hashtab, copyID, NULL)
         || set_ref_in_ht(&fc->fc_l_avars.dv_hashtab, copyID, NULL)
         || set_ref_in_list_items(&fc->fc_l_varlist, copyID, NULL)
+        || set_ref_in_defer(fc, copyID)
         || set_ref_in_func(NULL, fc->fc_func, copyID)) {
       return true;
     }

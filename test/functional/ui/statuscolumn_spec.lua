@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear = n.clear
 local command = n.command
 local eq = t.eq
@@ -532,8 +533,6 @@ describe('statuscolumn', function()
     exec_lua('vim.api.nvim_buf_set_extmark(0, ns, 15, 0, { virt_lines = {{{"END", ""}}} })')
     feed('GkJzz')
     screen:expect([[
-      {8:buffer  0 12}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
-      {8:wrapped 1 12}aaaaaaaaa                                |
       {8:buffer  0 13}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
       {8:wrapped 1 13}aaaaaaaaa                                |
       {8:buffer  0 14}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
@@ -542,7 +541,7 @@ describe('statuscolumn', function()
       {15:wrapped 1 15}{19:aaaaaaaaa^ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}|
       {15:wrapped 2 15}{19:aaaaaaaaaaaaaaaaaaa                      }|
       {8:virtual-1 15}END                                      |
-      {1:~                                                    }|*3
+      {1:~                                                    }|*5
                                                            |
     ]])
     -- Also test virt_lines when 'cpoptions' includes "n"
@@ -552,8 +551,6 @@ describe('statuscolumn', function()
       vim.api.nvim_buf_set_extmark(0, ns, 14, 0, { virt_lines = {{{"virt_line2", ""}}} })
     ]])
     screen:expect([[
-      {8:buffer  0 12}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
-      aaaaaaaaa                                            |
       {8:buffer  0 13}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
       aaaaaaaaa                                            |
       {8:buffer  0 14}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
@@ -564,7 +561,7 @@ describe('statuscolumn', function()
       {8:virtual-1 15}virt_line1                               |
       {8:virtual-2 15}virt_line2                               |
       {8:virtual-3 15}END                                      |
-      {1:~                                                    }|
+      {1:~                                                    }|*3
                                                            |
     ]])
     -- Also test "col_rows" code path for 'relativenumber' cursor movement
@@ -573,8 +570,6 @@ describe('statuscolumn', function()
       set stc=%{v:virtnum<0?'virtual':(!v:virtnum?'buffer':'wrapped')}%=%{'\ '.v:virtnum.'\ '.v:lnum.'\ '.v:relnum}
     ]])
     screen:expect([[
-      {8:buffer  0 12 3}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
-      {8:wrapped 1 12 3}aaaaaaaaaaa                            |
       {8:buffer  0 13 2}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
       {8:wrapped 1 13 2}aaaaaaaaaaa                            |
       {8:buffer  0 14 1}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
@@ -585,13 +580,11 @@ describe('statuscolumn', function()
       {8:virtual-1 15 0}virt_line1                             |
       {8:virtual-2 15 0}virt_line2                             |
       {8:virtual-3 15 0}END                                    |
-      {1:~                                                    }|
+      {1:~                                                    }|*3
                                                            |
     ]])
     feed('kk')
     screen:expect([[
-      {8:buffer  0 12 1}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
-      {8:wrapped 1 12 1}aaaaaaaaaaa                            |
       {8:buffer  0 13 0}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
       {8:wrapped 1 13 0}aaaaaaaaaa^a                            |
       {8:buffer  0 14 1}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
@@ -602,7 +595,7 @@ describe('statuscolumn', function()
       {8:virtual-1 15 2}virt_line1                             |
       {8:virtual-2 15 2}virt_line2                             |
       {8:virtual-3 15 2}END                                    |
-      {1:~                                                    }|
+      {1:~                                                    }|*3
                                                            |
     ]])
     feed('gg5<C-E>')
@@ -1224,5 +1217,65 @@ describe('statuscolumn', function()
     ]])
     api.nvim_exec_autocmds('User', { buf = buf })
     screen:expect_unchanged()
+  end)
+
+  it('does not break wrapping at unprintable chars #41198', function()
+    command([[let &statuscolumn = repeat(' ', 4)]])
+    api.nvim_buf_set_lines(0, 0, -1, true, { ('\1'):rep(100), 'foo', 'bar' })
+    command('normal! zb')
+    screen:expect([[
+      {8:    }{18:^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^}|
+      {8:    }{18:A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A}|
+      {8:    }{18:^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^}|
+      {8:    }{18:A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A^A}|
+      {8:    }{18:^A^A}                                             |
+      {8:    }foo                                              |
+      {8:    }^bar                                              |
+      {1:~                                                    }|*6
+                                                           |
+    ]])
+  end)
+
+  describe('no heap-buffer-overflow with', function()
+    it('%s after many items #41630', function()
+      exec([[
+        set nonumber signcolumn=yes
+        let &statuscolumn = repeat('%=', 99) .. '%s'
+      ]])
+      screen:expect([[
+        {7:  }aaaaa                                              |*4
+        {7:  }^aaaaa                                              |
+        {7:  }aaaaa                                              |*8
+                                                             |
+      ]])
+      assert_alive()
+    end)
+
+    it('%l after many items', function()
+      exec([[
+        func Statuscolumn()
+          return repeat('%=', v:relnum == 0 ? 149 : 99) .. '%l '
+        endfunc
+        set number numberwidth=4 relativenumber
+        set statuscolumn=%!Statuscolumn()
+      ]])
+      screen:expect([[
+        {8:  4 }aaaaa                                            |
+        {8:  3 }aaaaa                                            |
+        {8:  2 }aaaaa                                            |
+        {8:  1 }aaaaa                                            |
+        {8:8   }^aaaaa                                            |
+        {8:  1 }aaaaa                                            |
+        {8:  2 }aaaaa                                            |
+        {8:  3 }aaaaa                                            |
+        {8:  4 }aaaaa                                            |
+        {8:  5 }aaaaa                                            |
+        {8:  6 }aaaaa                                            |
+        {8:  7 }aaaaa                                            |
+        {8:  8 }aaaaa                                            |
+                                                             |
+      ]])
+      assert_alive()
+    end)
   end)
 end)

@@ -1,5 +1,7 @@
 -- For "--listen", ":restart", and related remote/server functionality.
 
+local util = require('vim._core.util')
+
 local M = {}
 
 --- Called by builtin serverlist(). Returns the combined server list (own + peers).
@@ -35,7 +37,7 @@ function M.serverlist(opts, addrs)
   if want_info then
     local self_pid = vim.fn.getpid()
     local self_active = vim.v.useractive
-    peers = vim.tbl_map(function(addr) ---@param addr vim.ServerInfo
+    peers = vim.tbl_map(function(addr)
       return {
         addr = addr,
         pid = self_pid,
@@ -59,11 +61,12 @@ function M.serverlist(opts, addrs)
     if not seen[socket] then
       local ok, chan = pcall(vim.fn.sockconnect, 'pipe', socket, { rpc = true })
       if ok and chan and chan > 0 then
-        -- Check that the server is responding
-        -- TODO: do we need a timeout or error handling here?
+        --- @cast chan integer
+        -- Check that the server is responding.
         local ok_rpc, peer_info = pcall(
-          vim.fn.rpcrequest,
+          vim.rpcrequest,
           chan,
+          { timeout = 1000 },
           'nvim_exec_lua',
           [[return { pid = vim.fn.getpid(), active = vim.v.useractive, }]],
           {}
@@ -204,8 +207,15 @@ function M.ex_session_restart(eap, extra)
   end)
 
   if not success then
+    --- @cast msg string
     vim.fs.rm(session, { force = true })
-    error(msg)
+
+    -- Trim error message to be equivalent to `:restart!`
+    if msg:find('Vim:') then
+      util.echo_err(util.cmd_errmsg(msg))
+    else
+      error(msg)
+    end
   end
 end
 

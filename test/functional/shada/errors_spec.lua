@@ -3,6 +3,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local t_shada = require('test.functional.shada.testutil')
 
+local describe, it, before_each, after_each = t.describe, t.it, t.before_each, t.after_each
 local nvim_command, eq = n.command, t.eq
 local reset, clear, get_shada_rw = t_shada.reset, t_shada.clear, t_shada.get_shada_rw
 
@@ -403,6 +404,15 @@ describe('ShaDa error handling', function()
     )
   end)
 
+  it('fails on history item with truncated string', function()
+    -- The string header declares five bytes, but only four follow it.
+    wshada('\004\000\007\146\000\165AAAA')
+    eq(
+      'Vim(rshada):E575: Error while reading ShaDa file: history entry at position 0 has wrong history string type',
+      t.pcall_err(nvim_command, sdrcmd())
+    )
+  end)
+
   it('fails on history item with second item with zero byte', function()
     wshada('\004\000\007\146\000\196\003ab\000')
     eq(
@@ -657,17 +667,21 @@ $
     nvim_command('wshada! ' .. shada_fname)
   end)
 
-  it('fails on invalid ShaDa file (failing skip in second item)', function()
-    wshada('\001\000\001\128#!/')
+  it('replaces ShaDa file damaged after the header, keeps valid entries', function()
+    -- Header, history entry, truncated entry.
+    wshada('\001\000\001\128\004\000\008\146\000\196\004kept#!/')
     eq(
       'Vim(rshada):E576: Reading ShaDa file: last entry specified that it occupies 47 bytes, but file ended earlier',
       t.pcall_err(nvim_command, sdrcmd())
     )
+    n.fn.histdel(':')
     eq(
       'Vim(wshada):E576: Error while reading ShaDa file: last entry specified that it occupies 47 bytes, but file ended earlier',
       t.pcall_err(nvim_command, 'wshada ' .. shada_fname)
     )
-    nvim_command('wshada! ' .. shada_fname)
+    eq(0, n.fn.filereadable(shada_fname .. '.tmp.a'))
+    nvim_command(sdrcmd())
+    eq('kept', n.fn.histget(':', -1))
   end)
 
   it('errors with too large items', function()

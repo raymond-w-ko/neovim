@@ -1,6 +1,8 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each, after_each, setup, finally =
+  t.describe, t.it, t.before_each, t.after_each, t.setup, t.finally
 local clear = n.clear
 local exec_lua = n.exec_lua
 local eq = t.eq
@@ -342,6 +344,32 @@ describe('vim.fs', function()
       -- nil: with depth=2 we don't scan testdir/a/noaccess.
       eq(nil, result['a/noaccess'])
     end)
+
+    it('plain=true', function()
+      mkdir('testdir')
+      mkdir('testdir/$XTEST_FS_DIR')
+      mkdir('testdir/expanded')
+      t.write_file('testdir/$XTEST_FS_DIR/literal.txt', '')
+      t.write_file('testdir/expanded/expanded.txt', '')
+      finally(function()
+        rmdir('testdir')
+      end)
+
+      eq(
+        { { ['expanded.txt'] = 'file' }, { ['literal.txt'] = 'file' } },
+        exec_lua(function()
+          vim.uv.os_setenv('XTEST_FS_DIR', 'expanded')
+          local out = {} ---@type table<string, string>[]
+          for i, plain in ipairs({ false, true }) do
+            out[i] = {}
+            for name, etype in vim.fs.dir('testdir/$XTEST_FS_DIR', { plain = plain }) do
+              out[i][name] = etype
+            end
+          end
+          return out
+        end)
+      )
+    end)
   end)
 
   describe('find()', function()
@@ -356,59 +384,56 @@ describe('vim.fs', function()
       eq({ nvim_dir }, vim.fs.find(name, { path = parent, upward = true, type = 'directory' }))
     end)
 
-    local function filter_zig_cache(list)
-      return vim.tbl_filter(function(val)
-        return not vim.startswith(val, test_source_path .. '/.zig-cache/')
-      end, list)
-    end
-
+    -- Isolated scratch tree (not the repo) so the result is deterministic regardless of what else
+    -- sits under the source path (e.g. extra "build*/" dirs).
     it('follows symlinks', function()
-      local build_dir = test_build_dir ---@type string
-      local symlink = test_source_path .. '/build_link' ---@type string
-      vim.uv.fs_symlink(build_dir, symlink, { junction = true, dir = true })
+      local root = t.tmpname(false)
+      mkdir(root)
+      -- realpath() so a symlinked tmpdir (macOS /tmp -> /private/tmp) doesn't consume a hop.
+      root = vim.fs.normalize(assert(vim.uv.fs_realpath(root)))
+      mkdir(root .. '/real')
+      t.write_file(root .. '/real/target', '')
+      -- Directory symlink: follow=true descends into it, follow=false does not.
+      vim.uv.fs_symlink(root .. '/real', root .. '/lnk', { junction = true, dir = true })
+      -- follow=true matches if symlink target has type=file. #42204
+      mkdir(root .. '/other')
+      vim.uv.fs_symlink(root .. '/real/target', root .. '/other/target')
 
-      finally(function()
-        vim.uv.fs_unlink(symlink)
-      end)
-
-      local cases = { nvim_prog, symlink .. '/bin/' .. nvim_prog_basename }
-      table.sort(cases)
-
-      eq(
-        cases,
-        vim.fs.find(nvim_prog_basename, {
-          path = test_source_path,
-          type = 'file',
-          limit = 2,
-          follow = true,
+      local function find(follow, type_)
+        local r = vim.fs.find('target', {
+          path = root,
+          type = type_ or 'file',
+          limit = math.huge,
+          follow = follow,
         })
-      )
+        table.sort(r)
+        return r
+      end
 
-      eq(
-        { nvim_prog },
-        filter_zig_cache(vim.fs.find(nvim_prog_basename, {
-          path = test_source_path,
-          type = 'file',
-          limit = 2,
-          follow = false,
-        }))
-      )
+      eq({ root .. '/lnk/target', root .. '/other/target', root .. '/real/target' }, find(true))
+      eq({ root .. '/real/target' }, find(false))
+      eq({ root .. '/other/target' }, find(false, 'link'))
+
+      local function find_up(follow)
+        return vim.fs.find(function(name)
+          return name == 'target'
+        end, { path = root .. '/other', upward = true, type = 'file', follow = follow })
+      end
+      eq({ root .. '/other/target' }, find_up(true))
+      eq({}, find_up(false))
     end)
 
     it('follow=true handles symlink loop', function()
-      if t.is_zig_build() then
-        return pending('broken/slow with build.zig')
-      end
-      local cwd = vim.uv.fs_realpath(test_source_path) ---@type string
-      local symlink = cwd .. '/loop_link' ---@type string
-      vim.uv.fs_symlink(cwd, symlink, { junction = true, dir = true })
+      local root = t.tmpname(false)
+      mkdir(root)
+      root = assert(vim.uv.fs_realpath(root))
+      t.write_file(root .. '/target', '')
+      -- Self-referential loop: follow=true must terminate at the OS symlink-follow limit,
+      -- yielding one hit per loop level.
+      vim.uv.fs_symlink(root, root .. '/loop', { junction = true, dir = true })
 
-      finally(function()
-        vim.uv.fs_unlink(symlink)
-      end)
-
-      eq(link_limit, #vim.fs.find(nvim_prog_basename, {
-        path = cwd,
+      eq(link_limit, #vim.fs.find('target', {
+        path = root,
         type = 'file',
         limit = math.huge,
         follow = true,
@@ -594,6 +619,18 @@ describe('vim.fs', function()
 
     it('works with a filename argument', function()
       eq(test_source_path, exec_lua([[return vim.fs.root(..., 'CMakePresets.json')]], nvim_prog))
+      eq_paths(
+        test_source_path,
+        exec_lua([[return vim.fs.root(vim.uri.from_fname(...), 'CMakePresets.json')]], nvim_prog)
+      )
+      -- Scheme is case-insensitive.
+      eq_paths(
+        test_source_path,
+        exec_lua(
+          [[return vim.fs.root(vim.uri.from_fname(...):gsub('^file:', 'FILE:'), 'CMakePresets.json')]],
+          nvim_prog
+        )
+      )
     end)
 
     it('works with a relative path', function()
@@ -617,11 +654,11 @@ describe('vim.fs', function()
       eq_paths(test_source_path, exec_lua([[return vim.fs.root(0, 'CMakePresets.json')]]))
     end)
 
-    it('returns CWD (absolute path) if no match is found', function()
+    it('returns CWD (absolute path) for a URL', function()
       assert(n.fn.isabsolutepath(test_source_path) == 1)
       eq_paths(
         test_source_path,
-        exec_lua([[return vim.fs.root('file://bogus', 'CMakePresets.json')]])
+        exec_lua([[return vim.fs.root('foo://bogus', 'CMakePresets.json')]])
       )
     end)
   end)
@@ -653,6 +690,80 @@ describe('vim.fs', function()
     end)
   end)
 
+  describe('slug()', function()
+    it('replaces unsafe characters with "-"', function()
+      -- `\` is normalized to `/` on Windows, so the hash differs per platform
+      eq(
+        'a-b-c-d-e-f-g-h-i-j-k-l-'
+          .. vim.fn.sha256(vim.fs.normalize('a/b\\c:d*e?f"g<h>i|j k\tl')):sub(1, 8),
+        vim.fs.slug('a/b\\c:d*e?f"g<h>i|j k\tl')
+      )
+      eq('a-16b8a9f5', vim.fs.slug('a/ '))
+      eq('a-ca978112', vim.fs.slug('a/.'))
+    end)
+
+    it('works', function()
+      -- `=special`
+      eq('=special-8a5edab2', vim.fs.slug('/'))
+      eq('=special-ab5df625', vim.fs.slug('...'))
+      eq('=special-11d925ec', vim.fs.slug('-------'))
+      eq('src-foo-init.lua-cf05d2fe', vim.fs.slug('/src/foo/init.lua'))
+      eq('C--src-project-main.c-3b0eb5f5', vim.fs.slug('C:/src/project/main.c'))
+      eq('con.txt-d3bde286', vim.fs.slug('con.txt'))
+      -- Windows reserved names.
+      eq('con-1143da2b', vim.fs.slug('con'))
+      eq('com¹-bdcbdc69', vim.fs.slug('com¹'))
+      eq('NUL-ae6de182', vim.fs.slug('NUL'))
+      eq('Prn-0d399452', vim.fs.slug('Prn'))
+      eq('aux-321f6814', vim.fs.slug('aux'))
+      eq('con.foo.bar-f386c405', vim.fs.slug('con.foo.bar'))
+      eq('con-.-txt-48f98581', vim.fs.slug('con . txt'))
+      -- URIs are prefixed with `=uri-<scheme>-`.
+      eq('=uri-term-foo-bar-123-bash-7fd6bb99', vim.fs.slug('term://foo/bar//123:bash'))
+      eq('=uri-http-example.com-2e152ec0', vim.fs.slug('http://example.com'))
+      eq('=uri-scp-host-path-5188b9a2', vim.fs.slug('scp://host/path'))
+      -- $HOME is replaced with `~`
+      local p = vim.uv.os_homedir() .. '/my-project'
+      local hash8_2 = vim.fn.sha256(vim.fs.normalize(p)):sub(1, 8)
+      eq('~-my-project-' .. hash8_2, vim.fs.slug(p))
+
+      -- Windows-only cases.
+      if is_os('win') then
+        eq('=unc-foo-dir-file-549fb6e7', vim.fs.slug([[\\foo\dir\file]]))
+        -- `\\?\` and `\\.\`
+        eq(
+          '---Volume{a1b2c3d4-aa00-4000-a111-1a2b3c4d5e6f}-dir-file-cfda6a98',
+          vim.fs.slug([[\\?\Volume{a1b2c3d4-aa00-4000-a111-1a2b3c4d5e6f}\dir\file]])
+        )
+        eq('---C--dir-file-e8f30888', vim.fs.slug([[\\?\C:\dir\file]]))
+        eq('-.-COM1-e0e5710d', vim.fs.slug([[\\.\COM1]]))
+      end
+    end)
+
+    it('`opts.maxlen`', function()
+      -- maxlen < 8 is an error
+      t.matches('`opts.maxlen` must be >= 8', t.pcall_err(vim.fs.slug, 'foo', { maxlen = 7 }))
+
+      eq('2c26b46b', vim.fs.slug('foo', { maxlen = 8 }))
+      eq('2c26b46b', vim.fs.slug('foo', { maxlen = 11 }))
+      eq('foo-2c26b46b', vim.fs.slug('foo', { maxlen = 12 }))
+      eq('ddab29ff', vim.fs.slug('foo.txt', { maxlen = 12 }))
+      eq('foo-2c26b46b', vim.fs.slug('foo', { maxlen = 13 }))
+
+      -- truncates to "{head}~~~{tail}-{hash8}"
+      eq(
+        'aaaa-~~~-ffff-gggg-file.txt-7bd52057',
+        vim.fs.slug('/aaaa/bbbb/cccc/dddd/eeee/ffff/gggg/file.txt', { maxlen = 40 })
+      )
+      eq('测~~~-测试3-58cf4a70', vim.fs.slug('/测试1/测试测试2/测试3', { maxlen = 25 }))
+      eq('ab~~~uvwxyz-71c480df', vim.fs.slug('abcdefghijklmnopqrstuvwxyz', { maxlen = 20 }))
+      eq('dir~~~试.md-d4141f20', vim.fs.slug(('dir/'):rep(20) .. '测试.md', { maxlen = 22 }))
+      eq('~~~试abc-ab138cd6', vim.fs.slug('测试abc测试abc', { maxlen = 18 }))
+      eq('~~~d-473a1da7', vim.fs.slug('foo/bar/longlonglong.md', { maxlen = 13 }))
+      eq('f~~~md-473a1da7', vim.fs.slug('foo/bar/longlonglong.md', { maxlen = 15 }))
+    end)
+  end)
+
   describe('normalize()', function()
     it('removes trailing /', function()
       eq('/home/user', vim.fs.normalize('/home/user/'))
@@ -662,6 +773,7 @@ describe('vim.fs', function()
     end)
     it('works with ~', function()
       eq(vim.fs.normalize(assert(vim.uv.os_homedir())) .. '/src/foo', vim.fs.normalize('~/src/foo'))
+      eq('~/src/foo', vim.fs.normalize('~/src/foo', { plain = true }))
     end)
     it('works with environment variables', function()
       local xdg_config_home = test_build_dir .. '/.config'
@@ -673,6 +785,7 @@ describe('vim.fs', function()
           end)
         end)
       )
+      eq('$XDG_CONFIG_HOME/nvim', vim.fs.normalize('$XDG_CONFIG_HOME/nvim', { plain = true }))
     end)
 
     -- Opts required for testing posix paths and win paths
@@ -824,15 +937,36 @@ describe('vim.fs', function()
         eq([[C:/foo]], vim.fs.abspath([[C:\foo]]))
         eq([[C:/foo/../.]], vim.fs.abspath([[C:\foo\..\.]]))
         eq('//foo/bar', vim.fs.abspath('\\\\foo\\bar'))
+        eq('//foo/bar', vim.fs.abspath('\\\\foo\\bar'))
       else
         eq('/foo/../.', vim.fs.abspath('/foo/../.'))
         eq('/foo/bar', vim.fs.abspath('/foo/bar'))
       end
+      eq('fugitive:///repo/.git//0/a', vim.fs.abspath('fugitive:///repo/.git//0/a'))
+      eq('deno:/https/deno.land/a', vim.fs.abspath('deno:/https/deno.land/a'))
+      -- Drive letter, not a URL scheme.
+      eq(
+        { false, false },
+        { vim._core.path_is_url([[C:\foo\bar]]), vim._core.path_is_url('C:/foo') }
+      )
+    end)
+
+    it('with `cwd`', function()
+      local parent_cwd = vim.fs.dirname(cwd)
+      eq(parent_cwd, vim.fs.abspath('.', { cwd = parent_cwd }))
+      eq(parent_cwd .. '/foo', vim.fs.abspath('foo', { cwd = parent_cwd }))
+      eq(parent_cwd .. '/.././../foo', vim.fs.abspath('.././../foo', { cwd = parent_cwd }))
+      eq('/foo/bar', vim.fs.abspath('/foo/bar', { cwd = parent_cwd }))
     end)
 
     it('expands ~', function()
       eq(home .. '/foo', vim.fs.abspath('~/foo'))
       eq(home .. '/./.././foo', vim.fs.abspath('~/./.././foo'))
+    end)
+
+    it('does not expand ~ if plain=true', function()
+      eq(cwd .. '/~/foo', vim.fs.abspath('~/foo', { plain = true }))
+      eq(cwd .. '/~/./.././foo', vim.fs.abspath('~/./.././foo', { plain = true }))
     end)
 
     if is_os('win') then
@@ -916,14 +1050,14 @@ describe('vim.fs', function()
       -- File
       vim.uv.fs_symlink('Xtest_fs-rm/file-to-link', 'Xtest_fs-rm/file-as-link')
       vim.fs.rm('Xtest_fs-rm/file-as-link')
-      eq(vim.uv.fs_stat('Xtest_fs-rm/file-as-link'), nil)
+      eq(nil, vim.uv.fs_stat('Xtest_fs-rm/file-as-link'))
       eq({ 'File to link' }, fn.readfile('Xtest_fs-rm/file-to-link'))
 
       -- Directory
       local function assert_rm_symlinked_dir(opts)
         vim.uv.fs_symlink('Xtest_fs-rm/dir-to-link', 'Xtest_fs-rm/dir-as-link')
         vim.fs.rm('Xtest_fs-rm/dir-as-link', opts)
-        eq(vim.uv.fs_stat('Xtest_fs-rm/dir-as-link'), nil)
+        eq(nil, vim.uv.fs_stat('Xtest_fs-rm/dir-as-link'))
         eq({ 'File in dir to link' }, fn.readfile('Xtest_fs-rm/dir-to-link/file'))
       end
 

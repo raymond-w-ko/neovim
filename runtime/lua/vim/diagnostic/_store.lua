@@ -9,7 +9,7 @@ local M = {}
 -- bufnr -> ns -> Diagnostic[]
 local diagnostic_cache = {} --- @type table<integer,table<integer,vim.Diagnostic[]?>>
 
-local group = api.nvim_create_augroup('nvim.diagnostic.buf_wipeout', {})
+local group = api.nvim_create_augroup('nvim.diagnostic.buf_wipeout')
 setmetatable(diagnostic_cache, {
   --- @param t table<integer,vim.Diagnostic[]>
   --- @param bufnr integer
@@ -38,23 +38,86 @@ local function norm_diag(bufnr, namespace, d)
   d1.bufnr = bufnr
 end
 
---- Execute a given function now if the given buffer is already loaded or once it is loaded later.
+--- Set extmarks at the computed positions of the cached diagnostics of
+--- {bufnr}/{namespace}, and store their ids in diagnostic._extmark_id (used by
+--- get_logical_pos to adjust positions).
 ---
---- @param bufnr integer Buffer number
---- @param fn fun()
---- @return integer?
-local function once_buf_loaded(bufnr, fn)
-  if api.nvim_buf_is_loaded(bufnr) then
-    fn()
-  else
-    return nvim_on('BufRead', nil, {
-      buf = bufnr,
-      once = true,
-    }, function()
-      fn()
-    end)
+--- @param bufnr integer
+--- @param namespace integer
+local function set_position_extmarks(bufnr, namespace)
+  local ns = vim.diagnostic.get_namespace(namespace)
+
+  if not ns.user_data.location_ns then
+    ns.user_data.location_ns =
+      api.nvim_create_namespace(string.format('nvim.%s.diagnostic', ns.name))
+  end
+
+  api.nvim_buf_clear_namespace(bufnr, ns.user_data.location_ns, 0, -1)
+
+  local lines = api.nvim_buf_get_lines(bufnr, 0, -1, true)
+  local buf_cache = rawget(diagnostic_cache, bufnr) --- @type table<integer,vim.Diagnostic[]?>?
+  -- set extmarks at diagnostic locations to preserve logical positions despite text changes
+  for _, diagnostic0 in ipairs(buf_cache and buf_cache[namespace] or {}) do
+    --- @cast diagnostic0 vim.Diagnostic
+    local last_row = #lines - 1
+    local row = math.max(0, math.min(diagnostic0.lnum, last_row))
+    local row_len = #lines[row + 1]
+    local col = math.max(0, math.min(diagnostic0.col, row_len - 1))
+
+    local end_row = math.max(0, math.min(diagnostic0.end_lnum or row, last_row))
+    local end_row_len = #lines[end_row + 1]
+    local end_col = math.max(0, math.min(diagnostic0.end_col or col, end_row_len))
+
+    if end_row == row then
+      -- avoid starting an extmark beyond end of the line
+      if end_col == col then
+        end_col = math.min(end_col + 1, end_row_len)
+      end
+    else
+      -- avoid ending an extmark before start of the line
+      if end_col == 0 then
+        end_row = end_row - 1
+
+        local end_line = lines[end_row + 1]
+
+        if not end_line then
+          error(
+            'Failed to adjust diagnostic position to the end of a previous line. #lines in a buffer: '
+              .. #lines
+              .. ', lnum: '
+              .. diagnostic0.lnum
+              .. ', col: '
+              .. diagnostic0.col
+              .. ', end_lnum: '
+              .. diagnostic0.end_lnum
+              .. ', end_col: '
+              .. diagnostic0.end_col
+          )
+        end
+
+        end_col = #end_line
+      end
+    end
+
+    diagnostic0._extmark_id = api.nvim_buf_set_extmark(bufnr, ns.user_data.location_ns, row, col, {
+      end_row = end_row,
+      end_col = end_col,
+      invalidate = true,
+    })
   end
 end
+
+-- Positions can only be computed (and handlers can only draw) once the buffer is loaded, so set
+-- the extmarks and show diagnostics for any buffer with cached diagnostics when it is read.
+nvim_on('BufRead', api.nvim_create_augroup('nvim.diagnostic.buf_load'), function(ev)
+  local buf_cache = rawget(diagnostic_cache, ev.buf) --- @type table<integer,vim.Diagnostic[]?>?
+  if buf_cache then
+    for namespace in pairs(buf_cache) do
+      set_position_extmarks(ev.buf, namespace)
+    end
+    vim.diagnostic.show(nil, ev.buf)
+  end
+end)
 
 --- @param bufnr integer?
 --- @param opts vim.diagnostic.GetOpts?
@@ -148,8 +211,8 @@ function M.get_diagnostics(bufnr, opts, clamp)
     end
   elseif not namespace then
     bufnr = vim._resolve_bufnr(bufnr)
-    for iter_namespace in pairs(diagnostic_cache[bufnr]) do
-      add_all_diags(bufnr, diagnostic_cache[bufnr][iter_namespace])
+    for _, diags in pairs(diagnostic_cache[bufnr]) do
+      add_all_diags(bufnr, diags)
     end
   elseif bufnr == nil then
     for b, t in pairs(diagnostic_cache) do
@@ -213,69 +276,9 @@ function M.set(namespace, bufnr, diagnostics)
     diagnostic_cache[bufnr][namespace] = diagnostics
   end
 
-  -- Compute positions, set them as extmarks, and store in diagnostic._extmark_id
-  -- (used by get_logical_pos to adjust positions).
-  once_buf_loaded(bufnr, function()
-    local ns = vim.diagnostic.get_namespace(namespace)
-
-    if not ns.user_data.location_ns then
-      ns.user_data.location_ns =
-        api.nvim_create_namespace(string.format('nvim.%s.diagnostic', ns.name))
-    end
-
-    api.nvim_buf_clear_namespace(bufnr, ns.user_data.location_ns, 0, -1)
-
-    local lines = api.nvim_buf_get_lines(bufnr, 0, -1, true)
-    -- set extmarks at diagnostic locations to preserve logical positions despite text changes
-    for _, diagnostic0 in ipairs(diagnostics) do
-      local last_row = #lines - 1
-      local row = math.max(0, math.min(diagnostic0.lnum, last_row))
-      local row_len = #lines[row + 1]
-      local col = math.max(0, math.min(diagnostic0.col, row_len - 1))
-
-      local end_row = math.max(0, math.min(diagnostic0.end_lnum or row, last_row))
-      local end_row_len = #lines[end_row + 1]
-      local end_col = math.max(0, math.min(diagnostic0.end_col or col, end_row_len))
-
-      if end_row == row then
-        -- avoid starting an extmark beyond end of the line
-        if end_col == col then
-          end_col = math.min(end_col + 1, end_row_len)
-        end
-      else
-        -- avoid ending an extmark before start of the line
-        if end_col == 0 then
-          end_row = end_row - 1
-
-          local end_line = lines[end_row + 1]
-
-          if not end_line then
-            error(
-              'Failed to adjust diagnostic position to the end of a previous line. #lines in a buffer: '
-                .. #lines
-                .. ', lnum: '
-                .. diagnostic0.lnum
-                .. ', col: '
-                .. diagnostic0.col
-                .. ', end_lnum: '
-                .. diagnostic0.end_lnum
-                .. ', end_col: '
-                .. diagnostic0.end_col
-            )
-          end
-
-          end_col = #end_line
-        end
-      end
-
-      diagnostic0._extmark_id =
-        api.nvim_buf_set_extmark(bufnr, ns.user_data.location_ns, row, col, {
-          end_row = end_row,
-          end_col = end_col,
-          invalidate = true,
-        })
-    end
-  end)
+  if api.nvim_buf_is_loaded(bufnr) then
+    set_position_extmarks(bufnr, namespace)
+  end
 end
 
 --- @param bufnr integer? Buffer number to get diagnostics from. Use 0 for

@@ -9,6 +9,8 @@ local function osc52(clipboard, contents)
   return string.format('\027]52;%s;%s\027\\', clipboard, contents)
 end
 
+--- @param reg string
+--- @return fun(lines: string[])
 function M.copy(reg)
   local clipboard = reg == '+' and 'c' or 'p'
   return function(lines)
@@ -18,6 +20,8 @@ function M.copy(reg)
   end
 end
 
+--- @param reg string
+--- @return fun(): string[]|0
 function M.paste(reg)
   local clipboard = reg == '+' and 'c' or 'p'
   return function()
@@ -57,7 +61,7 @@ function M.paste(reg)
         )
       elseif res == -2 then
         -- Clear message area
-        vim.api.nvim_echo({ { '' } }, false, {})
+        vim.api.nvim_echo({ { '' } }, false)
       end
       return 0
     end

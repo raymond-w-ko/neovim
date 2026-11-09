@@ -66,8 +66,10 @@
 #include "nvim/autocmd_defs.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
+#include "nvim/change.h"
 #include "nvim/charset.h"
 #include "nvim/cmdexpand.h"
+#include "nvim/context.h"
 #include "nvim/decoration.h"
 #include "nvim/decoration_defs.h"
 #include "nvim/decoration_provider.h"
@@ -79,7 +81,6 @@
 #include "nvim/ex_getln.h"
 #include "nvim/fold.h"
 #include "nvim/fold_defs.h"
-#include "nvim/getchar.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
@@ -87,6 +88,7 @@
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
+#include "nvim/input.h"
 #include "nvim/insexpand.h"
 #include "nvim/marktree_defs.h"
 #include "nvim/match.h"
@@ -136,25 +138,66 @@ static bool msg_grid_invalid = false;
 static bool resizing_autocmd = false;
 static bool conceal_cursor_used = false;
 
+/// Redraws the cursor line of `wp` after 'concealcursor' revealed or concealed it again.
+void conceal_redraw_cursor_line(win_T *wp)
+{
+  conceal_reveal_changed(wp, wp->w_cursor.lnum, wp->w_cursor.lnum);
+  if (decor_conceal_line(wp, wp->w_cursor.lnum - 1, true)) {
+    changed_window_setting(wp);
+  }
+}
+
 /// Check if the cursor line needs to be redrawn because of 'concealcursor'.
 ///
 /// When cursor is moved at the same time, both lines will be redrawn regardless.
 void conceal_check_cursor_line(void)
 {
+  conceal_check_visual();
+
   bool should_conceal = conceal_cursor_line(curwin);
   if (curwin->w_p_cole <= 0 || conceal_cursor_used == should_conceal) {
     return;
   }
 
-  redrawWinline(curwin, curwin->w_cursor.lnum);
-
-  // Concealed line visibility toggled.
-  if (decor_conceal_line(curwin, curwin->w_cursor.lnum - 1, true)) {
-    changed_window_setting(curwin);
-  }
+  conceal_redraw_cursor_line(curwin);
   // Need to recompute cursor column, e.g., when starting Visual mode
   // without concealing.
   curs_columns(curwin, true);
+}
+
+/// Redraws the lines that entered or left the Visual area since the last check: 'concealcursor'
+/// reveals the area (see conceal_cursor_reveals_line()).
+void conceal_check_visual(void)
+{
+  // Visual area (start/end lines) seen last, zero when none.
+  static linenr_T conceal_visual[2] = { 0, 0 };
+  linenr_T const old[2] = { conceal_visual[0], conceal_visual[1] };
+  linenr_T const cur[2] = { Visual.active ? MIN(Visual.start.lnum, curwin->w_cursor.lnum) : 0,
+                            Visual.active ? MAX(Visual.start.lnum, curwin->w_cursor.lnum) : 0 };
+  conceal_visual[0] = cur[0];
+  conceal_visual[1] = cur[1];
+
+  if (old[0] == 0 && cur[0] == 0) {
+    return;
+  }
+  // The Visual area is revealed in every window on the buffer.
+  FOR_ALL_TAB_WINDOWS(tp, wp) {
+    if (wp->w_buffer != curbuf) {
+      continue;
+    }
+    if (old[0] == 0) {
+      conceal_reveal_changed(wp, cur[0], cur[1]);
+    } else if (cur[0] == 0) {
+      conceal_reveal_changed(wp, old[0], old[1]);
+    } else {
+      // Lines between the old/new start, or the old/new end.
+      for (int i = 0; i < 2; i++) {
+        if (cur[i] != old[i]) {
+          conceal_reveal_changed(wp, MIN(cur[i], old[i]), MAX(cur[i], old[i]));
+        }
+      }
+    }
+  }
 }
 
 /// Resize default_grid to Rows and Columns.
@@ -369,9 +412,8 @@ void screen_resize(int width, int height)
     // - While at the more prompt or executing an external command, don't
     //   redraw, but position the cursor.
     // - While editing the command line, only redraw that. TODO: lies
-    // - in Ex mode, don't redraw anything.
     // - Otherwise, redraw right now, and position the cursor.
-    if (State == MODE_ASKMORE || State == MODE_EXTERNCMD || exmode_active
+    if (State == MODE_ASKMORE || State == MODE_EXTERNCMD
         || ((State & MODE_CMDLINE) && get_cmdline_info()->one_key)) {
       if (State & MODE_CMDLINE) {
         update_screen();
@@ -409,7 +451,10 @@ void screen_resize(int width, int height)
         }
       }
     }
-    ui_flush();
+
+    if (State != MODE_ASKMORE) {  // Don't flush partial pager; do_more_prompt() will redraw it.
+      ui_flush();
+    }
   }
   resizing_screen = false;
 }
@@ -466,7 +511,7 @@ int update_screen(void)
   }
 
   // Restore actual curwin before redrawing.
-  win_T *save_curwin = autocmd_save_curwin ? win_find_by_handle(autocmd_save_curwin) : NULL;
+  win_T *save_curwin = ctx_saved_curwin();
   win_T *restore_curwin = save_curwin != NULL ? curwin : NULL;
   if (save_curwin != NULL) {
     curwin = save_curwin;
@@ -679,7 +724,7 @@ int update_screen(void)
 
     if (wp->w_redr_border || wp->w_redr_type >= UPD_NOT_VALID) {
       grid_draw_border(&wp->w_grid_alloc, &wp->w_config, wp->w_border_adj, (int)wp->w_p_winbl,
-                       wp->w_ns_hl_attr);
+                       wp->w_ns_hl_attr, wp->w_hl_attr_normal);
     }
 
     if (wp->w_redr_type != 0) {
@@ -761,7 +806,7 @@ int update_screen(void)
 /// Prepare for 'hlsearch' highlighting.
 void start_search_hl(void)
 {
-  if (!p_hls || no_hlsearch) {
+  if (!p_hls || Search.no_hlsearch) {
     return;
   }
 
@@ -847,10 +892,10 @@ void show_cursor_info_later(bool force)
       || empty_line != curwin->w_stl_empty
       || reg_recording != curwin->w_stl_recording
       || state != curwin->w_stl_state
-      || (VIsual_active && (VIsual_mode != curwin->w_stl_visual_mode
-                            || VIsual.lnum != curwin->w_stl_visual_pos.lnum
-                            || VIsual.col != curwin->w_stl_visual_pos.col
-                            || VIsual.coladd != curwin->w_stl_visual_pos.coladd))) {
+      || (Visual.active && (Visual.mode != curwin->w_stl_visual_mode
+                            || Visual.start.lnum != curwin->w_stl_visual_pos.lnum
+                            || Visual.start.col != curwin->w_stl_visual_pos.col
+                            || Visual.start.coladd != curwin->w_stl_visual_pos.coladd))) {
     if (curwin->w_status_height || global_stl_height()) {
       curwin->w_redr_status = true;
     } else {
@@ -872,9 +917,9 @@ void show_cursor_info_later(bool force)
   curwin->w_stl_topfill = curwin->w_topfill;
   curwin->w_stl_recording = reg_recording;
   curwin->w_stl_state = state;
-  if (VIsual_active) {
-    curwin->w_stl_visual_mode = VIsual_mode;
-    curwin->w_stl_visual_pos = VIsual;
+  if (Visual.active) {
+    curwin->w_stl_visual_mode = Visual.mode;
+    curwin->w_stl_visual_pos = Visual.start;
   }
 }
 
@@ -911,7 +956,7 @@ int showmode(void)
                   && ((State & MODE_TERMINAL)
                       || (State & MODE_INSERT)
                       || restart_edit != NUL
-                      || VIsual_active));
+                      || Visual.active));
 
   bool can_show_mode = (p_ch != 0 || ui_has(kUIMessages));
   if ((do_mode || reg_recording != 0) && can_show_mode) {
@@ -943,7 +988,7 @@ int showmode(void)
     if (do_mode) {
       msg_puts_hl("--", hl_id, false);
       // CTRL-X in Insert mode
-      if (edit_submode != NULL && !shortmess(SHM_COMPLETIONMENU)) {
+      if (edit_submode != NULL && !shortmess(kShmCompletionmenu)) {
         // These messages can get long, avoid a wrap in a narrow window.
         // Prefer showing edit_submode_extra. With external messages there
         // is no imposed limit.
@@ -1006,14 +1051,14 @@ int showmode(void)
           msg_puts_hl(_(" (paste)"), hl_id, false);
         }
 
-        if (VIsual_active) {
+        if (Visual.active) {
           char *p;
 
           // Don't concatenate separate words to avoid translation
           // problems.
-          switch ((VIsual_select ? 4 : 0)
-                  + (VIsual_mode == Ctrl_V) * 2
-                  + (VIsual_mode == 'V')) {
+          switch ((Visual.select ? 4 : 0)
+                  + (Visual.mode == Ctrl_V) * 2
+                  + (Visual.mode == 'V')) {
           case 0:
             p = N_(" VISUAL"); break;
           case 1:
@@ -1063,7 +1108,7 @@ int showmode(void)
   msg_ext_flush_showmode();
 
   // In Visual mode the size of the selected area must be redrawn.
-  if (VIsual_active) {
+  if (Visual.active) {
     clear_showcmd();
   }
 
@@ -1115,7 +1160,7 @@ void clearmode(void)
 
 static void recording_mode(int hl_id)
 {
-  if (shortmess(SHM_RECORDING)) {
+  if (shortmess(kShmRecording)) {
     return;
   }
 
@@ -1125,7 +1170,7 @@ static void recording_mode(int hl_id)
   msg_puts_hl(s, hl_id, false);
 }
 
-#define COL_RULER 17        // columns needed by standard ruler
+#define COL_RULER 18        // columns needed by standard ruler
 
 /// Compute columns for ruler and shown command. 'sc_col' is also used to
 /// decide what the maximum length of a message on the status line can be.
@@ -1138,7 +1183,7 @@ void comp_col(void)
   sc_col = 0;
   ru_col = 0;
   if (p_ru) {
-    ru_col = (ru_wid ? ru_wid : COL_RULER) + 1;
+    ru_col = (ru_wid ? ru_wid : COL_RULER);
     // no last status line, adjust sc_col
     if (!last_has_status) {
       sc_col = ru_col;
@@ -1444,6 +1489,8 @@ static void win_update(win_T *wp)
 
   // Window is zero-height: Only need to draw the separator
   if (wp->w_view_height == 0) {
+    // draw the vertical separator right of this window
+    draw_vsep_win(wp);
     // draw the horizontal separator below this window
     draw_hsep_win(wp);
     wp->w_redr_type = 0;
@@ -1498,8 +1545,8 @@ static void win_update(win_T *wp)
 
   init_search_hl(wp, &screen_search_hl);
 
-  // Make sure skipcol is valid, it depends on various options and the window
-  // width.
+  // Make sure skipcol is valid, it depends on various options, the window width and the topline's
+  // displayed size (e.g. after a conceal mark or 'conceallevel' change).
   if (wp->w_skipcol > 0 && wp->w_view_width > win_col_off(wp)) {
     int w = 0;
     int width1 = wp->w_view_width - win_col_off(wp);
@@ -1516,6 +1563,11 @@ static void win_update(win_T *wp)
       // always round down, the higher value may not be valid
       wp->w_skipcol = w - add;
     }
+  }
+  // On the cursor line curs_columns() places skipcol, also past the end.
+  if (wp->w_skipcol > 0 && wp->w_cursor.lnum != wp->w_topline
+      && linetabsize_disp_eol(wp, wp->w_topline) <= wp->w_skipcol) {
+    wp->w_skipcol = 0;
   }
 
   const int nrwidth_before = wp->w_nrwidth;
@@ -1830,20 +1882,20 @@ static void win_update(win_T *wp)
   }
 
   // check if we are updating or removing the inverted part
-  if ((VIsual_active && buf == curwin->w_buffer)
+  if ((Visual.active && buf == curwin->w_buffer)
       || (wp->w_old_cursor_lnum != 0 && type != UPD_NOT_VALID)) {
     linenr_T from, to;
 
-    if (VIsual_active) {
-      if (VIsual_mode != wp->w_old_visual_mode || type == UPD_INVERTED_ALL) {
+    if (Visual.active) {
+      if (Visual.mode != wp->w_old_visual_mode || type == UPD_INVERTED_ALL) {
         // If the type of Visual selection changed, redraw the whole
         // selection.  Also when the ownership of the X selection is
         // gained or lost.
-        if (curwin->w_cursor.lnum < VIsual.lnum) {
+        if (curwin->w_cursor.lnum < Visual.start.lnum) {
           from = curwin->w_cursor.lnum;
-          to = VIsual.lnum;
+          to = Visual.start.lnum;
         } else {
-          from = VIsual.lnum;
+          from = Visual.start.lnum;
           to = curwin->w_cursor.lnum;
         }
         // redraw more when the cursor moved as well
@@ -1864,36 +1916,36 @@ static void win_update(win_T *wp)
           }
         }
 
-        if (VIsual.lnum != wp->w_old_visual_lnum
-            || VIsual.col != wp->w_old_visual_col) {
+        if (Visual.start.lnum != wp->w_old_visual_lnum
+            || Visual.start.col != wp->w_old_visual_col) {
           if (wp->w_old_visual_lnum < from
               && wp->w_old_visual_lnum != 0) {
             from = wp->w_old_visual_lnum;
           }
-          to = MAX(MAX(to, wp->w_old_visual_lnum), VIsual.lnum);
-          from = MIN(from, VIsual.lnum);
+          to = MAX(MAX(to, wp->w_old_visual_lnum), Visual.start.lnum);
+          from = MIN(from, Visual.start.lnum);
         }
       }
 
       // If in block mode and changed column or curwin->w_curswant:
       // update all lines.
       // First compute the actual start and end column.
-      if (VIsual_mode == Ctrl_V) {
+      if (Visual.mode == Ctrl_V) {
         colnr_T fromc, toc;
-        getvcols(wp, &VIsual, &curwin->w_cursor, &fromc, &toc, GETVCOL_END_EXCL_LBR);
+        getvcols(wp, &Visual.start, &curwin->w_cursor, &fromc, &toc, GETVCOL_END_EXCL_LBR);
         toc++;
         // Highlight to the end of the line, unless 'virtualedit' has
         // "block".
         if (curwin->w_curswant == MAXCOL) {
           if (get_ve_flags(curwin) & kOptVeFlagBlock) {
             pos_T pos;
-            int cursor_above = curwin->w_cursor.lnum < VIsual.lnum;
+            int cursor_above = curwin->w_cursor.lnum < Visual.start.lnum;
 
             // Need to find the longest line.
             toc = 0;
             pos.coladd = 0;
             for (pos.lnum = curwin->w_cursor.lnum;
-                 cursor_above ? pos.lnum <= VIsual.lnum : pos.lnum >= VIsual.lnum;
+                 cursor_above ? pos.lnum <= Visual.start.lnum : pos.lnum >= Visual.start.lnum;
                  pos.lnum += cursor_above ? 1 : -1) {
               colnr_T t;
 
@@ -1909,8 +1961,8 @@ static void win_update(win_T *wp)
 
         if (fromc != wp->w_old_cursor_fcol
             || toc != wp->w_old_cursor_lcol) {
-          from = MIN(from, VIsual.lnum);
-          to = MAX(to, VIsual.lnum);
+          from = MIN(from, Visual.start.lnum);
+          to = MAX(to, Visual.start.lnum);
         }
         wp->w_old_cursor_fcol = fromc;
         wp->w_old_cursor_lcol = toc;
@@ -1931,9 +1983,10 @@ static void win_update(win_T *wp)
 
     // If we know the value of w_botline, use it to restrict the update to
     // the lines that are visible in the window.
+    // Note: w_botline may be partially visible or completely invisible.
     if (wp->w_valid & VALID_BOTLINE) {
-      from = MIN(from, wp->w_botline - 1);
-      to = MIN(to, wp->w_botline - 1);
+      from = MIN(from, wp->w_botline);
+      to = MIN(to, wp->w_botline);
     }
 
     // Find the minimal part to be updated.
@@ -1979,11 +2032,11 @@ static void win_update(win_T *wp)
     }
   }
 
-  if (VIsual_active && buf == curwin->w_buffer) {
-    wp->w_old_visual_mode = (char)VIsual_mode;
+  if (Visual.active && buf == curwin->w_buffer) {
+    wp->w_old_visual_mode = (char)Visual.mode;
     wp->w_old_cursor_lnum = curwin->w_cursor.lnum;
-    wp->w_old_visual_lnum = VIsual.lnum;
-    wp->w_old_visual_col = VIsual.col;
+    wp->w_old_visual_lnum = Visual.start.lnum;
+    wp->w_old_visual_col = Visual.start.col;
     wp->w_old_curswant = curwin->w_curswant;
   } else {
     wp->w_old_visual_mode = 0;
@@ -2247,7 +2300,14 @@ static void win_update(win_T *wp)
           syntax_end_parsing(wp, syntax_last_parsed + 1);
         }
 
-        bool display_buf_line = !concealed && (foldinfo.fi_lines == 0 || *wp->w_p_fdt == NUL);
+        bool display_buf_line = !concealed
+                                && (foldinfo.fi_lines == 0 || wp->w_p_fdt.type == kCallbackNone);
+
+        // Add provider conceal to the marktree before drawing, so win_line() reflows it the same
+        // way the geometry functions do.
+        if (display_buf_line) {
+          decor_providers_invoke_conceal(wp, lnum - 1, false);
+        }
 
         // Display one line
         spellvars_T zero_spv = { 0 };
@@ -2511,8 +2571,9 @@ void win_scroll_lines(win_T *wp, int row, int line_count)
   int checked_width = MIN(grid->cols - col, wp->w_view_width);
   int checked_height = MIN(grid->rows - row_off, wp->w_view_height);
 
-  // No lines are being moved, just draw over the entire area
-  if (row + abs(line_count) >= checked_height) {
+  // No lines are being moved, or the window is not on the grid (stale offsets, see curs_columns()):
+  // just draw over the entire area.
+  if (checked_width <= 0 || row + abs(line_count) >= checked_height) {
     return;
   }
 
@@ -2552,7 +2613,7 @@ void win_draw_end(win_T *wp, schar_T c1, bool draw_margin, int startrow, int end
       }
 
       // draw the number column
-      if ((wp->w_p_nu || wp->w_p_rnu) && vim_strchr(p_cpo, CPO_NUMCOL) == NULL) {
+      if ((wp->w_p_nu || wp->w_p_rnu) && vim_strchr(p_cpo, kCpoNumcol) == NULL) {
         int width = number_width(wp) + 1;
         n = grid_line_fill(n, MIN(view_width, n + width),
                            schar_from_ascii(' '), win_hl_attr(wp, HLF_N));
@@ -2737,7 +2798,7 @@ void redraw_buf_range_later(buf_T *buf, linenr_T first, linenr_T last)
   }
 }
 
-/// called when the status bars for the buffer 'buf' need to be updated
+/// Marks the statuslines, 'winbar' and cmdline ruler of `buf` for redraw.
 void redraw_buf_status_later(buf_T *buf)
 {
   FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
@@ -2748,6 +2809,10 @@ void redraw_buf_status_later(buf_T *buf)
       wp->w_redr_status = true;
       set_must_redraw(UPD_VALID);
     }
+  }
+  // Redraw 'ruler' if it is in cmdline (e.g. 'laststatus=0') and was not marked for redraw above.
+  if (p_ru && curwin->w_buffer == buf && !curwin->w_status_height && !curwin->w_redr_status) {
+    redraw_cmdline = true;
   }
 }
 
@@ -2783,7 +2848,7 @@ void status_redraw_buf(buf_T *buf)
       redraw_later(wp, UPD_VALID);
     }
   }
-  // Redraw the ruler if it is in the command line and was not marked for redraw above
+  // Redraw 'ruler' if it is in cmdline (e.g. 'laststatus=0') and was not marked for redraw above.
   if (p_ru && !curwin->w_status_height && !curwin->w_redr_status) {
     redraw_cmdline = true;
     redraw_later(curwin, UPD_VALID);
@@ -2853,6 +2918,33 @@ bool conceal_cursor_line(const win_T *wp)
     return false;
   }
   return vim_strchr(wp->w_p_cocu, c) != NULL;
+}
+
+/// Redraws lines `line1` to `line2` of `wp` and invalidates their heights, after 'concealcursor'
+/// revealed or concealed them again.
+void conceal_reveal_changed(win_T *wp, linenr_T line1, linenr_T line2)
+{
+  redraw_win_range_later(wp, line1, line2);
+  // Extmark-conceal may change their size.
+  if (has_extconceal(wp)) {
+    changed_lines_invalidate_win(wp, line1, 0, line2 + 1, 0);
+    changed_topline_skipcol(wp, line1, line2);
+  }
+}
+
+/// Whether 'concealcursor' reveals line `lnum` in window `wp`: the cursor line outside the
+/// listed modes, and every line of the Visual area unless "v" is listed. Drawing and height
+/// calculations must ask this the same way, or they disagree about how tall a concealed line is.
+bool conceal_cursor_reveals_line(const win_T *wp, linenr_T lnum)
+  FUNC_ATTR_NONNULL_ALL
+{
+  if (wp == curwin && lnum == wp->w_cursor.lnum && !conceal_cursor_line(wp)) {
+    return true;
+  }
+  return Visual.active && wp->w_buffer == curwin->w_buffer
+         && lnum >= MIN(Visual.start.lnum, curwin->w_cursor.lnum)
+         && lnum <= MAX(Visual.start.lnum, curwin->w_cursor.lnum)
+         && vim_strchr(wp->w_p_cocu, 'v') == NULL;
 }
 
 /// Whether cursorline is drawn in a special way

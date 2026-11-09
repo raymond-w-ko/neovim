@@ -55,12 +55,12 @@
 #include "nvim/buffer_defs.h"
 #include "nvim/change.h"
 #include "nvim/cursor.h"
+#include "nvim/dialog.h"
 #include "nvim/drawscreen.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/fileio.h"
-#include "nvim/getchar.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/highlight_defs.h"
@@ -420,6 +420,11 @@ void ml_setname(buf_T *buf)
       break;
     }
     char *fname = findswapname(buf, &dirp, mfp->mf_fname, &found_existing_dir);
+    // autocmd may have freed mfp if findswapname creates different swapfile name
+    if (buf->b_ml.ml_mfp != mfp) {
+      xfree(fname);
+      return;
+    }
     // alloc's fname
     if (dirp == NULL) {             // out of memory
       break;
@@ -429,7 +434,7 @@ void ml_setname(buf_T *buf)
     }
 
     // if the file name is the same we don't have to do anything
-    if (path_fnamecmp(fname, mfp->mf_fname) == 0) {
+    if (path_equal(fname, mfp->mf_fname, kPathCmpLiteral)) {
       xfree(fname);
       success = true;
       break;
@@ -510,6 +515,11 @@ void ml_open_file(buf_T *buf)
     // and creating it, another Vim creates the file.  In that case the
     // creation will fail and we will use another directory.
     char *fname = findswapname(buf, &dirp, NULL, &found_existing_dir);
+    // autocmd may have freed mfp, grr!
+    if (buf->b_ml.ml_mfp != mfp) {
+      xfree(fname);
+      return;
+    }
     if (dirp == NULL) {
       break;        // out of memory
     }
@@ -803,7 +813,7 @@ void ml_recover(bool checkext)
     if (n_swaps > 1) {
       // Several swapfiles found: prompt (async) via vim.ui.select().
       typval_T lua_args[] = { items_tv, { .v_type = VAR_UNKNOWN } };
-      nlua_call_vimfn("vim._core.swapfile", "select_swap", lua_args, NULL);
+      nlua_call_typval("vim._core.swapfile", "select_swap", lua_args, NULL);
       tv_clear(&items_tv);
       goto theend;
     }
@@ -981,7 +991,7 @@ void ml_recover(bool checkext)
     set_fileformat(b0_ff - 1, OPT_LOCAL);
   }
   if (b0_fenc != NULL) {
-    set_option_value_give_err(kOptFileencoding, CSTR_AS_OPTVAL(b0_fenc), OPT_LOCAL);
+    set_option_value_give_err(kOptFileencoding, CSTR_AS_OBJ(b0_fenc), OPT_LOCAL);
     xfree(b0_fenc);
   }
   unchanged(curbuf, true, true);
@@ -1398,7 +1408,7 @@ void recover_names(char *fname, bool skip_curbuf, list_T *ret_list)
       for (int i = 0; i < num_files; i++) {
         // Do not expand wildcards, on Windows would try to expand
         // "%tmp%" in "%tmp%file"
-        if (path_full_compare(p, files[i], true, false) & kEqualFiles) {
+        if (path_equal(p, files[i], kPathCmpFull)) {
           // Remove the name from files[i].  Move further entries
           // down.  When the array becomes empty free it here, since
           // FreeWild() won't be called below.
@@ -1873,6 +1883,27 @@ colnr_T ml_get_buf_len(buf_T *buf, linenr_T lnum)
 
   assert(buf->b_ml.ml_line_textlen > 0);
   return buf->b_ml.ml_line_textlen - 1;
+}
+
+/// Gets the charwise NL-joined text of range [start, end), 1-based lnum, 0-based col, end col
+/// exclusive, as an allocated String ("" if empty). Line range must be valid (start <= end); cols
+/// clamp to line-length.
+String ml_region_text(buf_T *buf, pos_T start, pos_T end)
+  FUNC_ATTR_NONNULL_ALL
+{
+  StringBuilder sb = KV_INITIAL_VALUE;
+  for (linenr_T lnum = start.lnum; lnum <= end.lnum; lnum++) {
+    char *line = ml_get_buf(buf, lnum);
+    colnr_T len = ml_get_buf_len(buf, lnum);
+    colnr_T from = lnum == start.lnum ? MIN(start.col, len) : 0;
+    colnr_T to = lnum == end.lnum ? MIN(end.col, len) : len;
+    kv_concat_len(sb, line + from, (size_t)(to - from));
+    if (lnum < end.lnum) {
+      kv_push(sb, NL);
+    }
+  }
+  kv_push(sb, NUL);
+  return cbuf_as_string(sb.items, kv_size(sb) - 1);
 }
 
 /// @return  codepoint at pos. pos must be either valid or have col set to MAXCOL!
@@ -3479,7 +3510,7 @@ static char *findswapname(buf_T *buf, char **dirp, char *old_fname, bool *found_
     }
 
     // A file name equal to old_fname is OK to use.
-    if (old_fname != NULL && path_fnamecmp(fname, old_fname) == 0) {
+    if (old_fname != NULL && path_equal(fname, old_fname, kPathCmpLiteral)) {
       break;
     }
 
@@ -3505,8 +3536,7 @@ static char *findswapname(buf_T *buf, char **dirp, char *old_fname, bool *found_
             // buffer don't compare the directory names, they can
             // have a different mountpoint.
             if (b0.b0_flags & B0_SAME_DIR) {
-              if (path_fnamecmp(path_tail(buf->b_ffname),
-                                path_tail(b0.b0_fname)) != 0
+              if (!path_equal(path_tail(buf->b_ffname), path_tail(b0.b0_fname), kPathCmpLiteral)
                   || !same_directory(fname, buf->b_ffname)) {
                 // Symlinks may point to the same file even
                 // when the name differs, need to check the
@@ -3533,7 +3563,7 @@ static char *findswapname(buf_T *buf, char **dirp, char *old_fname, bool *found_
         //  - there is an old swapfile for the current file
         //  - the buffer was not recovered
         if (!differ && !(curbuf->b_flags & BF_RECOVERED)
-            && vim_strchr(p_shm, SHM_ATTENTION) == NULL) {
+            && vim_strchr(p_shm, kShmAttention) == NULL) {
           sea_choice_T choice = SEA_CHOICE_NONE;
 
           // It's safe to delete the swapfile if all these are true:
@@ -3832,7 +3862,6 @@ enum {
 static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
 {
   static buf_T *ml_upd_lastbuf = NULL;
-  static linenr_T ml_upd_lastline;
   static linenr_T ml_upd_lastcurline;
   static int ml_upd_lastcurix;
 
@@ -3849,6 +3878,7 @@ static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
     buf->b_ml.ml_usedchunks = 1;
     buf->b_ml.ml_chunksize[0].mlcs_numlines = 1;
     buf->b_ml.ml_chunksize[0].mlcs_totalsize = 1;
+    ml_upd_lastbuf = NULL;          // invalidate resume cache
   }
 
   if (updtype == ML_CHNK_UPDLINE && buf->b_ml.ml_line_count == 1) {
@@ -3856,25 +3886,22 @@ static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
     buf->b_ml.ml_usedchunks = 1;
     buf->b_ml.ml_chunksize[0].mlcs_numlines = 1;
     buf->b_ml.ml_chunksize[0].mlcs_totalsize = buf->b_ml.ml_line_textlen;
+    ml_upd_lastbuf = NULL;          // invalidate resume cache
     return;
   }
 
   // Find chunk that our line belongs to, curline will be at start of the
   // chunk.
-  if (buf != ml_upd_lastbuf || line != ml_upd_lastline + 1
-      || updtype != ML_CHNK_ADDLINE) {
-    for (curline = 1, curix = 0;
-         curix < buf->b_ml.ml_usedchunks - 1
-         && line >= curline +
-         buf->b_ml.ml_chunksize[curix].mlcs_numlines;
-         curix++) {
-      curline += buf->b_ml.ml_chunksize[curix].mlcs_numlines;
-    }
-  } else if (curix < buf->b_ml.ml_usedchunks - 1
-             && line >= curline + buf->b_ml.ml_chunksize[curix].mlcs_numlines) {
-    // Adjust cached curix & curline
+  // The scan resumes at the cached chunk while ml_upd_lastbuf is set: the
+  // chunks have not moved since the last call.
+  if (buf != ml_upd_lastbuf || line < curline) {
+    curline = 1;
+    curix = 0;
+  }
+  for (; curix < buf->b_ml.ml_usedchunks - 1
+       && line >= curline + buf->b_ml.ml_chunksize[curix].mlcs_numlines;
+       curix++) {
     curline += buf->b_ml.ml_chunksize[curix].mlcs_numlines;
-    curix++;
   }
   chunksize_T *curchnk = buf->b_ml.ml_chunksize + curix;
 
@@ -3971,13 +3998,13 @@ static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
     }
   } else if (updtype == ML_CHNK_DELLINE) {
     curchnk->mlcs_numlines--;
-    ml_upd_lastbuf = NULL;       // Force recalc of curix & curline
     if (curix < (buf->b_ml.ml_usedchunks - 1)
         && (curchnk->mlcs_numlines + curchnk[1].mlcs_numlines)
         <= MLCS_MINL) {
       curix++;
       curchnk = buf->b_ml.ml_chunksize + curix;
     } else if (curix == 0 && curchnk->mlcs_numlines <= 0) {
+      ml_upd_lastbuf = NULL;   // Force recalc of curix & curline
       buf->b_ml.ml_usedchunks--;
       memmove(buf->b_ml.ml_chunksize, buf->b_ml.ml_chunksize + 1,
               (size_t)buf->b_ml.ml_usedchunks * sizeof(chunksize_T));
@@ -3986,10 +4013,15 @@ static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
                               && (curchnk->mlcs_numlines +
                                   curchnk[-1].mlcs_numlines)
                               > MLCS_MINL)) {
+      // The chunks are left as they are, the cached position stays valid.
+      ml_upd_lastbuf = buf;
+      ml_upd_lastcurline = curline;
+      ml_upd_lastcurix = curix;
       return;
     }
 
     // Collapse chunks
+    ml_upd_lastbuf = NULL;   // Force recalc of curix & curline
     curchnk[-1].mlcs_numlines += curchnk->mlcs_numlines;
     curchnk[-1].mlcs_totalsize += curchnk->mlcs_totalsize;
     buf->b_ml.ml_usedchunks--;
@@ -4001,7 +4033,6 @@ static void ml_updatechunk(buf_T *buf, linenr_T line, int len, int updtype)
     return;
   }
   ml_upd_lastbuf = buf;
-  ml_upd_lastline = line;
   ml_upd_lastcurline = curline;
   ml_upd_lastcurix = curix;
 }
@@ -4226,6 +4257,12 @@ int incl(pos_T *lp)
   return r;
 }
 
+/// Decrements position `lp` by one character (multibyte-aware), crossing line boundaries as
+/// necessary. Resets `lp.coladd`. Uses curbuf.
+///
+/// @return   1 when crossing to the previous line.
+///          -1 when at the start of the file.
+///           0 otherwise.
 int dec(pos_T *lp)
 {
   lp->coladd = 0;

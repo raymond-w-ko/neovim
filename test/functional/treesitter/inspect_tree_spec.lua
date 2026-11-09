@@ -1,6 +1,7 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear = n.clear
 local insert = n.insert
 local dedent = t.dedent
@@ -107,7 +108,7 @@ describe('vim.treesitter.inspect_tree', function()
         (section ; [0, 0] - [4, 0]
           (fenced_code_block ; [0, 0] - [3, 0]
             (fenced_code_block_delimiter) ; [0, 0] - [0, 3]
-            (info_string ; [0, 3] - [0, 6]
+            info_string: (info_string ; [0, 3] - [0, 6]
               (language)) ; [0, 3] - [0, 6]
             (block_continuation) ; [1, 0] - [1, 0]
             (code_fence_content ; [1, 0] - [2, 0]
@@ -176,7 +177,7 @@ describe('vim.treesitter.inspect_tree', function()
         (section ; [0, 0] - [4, 0] markdown
           (fenced_code_block ; [0, 0] - [3, 0] markdown
             (fenced_code_block_delimiter) ; [0, 0] - [0, 3] markdown
-            (info_string ; [0, 3] - [0, 6] markdown
+            info_string: (info_string ; [0, 3] - [0, 6] markdown
               (language)) ; [0, 3] - [0, 6] markdown
             (block_continuation) ; [1, 0] - [1, 0] markdown
             (code_fence_content ; [1, 0] - [2, 0] markdown

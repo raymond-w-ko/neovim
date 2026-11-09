@@ -103,9 +103,9 @@
 //   E577: Illegal register name
 //   E886: Can't rename viminfo file to %s!
 //   E929: Too many viminfo temp files, like %s!
-// Now only six of them are used:
+// Now only seven of them are used:
 //   E137: ShaDa file is not writeable (for pre-open checks)
-//   E929: All %s.tmp.X files exist, cannot write ShaDa file!
+//   E138: All %s.tmp.X files exist, cannot write ShaDa file!
 //   RCERR (E576) for critical read errors.
 //   RNERR (E136) for various errors when renaming.
 //   RERR (E575) for various errors inside read ShaDa file.
@@ -473,7 +473,6 @@ static inline void hmll_remove(HMLList *const hmll, HMLListEntry *const hmll_ent
 /// @param[in]   hmll_entry      Entry to insert after or NULL if it is needed
 ///                              to insert at the first entry.
 /// @param[in]   data            Data to insert.
-/// @param[in]   can_free_entry  True if data can be freed.
 static inline void hmll_insert(HMLList *const hmll, HMLListEntry *hmll_entry, const ShadaEntry data)
   FUNC_ATTR_NONNULL_ARG(1)
 {
@@ -559,13 +558,14 @@ static ShaDaReadResult sd_reader_skip(FileDescriptor *const sd_reader, const siz
 }
 
 /// Wrapper for closing file descriptors
-static void close_file(FileDescriptor *cookie)
+static int close_file(FileDescriptor *cookie)
 {
   const int error = file_close(cookie, !!p_fs);
   if (error != 0) {
     semsg(_(SERR "System error while closing ShaDa file: %s"),
           os_strerror(error));
   }
+  return error;
 }
 
 /// Read ShaDa file
@@ -850,7 +850,7 @@ static buf_T *find_buffer(PMap(cstr_t) *const fname_bufs, const char *const fnam
 
   FOR_ALL_BUFFERS(buf) {
     if (buf->b_ffname != NULL) {
-      if (path_fnamecmp(fname, buf->b_ffname) == 0) {
+      if (path_equal(fname, buf->b_ffname, kPathCmpLiteral)) {
         *ref = buf;
         return buf;
       }
@@ -908,20 +908,21 @@ static void shada_read(FileDescriptor *const sd_reader, const int flags)
 {
   list_T *oldfiles_list = get_vim_var_list(VV_OLDFILES);
   const bool force = flags & kShaDaForceit;
-  const bool get_old_files = (flags & (kShaDaGetOldfiles | kShaDaForceit)
-                              && (force || tv_list_len(oldfiles_list) == 0));
+  const bool get_old_files = (flags & kShaDaGetOldfiles)
+                             && (force || tv_list_len(oldfiles_list) == 0);
   const bool want_marks = flags & kShaDaWantMarks;
+  const bool no_opt = flags & kShaDaNoOpt;
   const unsigned srni_flags =
     (unsigned)(
                (flags & kShaDaWantInfo
                 ? (kSDReadUndisableableData
                    | kSDReadRegisters
                    | kSDReadGlobalMarks
-                   | (p_hi ? kSDReadHistory : 0)
-                   | (find_shada_parameter('!') != NULL
+                   | (p_hi && !(flags & kShaDaNoHistory) ? kSDReadHistory : 0)
+                   | (no_opt || find_shada_parameter('!') != NULL
                       ? kSDReadVariables
                       : 0)
-                   | (find_shada_parameter('%') != NULL
+                   | ((no_opt || find_shada_parameter('%') != NULL)
                       && ARGCOUNT == 0
                       ? kSDReadBufferList
                       : 0))
@@ -1032,7 +1033,7 @@ static void shada_read(FileDescriptor *const sd_reader, const int flags)
       // string is close to useless: you can only use it with :& or :~ and
       // that’s all because s//~ is not available until the first call to
       // regtilde. Vim was not calling this for some reason.
-      regtilde(cur_entry.data.sub_string.sub, magic_isset(), false);
+      regtilde(cur_entry.data.sub_string.sub, p_magic, false);
       // Do not free shada entry: its allocated memory was saved above.
       break;
     case kSDItemHistoryEntry:
@@ -1043,32 +1044,36 @@ static void shada_read(FileDescriptor *const sd_reader, const int flags)
       hms_insert(hms + cur_entry.data.history_item.histtype, cur_entry, true);
       // Do not free shada entry: its allocated memory was saved above.
       break;
-    case kSDItemRegister:
+    case kSDItemRegister: {
       if (cur_entry.data.reg.type != kMTCharWise
           && cur_entry.data.reg.type != kMTLineWise
           && cur_entry.data.reg.type != kMTBlockWise) {
         shada_free_shada_entry(&cur_entry);
         break;
       }
+      // reg are ns; shada stores seconds; Context/multicursor wants high-precision comparison.
+      const Timestamp reg_ts = (flags & kShaDaNanos)
+                               ? cur_entry.timestamp : cur_entry.timestamp * NS_PER_SEC;
       if (!force) {
         const yankreg_T *const reg = op_reg_get(cur_entry.data.reg.name);
-        if (reg == NULL || reg->timestamp >= cur_entry.timestamp) {
+        if (reg == NULL || reg->timestamp >= reg_ts) {
           shada_free_shada_entry(&cur_entry);
           break;
         }
       }
       if (!op_reg_set(cur_entry.data.reg.name, (yankreg_T) {
-        .y_array = cur_entry.data.reg.contents,
-        .y_size = cur_entry.data.reg.contents_size,
-        .y_type = cur_entry.data.reg.type,
-        .y_width = (colnr_T)cur_entry.data.reg.width,
-        .timestamp = cur_entry.timestamp,
-        .additional_data = cur_entry.additional_data,
-      }, cur_entry.data.reg.is_unnamed)) {
+          .y_array = cur_entry.data.reg.contents,
+          .y_size = cur_entry.data.reg.contents_size,
+          .y_type = cur_entry.data.reg.type,
+          .y_width = (colnr_T)cur_entry.data.reg.width,
+          .timestamp = reg_ts,
+          .additional_data = cur_entry.additional_data,
+        }, cur_entry.data.reg.is_unnamed)) {
         shada_free_shada_entry(&cur_entry);
       }
       // Do not free shada entry: its allocated memory was saved above.
       break;
+    }
     case kSDItemVariable:
       var_set_global(cur_entry.data.global_var.name,
                      cur_entry.data.global_var.value);
@@ -1606,17 +1611,13 @@ static int compare_file_marks(const void *a, const void *b)
           : ((*a_fms)->greatest_timestamp > (*b_fms)->greatest_timestamp ? -1 : 1));
 }
 
-/// Parse msgpack object that has given length
+/// Check the result of parsing one msgpack object from the ShaDa file.
 ///
-/// @param[in]   sd_reader     Structure containing file reader definition.
-/// @param[in]   length        Object length.
-/// @param[out]  ret_unpacked  Location where read result should be saved. If
-///                            NULL then unpacked data will be freed. Must be
-///                            NULL if `ret_buf` is NULL.
-/// @param[out]  ret_buf       Buffer containing parsed string.
+/// @param[in]  initial_fpos  File position where the object started (for error messages).
+/// @param[in]  status        mpack parser status (MPACK_OK, MPACK_EOF, …).
+/// @param[in]  remaining     Unparsed bytes left over (must be 0 for a well-formed object).
 ///
-/// @return kSDReadStatusNotShaDa, kSDReadStatusReadError or
-///         kSDReadStatusSuccess.
+/// @return kSDReadStatusSuccess, or kSDReadStatusNotShaDa on a parse error.
 static ShaDaReadResult shada_check_status(uintmax_t initial_fpos, int status, size_t remaining)
   FUNC_ATTR_WARN_UNUSED_RESULT
 {
@@ -1718,7 +1719,7 @@ static const char *shada_format_entry(const ShadaEntry entry)
 /// @param[in]      sd_reader   Structure containing file reader definition.
 /// @param[in]      srni_flags  Flags determining what to read.
 /// @param[in]      max_kbyte   Maximum size of one element.
-/// @param[in,out]  ret_wms     Location where results are saved.
+/// @param[in,out]  wms         Location where results are saved.
 /// @param[out]     packer      MessagePack packer for entries which are not
 ///                             merged.
 static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_reader,
@@ -1731,6 +1732,7 @@ static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_
   ShaDaWriteResult ret = kSDWriteSuccessful;
   ShadaEntry entry;
   ShaDaReadResult srni_ret;
+  bool has_header = false;
 
 #define COMPARE_WITH_ENTRY(wms_entry_, entry) \
   do { \
@@ -1755,8 +1757,9 @@ static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_
       // Should be handled by the while condition.
       abort();
     case kSDReadStatusNotShaDa:
-      ret = kSDWriteReadNotShada;
-      FALLTHROUGH;
+      // Damage after a valid header (e.g. truncated by a crash), so we know it is a (partial) ShaDa
+      // file. Keep the entries gathered so far and replace the file. #6875 #11876
+      return has_header ? ret : kSDWriteReadNotShada;
     case kSDReadStatusReadError:
       return ret;
     case kSDReadStatusMalformed:
@@ -1766,6 +1769,9 @@ static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_
     case kSDItemMissing:
       break;
     case kSDItemHeader:
+      has_header = true;
+      shada_free_shada_entry(&entry);
+      break;
     case kSDItemBufferList:
       abort();
     case kSDItemUnknown:
@@ -1808,7 +1814,7 @@ static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_
       }
       if (wms->registers[idx].type == kSDItemMissing) {
         const yankreg_T *const reg = op_reg_get(entry.data.reg.name);
-        if (reg != NULL && reg_empty(reg) && reg->timestamp >= entry.timestamp) {
+        if (reg != NULL && reg_empty(reg) && reg->timestamp / NS_PER_SEC >= entry.timestamp) {
           shada_free_shada_entry(&entry);
           break;
         }
@@ -1922,7 +1928,7 @@ static inline ShaDaWriteResult shada_read_when_writing(FileDescriptor *const sd_
           } else {
             FOR_ALL_BUFFERS(buf) {
               if (buf->b_ffname != NULL
-                  && path_fnamecmp(entry.data.filemark.fname, buf->b_ffname) == 0) {
+                  && path_equal(entry.data.filemark.fname, buf->b_ffname, kPathCmpLiteral)) {
                 fmark_T fm;
                 mark_get(buf, curwin, &fm, kMarkBufLocal, (int)entry.data.filemark.name);
                 if (fm.timestamp >= entry.timestamp) {
@@ -2113,7 +2119,9 @@ static inline void add_search_pattern(ShadaEntry *const ret_pse,
 ///
 /// @param[in]  wms  The WriteMergerState used when writing.
 /// @param[in]  max_reg_lines  The maximum number of register lines.
-static inline void shada_initialize_registers(WriteMergerState *const wms, int max_reg_lines)
+/// @param scale_ts  Downscale the timestamp to seconds (shada legacy).
+static inline void shada_initialize_registers(WriteMergerState *const wms, int max_reg_lines,
+                                              bool scale_ts)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_ALWAYS_INLINE
 {
   const void *reg_iter = NULL;
@@ -2132,7 +2140,7 @@ static inline void shada_initialize_registers(WriteMergerState *const wms, int m
     wms->registers[op_reg_index(name)] = (ShadaEntry) {
       .can_free_entry = false,
       .type = kSDItemRegister,
-      .timestamp = reg.timestamp,
+      .timestamp = scale_ts ? reg.timestamp / NS_PER_SEC : reg.timestamp,
       .data = {
         .reg = {
           .contents = reg.y_array,
@@ -2277,7 +2285,8 @@ static ShaDaWriteResult shada_write(FileDescriptor *const sd_writer,
     }
   }
 
-  const unsigned srni_flags = (unsigned)(kSDReadUndisableableData
+  const unsigned srni_flags = (unsigned)(kSDReadHeader
+                                         | kSDReadUndisableableData
                                          | kSDReadUnknown
                                          | (dump_history ? kSDReadHistory : 0)
                                          | (dump_registers ? kSDReadRegisters : 0)
@@ -2409,7 +2418,7 @@ static ShaDaWriteResult shada_write(FileDescriptor *const sd_writer,
   }
 
   if (dump_one_history[HIST_SEARCH] > 0) {  // Skip if /0 in 'shada'
-    const bool search_highlighted = !(no_hlsearch
+    const bool search_highlighted = !(Search.no_hlsearch
                                       || find_shada_parameter('h') != NULL);
     const bool search_last_used = search_was_last_used();
 
@@ -2488,7 +2497,7 @@ static ShaDaWriteResult shada_write(FileDescriptor *const sd_writer,
 
   // Initialize registers
   if (dump_registers) {
-    shada_initialize_registers(wms, max_reg_lines);
+    shada_initialize_registers(wms, max_reg_lines, true);
   }
 
   // Initialize buffers
@@ -2684,6 +2693,9 @@ shada_write_exit:
   map_destroy(cstr_t, &wms->file_marks);
   set_destroy(ptr_t, &removable_bufs);
   packer.packer_flush(&packer);
+  if (packer.anyint != 0) {
+    ret = kSDWriteFailed;
+  }
   set_destroy(cstr_t, &wms->dumped_variables);
   xfree(wms);
   return ret;
@@ -2691,9 +2703,57 @@ shada_write_exit:
 
 #undef PACK_KEY
 
+/// Creates the first available `{fname}.tmp.a…z` file. If all exist (old failed writes), deletes
+/// the oldest and reuses its name.
+///
+/// @param[out]  sd_writer  Opened file.
+/// @param[in]  perm  Permissions of the new file.
+///
+/// @return Name of the opened file, or NULL on error.
+static char *shada_open_tmp(const char *const fname, FileDescriptor *const sd_writer,
+                            const int perm)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
+{
+  char *const tempname = modname(fname, ".tmp.a", false);
+  if (tempname == NULL) {
+    return NULL;
+  }
+  const int flags = kFileCreateOnly|kFileNoSymlink;
+  char *const letter = tempname + strlen(tempname) - 1;
+  char oldest = NUL;
+  int64_t oldest_mtime = 0;
+  for (int c = 'a'; c <= 'z'; c++) {
+    *letter = (char)c;
+    const int error = file_open(sd_writer, tempname, flags, perm);
+    if (error == 0) {
+      return tempname;
+    } else if (error != UV_EEXIST && error != UV_ELOOP) {
+      semsg(_(SERR "System error while opening temporary ShaDa file %s for writing: %s"),
+            tempname, os_strerror(error));
+      xfree(tempname);
+      return NULL;
+    }
+    FileInfo info;
+    if (os_fileinfo_link(tempname, &info)
+        && (oldest == NUL || info.stat.st_mtim.tv_sec < oldest_mtime)) {
+      oldest = (char)c;
+      oldest_mtime = info.stat.st_mtim.tv_sec;
+    }
+  }
+  if (oldest != NUL) {
+    *letter = oldest;
+    if (os_remove(tempname) == 0 && file_open(sd_writer, tempname, flags, perm) == 0) {
+      return tempname;
+    }
+  }
+  semsg(_("E138: All %s.tmp.X files exist, cannot write ShaDa file!"), fname);
+  xfree(tempname);
+  return NULL;
+}
+
 /// Write ShaDa file to a given location
 ///
-/// @param[in]  fname    File to write to. If it is NULL or empty then default
+/// @param[in]  file     File to write to. If it is NULL or empty then default
 ///                      location is used.
 /// @param[in]  nomerge  If true then old file is ignored.
 ///
@@ -2705,101 +2765,36 @@ int shada_write_file(const char *const file, bool nomerge)
     return FAIL;
   }
 
-  char *tempname = NULL;
   FileDescriptor sd_writer;
   FileDescriptor sd_reader;
-  bool did_open_writer = false;
   bool did_open_reader = false;
 
   if (!nomerge) {
-    int error;
-    if ((error = file_open(&sd_reader, fname, kFileReadOnly, 0)) != 0) {
-      if (error != UV_ENOENT) {
-        semsg(_(SERR "System error while opening ShaDa file %s for reading "
-                "to merge before writing it: %s"),
-              fname, os_strerror(error));
-        // Try writing the file even if opening it emerged any issues besides
-        // file not existing: maybe writing will succeed nevertheless.
-      }
-      nomerge = true;
-      goto shada_write_file_nomerge;
-    } else {
+    const int error = file_open(&sd_reader, fname, kFileReadOnly, 0);
+    if (error == 0) {
       did_open_reader = true;
-    }
-    tempname = modname(fname, ".tmp.a", false);
-    if (tempname == NULL) {
-      nomerge = true;
-      goto shada_write_file_nomerge;
-    }
-
-    // Save permissions from the original file, with modifications:
-    int perm = (int)os_getperm(fname);
-    perm = (perm >= 0) ? ((perm & 0777) | 0600) : 0600;
-    //                 ^3         ^1       ^2      ^2,3
-    // 1: Strip SUID bit if any.
-    // 2: Make sure that user can always read and write the result.
-    // 3: If somebody happened to delete the file after it was opened for
-    //    reading use u=rw permissions.
-shada_write_file_open: {}
-    error = file_open(&sd_writer, tempname, kFileCreateOnly|kFileNoSymlink, perm);
-    if (error) {
-      if (error == UV_EEXIST || error == UV_ELOOP) {
-        // File already exists, try another name
-        char *const wp = tempname + strlen(tempname) - 1;
-        if (*wp == 'z') {
-          // Tried names from .tmp.a to .tmp.z, all failed. Something must be
-          // wrong then.
-          semsg(_("E138: All %s.tmp.X files exist, cannot write ShaDa file!"),
-                fname);
-          xfree(fname);
-          xfree(tempname);
-          if (did_open_reader) {
-            close_file(&sd_reader);
-          }
-          return FAIL;
-        }
-        (*wp)++;
-        goto shada_write_file_open;
-      } else {
-        semsg(_(SERR "System error while opening temporary ShaDa file %s "
-                "for writing: %s"), tempname, os_strerror(error));
-      }
-    } else {
-      did_open_writer = true;
-    }
-  }
-  if (nomerge) {
-shada_write_file_nomerge: {}
-    char *const tail = path_tail_with_sep(fname);
-    if (tail != fname) {
-      const char tail_save = *tail;
-      *tail = NUL;
-      if (!os_isdir(fname)) {
-        int ret;
-        char *failed_dir;
-        if ((ret = os_mkdir_recurse(fname, 0700, &failed_dir, NULL)) != 0) {
-          semsg(_(SERR "Failed to create directory %s "
-                  "for writing ShaDa file: %s"),
-                failed_dir, os_strerror(ret));
-          xfree(fname);
-          xfree(failed_dir);
-          return FAIL;
-        }
-      }
-      *tail = tail_save;
-    }
-    int error = file_open(&sd_writer, fname, kFileCreate|kFileTruncate, 0600);
-    if (error) {
-      semsg(_(SERR "System error while opening ShaDa file %s for writing: %s"),
+    } else if (error != UV_ENOENT) {
+      semsg(_(SERR "System error while opening ShaDa file %s for reading "
+              "to merge before writing it: %s"),
             fname, os_strerror(error));
-    } else {
-      did_open_writer = true;
+      // Try writing the file even if opening it emerged any issues besides
+      // file not existing: maybe writing will succeed nevertheless.
     }
   }
 
-  if (!did_open_writer) {
+  // Save permissions from the original file, with modifications:
+  int perm = (int)os_getperm(fname);
+  perm = (perm >= 0) ? ((perm & 0777) | 0600) : 0600;
+  //                 ^3         ^1       ^2      ^2,3
+  // 1: Strip SUID bit if any.
+  // 2: Make sure that user can always read and write the result.
+  // 3: If the file does not exist use u=rw permissions.
+  char *tempname = NULL;
+  if (os_file_mkdir(fname, 0700) == 0) {
+    tempname = shada_open_tmp(fname, &sd_writer, perm);
+  }
+  if (tempname == NULL) {
     xfree(fname);
-    xfree(tempname);
     if (did_open_reader) {
       close_file(&sd_reader);
     }
@@ -2812,17 +2807,16 @@ shada_write_file_nomerge: {}
     verbose_leave();
   }
 
-  const ShaDaWriteResult sw_ret = shada_write(&sd_writer, (nomerge ? NULL : &sd_reader));
+  const ShaDaWriteResult sw_ret = shada_write(&sd_writer, did_open_reader ? &sd_reader : NULL);
   assert(sw_ret != kSDWriteIgnError);
-  if (!nomerge) {
-    if (did_open_reader) {
-      close_file(&sd_reader);
-    }
-    bool did_remove = false;
-    if (sw_ret == kSDWriteSuccessful) {
-      FileInfo old_info;
-      if (!os_fileinfo(fname, &old_info)
-          || S_ISDIR(old_info.stat.st_mode)
+  if (did_open_reader) {
+    close_file(&sd_reader);
+  }
+  bool did_remove = false;
+  if (sw_ret == kSDWriteSuccessful) {
+    FileInfo old_info;
+    if (os_fileinfo(fname, &old_info)) {
+      if (S_ISDIR(old_info.stat.st_mode)
 #ifdef UNIX
           // For Unix we check the owner of the file.  It's not very nice
           // to overwrite a user's viminfo file after a "su root", with a
@@ -2854,29 +2848,33 @@ shada_write_file_nomerge: {}
         }
       }
 #endif
-      if (vim_rename(tempname, fname) == -1) {
-        semsg(_(RNERR "Can't rename ShaDa file from %s to %s!"),
-              tempname, fname);
-      } else {
-        did_remove = true;
-        os_remove(tempname);
-      }
-    } else {
-      if (sw_ret == kSDWriteReadNotShada) {
-        semsg(_(RNERR "Did not rename %s because %s "
-                "does not look like a ShaDa file"), tempname, fname);
-      } else {
-        semsg(_(RNERR "Did not rename %s to %s because there were errors "
-                "during writing it"), tempname, fname);
-      }
     }
-    if (!did_remove) {
-shada_write_file_did_not_remove:
-      semsg(_(RNERR "Do not forget to remove %s or rename it manually to %s."),
+    // Flush (+fsync) before rename, so a crash cannot partially replace the old file.
+    if (close_file(&sd_writer) != 0) {
+      goto shada_write_file_did_not_remove;
+    }
+    if (vim_rename(tempname, fname) == -1) {
+      semsg(_(RNERR "Can't rename ShaDa file from %s to %s!"),
             tempname, fname);
+    } else {
+      did_remove = true;
+      os_remove(tempname);
     }
-    xfree(tempname);
+  } else {
+    if (sw_ret == kSDWriteReadNotShada) {
+      semsg(_(RNERR "Did not rename %s because %s "
+              "does not look like a ShaDa file"), tempname, fname);
+    } else {
+      semsg(_(RNERR "Did not rename %s to %s because there were errors "
+              "during writing it"), tempname, fname);
+    }
   }
+  if (!did_remove) {
+shada_write_file_did_not_remove:
+    semsg(_(RNERR "Do not forget to remove %s or rename it manually to %s."),
+          tempname, fname);
+  }
+  xfree(tempname);
   close_file(&sd_writer);
 
   xfree(fname);
@@ -3238,9 +3236,11 @@ shada_read_next_item_start:
   entry->data = sd_default_values[type_u64].data;
   switch ((ShadaEntryType)type_u64) {
   case kSDItemHeader:
-    // TODO(bfredl): header is written to file and provides useful debugging
-    // info. It is never read by nvim (earlier we parsed it back to a
-    // Dict, but that value was never used)
+    // Check that header is well-formed. shada_read_when_writing() uses it to detect "damaged ShaDa"
+    // vs "non-ShaDa" file.
+    if (unpack_skip(&read_ptr, &read_size) != MPACK_OK) {
+      goto shada_read_next_item_error;
+    }
     break;
   case kSDItemSearchPattern: {
     Dict(_shada_search_pat) *it = &entry->data.search_pattern;
@@ -3613,17 +3613,18 @@ static inline size_t shada_init_jumps(ShadaEntry *jumps, Set(ptr_t) *const remov
   return jumps_size;
 }
 
-/// Write registers ShaDa entries in given msgpack_sbuffer.
+/// Gets registers as a msgpack-encoded string, in shada format.
 ///
-/// @param[in]  sbuf  target msgpack_sbuffer to write to.
-String shada_encode_regs(void)
+/// @param scale_ts  Downscale the timestamp to seconds (shada legacy).
+/// @param since     Only registers modified => this time (0: all). Nanoseconds, unless `scale_ts`.
+String shada_encode_regs(bool scale_ts, Timestamp since)
   FUNC_ATTR_NONNULL_ALL
 {
   WriteMergerState *const wms = xcalloc(1, sizeof(*wms));
-  shada_initialize_registers(wms, -1);
+  shada_initialize_registers(wms, -1, scale_ts);
   PackerBuffer packer = packer_string_buffer();
   for (size_t i = 0; i < ARRAY_SIZE(wms->registers); i++) {
-    if (wms->registers[i].type == kSDItemRegister) {
+    if (wms->registers[i].type == kSDItemRegister && wms->registers[i].timestamp >= since) {
       if (kSDWriteFailed
           == shada_pack_pfreed_entry(&packer, wms->registers[i], 0)) {
         abort();
@@ -3634,9 +3635,7 @@ String shada_encode_regs(void)
   return packer_take_string(&packer);
 }
 
-/// Write jumplist ShaDa entries in given msgpack_sbuffer.
-///
-/// @param[in]  sbuf            target msgpack_sbuffer to write to.
+/// Gets the jumplist as a msgpack-encoded string, in shada format.
 String shada_encode_jumps(void)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -3653,9 +3652,7 @@ String shada_encode_jumps(void)
   return packer_take_string(&packer);
 }
 
-/// Write buffer list ShaDa entry in given msgpack_sbuffer.
-///
-/// @param[in]  sbuf            target msgpack_sbuffer to write to.
+/// Gets the buffer-list as a msgpack-encoded string, in shada format.
 String shada_encode_buflist(void)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -3671,9 +3668,7 @@ String shada_encode_buflist(void)
   return packer_take_string(&packer);
 }
 
-/// Write global variables ShaDa entries in given msgpack_sbuffer.
-///
-/// @param[in]  sbuf            target msgpack_sbuffer to write to.
+/// Gets global Vimscript variables as a msgpack-encoded string, in shada format.
 String shada_encode_gvars(void)
   FUNC_ATTR_NONNULL_ALL
 {

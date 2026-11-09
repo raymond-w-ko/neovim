@@ -10,7 +10,7 @@ local M = {}
 ---
 ---@param payload string Sequence to send via nvim_ui_send(). Use empty string ('') to just register
 ---                      a listener (no sending).
----@param opts? { timeout?: integer, on_timeout?: fun(), group?: integer|string, chan?: integer }
+---@param opts? { timeout?: integer, on_timeout?: fun(), group?: integer|string, chan?: integer } #
 ---       - `timeout` (default: 1000) ms to wait before giving up, or 0 for never (caller must remove the autocmd).
 ---       - `on_timeout` optional fn called when the timeout fires.
 ---       - `group`: augroup for the TermResponse autocmd.
@@ -52,6 +52,7 @@ function M.request(payload, opts, on_response)
   end
 
   if timer then
+    vim.uv.update_time() -- See time_watcher_start().
     timer:start(timeout, 0, function()
       vim.schedule(function()
         pcall(vim.api.nvim_del_autocmd, id)
@@ -126,28 +127,40 @@ function M.query(caps, opts, on_response)
       end
     end,
   }, function(resp)
-    local k, rest = resp:match('^\027P1%+r(%x+)(.*)$')
-    if not k or not rest then
-      return
-    end
-    local cap = vim.text.hexdecode(k)
-    if not cap or not pending[cap] then
-      -- Received a response for a capability we didn't request. This can happen if there are
-      -- multiple concurrent XTGETTCAP requests
+    -- XTGETTCAP reply: ESC P, status (0 = not found, 1 = found), "+r", then capability data.
+    local status, body = resp:match('^\027P([01])%+r(.*)$')
+    if not status or not body then
       return
     end
 
-    local seq ---@type string?
-    if rest:match('^=%x+$') then
-      seq = vim.text
-        .hexdecode(rest:sub(2))
-        :gsub('\\E', '\027')
-        :gsub('%%p%d', '')
-        :gsub('\\(%d+)', string.char)
-    end
+    -- Each pair contains a hex-encoded name, optionally followed by "=" and a hex-encoded value.
+    for pair in vim.gsplit(body, ';') do
+      local k, rest = pair:match('^(%x+)(.*)$')
+      local cap = k and vim.text.hexdecode(k)
+      -- Ignore capabilities we didn't request: concurrent queries share TermResponse.
+      if cap and rest and pending[cap] then
+        local seq ---@type string?
+        if status == '1' and rest:match('^=%x+$') then
+          seq = vim.text.hexdecode(rest:sub(2))
+          if not seq then
+            return -- Ignore malformed responses and leave the capability pending.
+          end
+          -- Normalize terminfo source strings in three steps:
+          -- 1. Replace the literal \E escape with the ESC byte.
+          -- 2. Remove %pN parameter selectors (N is one decimal digit), leaving %d/%s conversions.
+          -- 3. Decode a backslash followed by exactly three octal digits as one byte.
+          seq = seq
+            :gsub('\\E', '\027')
+            :gsub('%%p%d', '')
+            :gsub('\\([0-7][0-7][0-7])', function(digits)
+              return string.char(assert(tonumber(digits, 8)))
+            end)
+        end
 
-    on_response(cap, true, seq)
-    pending[cap] = nil
+        on_response(cap, status == '1', seq)
+        pending[cap] = nil
+      end
+    end
 
     return next(pending) == nil
   end)

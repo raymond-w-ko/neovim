@@ -83,7 +83,7 @@ function M.get_lines(buf, rows)
   -- Load the buffer if this is not a file URI.
   -- Custom language server protocol extensions can result in servers sending
   -- URIs with custom schemes. Plugins are able to load these via `BufReadCmd` autocmds.
-  if not vim.startswith(vim.uri_from_bufnr(buf), 'file://') then
+  if not vim.startswith(vim.uri.from_buf(buf), 'file://') then
     vim.fn.bufload(buf)
     return buf_lines()
   end
@@ -94,11 +94,12 @@ function M.get_lines(buf, rows)
   end
 
   -- Get the data from the file.
-  local success, data = pcall(vim.fn.readblob, vim.api.nvim_buf_get_name(buf))
+  local success, data = pcall(vim.fn.readblob, api.nvim_buf_get_name(buf))
   if not success then
     return row_line
   end
 
+  --- @cast data string
   local need = vim.tbl_count(row_line)
   local row = 0
   for line in string.gmatch(data, '([^\n]*)\n?') do

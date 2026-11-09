@@ -2,6 +2,7 @@ local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each = t.describe, t.it, t.before_each
 local clear = n.clear
 local eq = t.eq
 local insert = n.insert
@@ -44,6 +45,21 @@ void ui_refresh(void)
     exec_lua(
       ([[vim.treesitter.get_parser(0, %s):parse()]]):format(lang and '"' .. lang .. '"' or 'nil')
     )
+  end
+
+  --- Waits for the async parse, and the fold update that follows it.
+  local function wait_folds()
+    exec_lua(function()
+      local done = false
+      -- Queued after the in-flight parse's callbacks (if any), so folds have updated when it runs.
+      vim.treesitter.get_parser(0):parse(nil, function()
+        done = true
+      end)
+      assert(vim.wait(5000, function()
+        return done
+      end))
+    end)
+    poke_eventloop()
   end
 
   local function get_fold_levels()
@@ -90,7 +106,7 @@ void ui_refresh(void)
     parse('c')
 
     command('1,2d')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '0',
@@ -113,7 +129,7 @@ void ui_refresh(void)
     }, get_fold_levels())
 
     command('1put!')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -156,7 +172,7 @@ t2]])
     }, get_fold_levels())
 
     feed('2ggo<Esc>')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -167,7 +183,7 @@ t2]])
     }, get_fold_levels())
 
     feed('dd')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -177,7 +193,7 @@ t2]])
     }, get_fold_levels())
 
     feed('2ggdd')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '0',
@@ -186,7 +202,7 @@ t2]])
     }, get_fold_levels())
 
     feed('u')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -196,7 +212,7 @@ t2]])
     }, get_fold_levels())
 
     feed('3ggdd')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -205,7 +221,7 @@ t2]])
     }, get_fold_levels())
 
     feed('u')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -216,7 +232,7 @@ t2]])
 
     feed('3ggI#<Esc>')
     parse()
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -227,7 +243,7 @@ t2]])
 
     feed('x')
     parse()
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -263,7 +279,7 @@ end
     }, get_fold_levels())
 
     command('1,4join')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '0',
@@ -271,7 +287,7 @@ end
     }, get_fold_levels())
 
     feed('u')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -316,7 +332,7 @@ end]])
 
     command('1,8join')
     feed('u')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -360,7 +376,7 @@ end]])
     }, get_fold_levels())
 
     command('2,6join')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -369,7 +385,7 @@ end]])
     }, get_fold_levels())
 
     feed('u')
-    poke_eventloop()
+    wait_folds()
 
     eq({
       [1] = '>1',
@@ -802,6 +818,7 @@ t2]])
       [18] = '2',
       [19] = '1',
     }
+    wait_folds()
     eq(foldlevels, get_fold_levels())
 
     -- only changing filetype should change the parser again
@@ -809,6 +826,7 @@ t2]])
     expect_no_folds()
 
     command('set ft=c')
+    wait_folds()
     eq(foldlevels, get_fold_levels())
   end)
 
@@ -822,5 +840,53 @@ t2]])
       ^hello                                   |
                                               |
     ]])
+  end)
+
+  it('no error setting foldminlines after a buffer is wiped in an autocmd #40290', function()
+    insert('foo')
+    command('set foldmethod=expr foldexpr=v:lua.vim.treesitter.foldexpr()')
+    command('call foldlevel(1) | enew')
+    -- BufUnload doesn't fire for a buffer wiped inside another autocmd.
+    command('autocmd User Wipe ++once bwipeout! 1')
+    command('doautocmd User Wipe')
+    command('set foldminlines=0')
+  end)
+
+  it('clamps unbounded changed ranges on 32-bit platforms', function()
+    insert([[
+one
+two]])
+
+    exec_lua(function()
+      local parser = {}
+
+      function parser:parse(_, callback)
+        if callback then
+          callback(nil, {})
+        end
+      end
+
+      function parser:for_each_tree() end
+
+      function parser:register_cbs(callbacks)
+        self.callbacks = callbacks
+      end
+
+      vim.treesitter.get_parser = function()
+        return parser
+      end
+
+      vim.treesitter.foldexpr()
+      vim.wo.foldmethod = 'expr'
+      vim._foldupdate = function(_, first, last)
+        _G.foldupdate_range = { first, last }
+      end
+
+      -- UINT32_MAX is represented as -1 by Lua integers on 32-bit platforms.
+      parser.callbacks.on_changedtree({ { 0, 0, -1, -1 } })
+    end)
+    poke_eventloop()
+
+    eq({ 0, 2 }, exec_lua('return _G.foldupdate_range'))
   end)
 end)

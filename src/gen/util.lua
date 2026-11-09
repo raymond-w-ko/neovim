@@ -162,7 +162,7 @@ local function parse_md(text)
 
     for child, child_field in node:iter_children() do
       local e = extract(child)
-      if child_field then
+      if child_field and child_field ~= 'info_string' then
         ret[child_field] = e
       else
         table.insert(ret, e)
@@ -236,6 +236,8 @@ local function render_md(node, start_indent, indent, text_width, level, is_list)
 
   if ntype == 'text' then
     parts[#parts + 1] = node.text
+  elseif ntype == 'atx_heading' then
+    parts[#parts + 1] = ('*%s*'):format(node.heading_content.text)
   elseif ntype == 'html_tag' then
     error('html_tag: ' .. node.text)
   elseif ntype == 'inline_link' then

@@ -16,6 +16,7 @@
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/context.h"
 #include "nvim/decoration_defs.h"
 #include "nvim/drawscreen.h"
 #include "nvim/errors.h"
@@ -95,7 +96,7 @@
 ///      - "NE" northeast
 ///      - "SW" southwest
 ///      - "SE" southeast
-///   - border: (`string|string[]`) (defaults to 'winborder' option) Window border. The string form
+///   - border: (`string|string[]`, default: 'winborder' option) Window border. The string form
 ///     accepts the same values as the 'winborder' option. The array form must have a length of
 ///     eight or any divisor of eight, specifying the chars that form the border in a clockwise
 ///     fashion starting from the top-left corner. For example, the double-box style can be
@@ -135,26 +136,20 @@
 ///       configuration together with this.
 ///   - fixed: If true when anchor is NW or SW, the float window
 ///            would be kept fixed even if the window would be truncated.
-///   - focusable: Enable focus by user actions (wincmds, mouse events).
-///       Defaults to true. Non-focusable windows can be entered by
-///       |nvim_set_current_win()|, or, when the `mouse` field is set to true,
-///       by mouse events. See |focusable|.
-///   - footer: (optional) Footer in window border, string or list.
-///       List should consist of `[text, highlight]` tuples.
-///       If string, or a tuple lacks a highlight, the default highlight group is `FloatFooter`.
-///   - footer_pos: Footer position. Must be set with `footer` option.
-///       Value can be one of "left", "center", or "right".
-///       Default is `"left"`.
+///   - focusable: (default: true) Enable focus by user actions (wincmds, mouse events).
+///     Non-|focusable| windows can be entered by |nvim_set_current_win()|, or by mouse events if
+///     `mouse=true`.
+///   - footer: (`string|string[]?`) Footer in window border: string or list of `[text, highlight]`
+///     tuples. Default highlight group is `FloatFooter`.
+///   - footer_pos: (default: "left") Footer position. One of: "left", "center", "right". The
+///    `footer` field must be set also.
 ///   - height: Window height (in character cells). Minimum of 1.
 ///   - hide: Hides the floating window. |window-hidden|
-///   - mouse: Specify how this window interacts with mouse events.
-///       Defaults to `focusable` value.
-///       - If false, mouse events pass through this window.
-///       - If true, mouse events interact with this window normally.
+///   - mouse: (default: `focusable` value) If true, mouse events interact with the window
+///     normally; if false, they pass through to the window behind it.
 ///   - noautocmd: Block all autocommands for the duration of the call. Cannot be changed by
 ///     |nvim_win_set_config()|.
-///   - relative: Sets the window layout to "floating", placed at (row,col)
-///                 coordinates relative to:
+///   - relative: Sets the window layout to "floating", placed at (row,col) coordinates relative to:
 ///      - "cursor"     Cursor position in current window.
 ///      - "editor"     The global editor grid.
 ///      - "laststatus" 'laststatus' if present, or last row.
@@ -178,9 +173,8 @@
 ///   - title: (optional) Title in window border, string or list.
 ///       List should consist of `[text, highlight]` tuples.
 ///       If string, or a tuple lacks a highlight, the default highlight group is `FloatTitle`.
-///   - title_pos: Title position. Must be set with `title` option.
-///       Value can be one of "left", "center", or "right".
-///       Default is `"left"`.
+///   - title_pos: (default: "left") Title position. One of: "left", "center", "right". The `title`
+///     field must be set also.
 ///   - vertical: Split vertically |:vertical|.
 ///   - width: Window width (in character cells). Minimum of 1.
 ///   - win: |window-ID| target window. Can be in a different tab page. Determines the window to
@@ -253,13 +247,13 @@ Window nvim_open_win(Buffer buf, Boolean enter, Dict(win_config) *config, Error 
       if (parent == NULL || parent == curwin) {
         wp = win_split_ins(size, flags, NULL, 0, NULL);
       } else {
-        switchwin_T switchwin;
-        // `parent` is valid in `tp`, so switch_win should not fail.
-        const int result = switch_win(&switchwin, parent, tp, true);
-        assert(result == OK);
+        CtxSwitch switchwin;
+        // `parent` is valid in `tp`, so ctx_switch should not fail.
+        const bool result = ctx_switch(&switchwin, parent, tp, NULL, kCtxNoEvents | kCtxNoDisplay);
+        assert(result);
         (void)result;
         wp = win_split_ins(size, flags, NULL, 0, NULL);
-        restore_win(&switchwin, true);
+        ctx_restore(&switchwin);
       }
     });
     if (wp) {
@@ -296,19 +290,19 @@ Window nvim_open_win(Buffer buf, Boolean enter, Dict(win_config) *config, Error 
   }
 
   // Autocommands may close `wp` or move it to another tabpage, so update and check `tp` after each
-  // event. In each case, `wp` should already be valid in `tp`, so switch_win should not fail.
+  // event. In each case, `wp` should already be valid in `tp`, so ctx_switch should not fail.
   // Also, autocommands may free the `buf` to switch to, so store a bufref to check.
   bufref_T bufref;
   set_bufref(&bufref, b);
   if (!fconfig.noautocmd) {
-    switchwin_T switchwin;
-    const int result = switch_win_noblock(&switchwin, wp, tp, true);
-    assert(result == OK);
+    CtxSwitch switchwin;
+    const bool result = ctx_switch(&switchwin, wp, tp, NULL, kCtxNoDisplay);
+    assert(result);
     (void)result;
-    if (apply_autocmds(EVENT_WINNEW, NULL, NULL, false, curbuf)) {
+    if (apply_autocmds_win(EVENT_WINNEW, NULL, NULL, false, curbuf, wp)) {
       tp = win_find_tabpage(wp);
     }
-    restore_win_noblock(&switchwin, true);
+    ctx_restore(&switchwin);
   }
   if (tp && enter) {
     goto_tabpage_win(tp, wp);
@@ -403,7 +397,7 @@ static bool win_can_move_tp(win_T *wp, tabpage_T *tp, Error *err)
     api_set_error(err, kErrorTypeException, "%s", e_textlock);
     return false;
   }
-  if (is_aucmd_win(wp)) {
+  if (is_ctx_win(wp)) {
     api_set_error(err, kErrorTypeException, "Cannot move autocmd window to another tabpage");
     return false;
   }
@@ -576,20 +570,21 @@ static bool win_config_split(win_T *win, const Dict(win_config) *config, WinConf
 
   TRY_WRAP(err, {
     const bool need_switch = parent != NULL && parent != curwin;
-    switchwin_T switchwin;
+    CtxSwitch switchwin;
     if (need_switch) {
-      // `parent` is valid in its tabpage, so switch_win should not fail.
-      const int result = switch_win(&switchwin, parent, parent_tp, true);
+      // `parent` is valid in its tabpage, so ctx_switch should not fail.
+      const bool result = ctx_switch(&switchwin, parent, parent_tp, NULL,
+                                     kCtxNoEvents | kCtxNoDisplay);
       (void)result;
-      assert(result == OK);
+      assert(result);
     }
     to_split_ok = win_split_ins(0, flags, win, 0, unflat_altfr) != NULL;
     if (!to_split_ok) {
-      // Restore `win` to the window list now, so it's valid for restore_win (if used).
+      // Restore `win` to the window list now, so it's valid for ctx_restore (if used).
       win_append(win->w_prev, win, win_tp == curtab ? NULL : win_tp);
     }
     if (need_switch) {
-      restore_win(&switchwin, true);
+      ctx_restore(&switchwin);
     }
   });
   if (!to_split_ok) {
@@ -713,7 +708,7 @@ restore_curwin:
 
     // Remove grid if present. More reliable than checking curtab, as tabpage_check_windows may not
     // run when temporarily switching tabpages, meaning grids may be stale from another tabpage!
-    // (e.g: switch_win_noblock with no_display=true)
+    // (e.g: ctx_switch with kCtxNoDisplay)
     ui_comp_remove_grid(&win->w_grid_alloc);
 
     // Redraw tabline, update window's hl attribs, etc. Set must_redraw here, as redraw_later might
@@ -834,10 +829,15 @@ static void config_put_bordertext(Dict(win_config) *config, WinConfig *fconfig,
   }
 }
 
-/// Gets window configuration in the form of a dict which can be passed as the `config` parameter of
-/// |nvim_open_win()|.
+/// Gets window config as a dict which can be passed to |nvim_open_win()| as the `config` parameter.
 ///
-/// For non-floating windows, `relative` is empty.
+/// For non-floating windows, `relative` is empty, thus you can check that field to detect if
+/// a window is a floatwin:
+/// ```lua
+/// vim.print(vim.api.nvim_win_get_config(0).relative == '' and 'non-float' or 'float')
+/// -- Or use win_gettype().
+/// vim.print(vim.fn.win_gettype())
+/// ```
 ///
 /// @param      win |window-ID|, or 0 for current window
 /// @param[out] err Error details, if any
@@ -1001,8 +1001,8 @@ static bool parse_float_bufpos(Array bufpos, lpos_T *out)
   return true;
 }
 
-static void parse_bordertext(Object bordertext, BorderTextType bordertext_type, WinConfig *fconfig,
-                             Error *err)
+void parse_bordertext(Object bordertext, BorderTextType bordertext_type, WinConfig *fconfig,
+                      Error *err)
 {
   VALIDATE_EXP(!(bordertext.type != kObjectTypeString && bordertext.type != kObjectTypeArray),
                "title/footer", "String or Array", api_typename(bordertext.type), {

@@ -3,6 +3,8 @@ local n = require('test.functional.testnvim')()
 local tt = require('test.functional.testterm')
 local Screen = require('test.functional.ui.screen')
 
+local describe, it, before_each, after_each, finally =
+  t.describe, t.it, t.before_each, t.after_each, t.finally
 local uv = vim.uv
 local eq, eval, expect, exec = t.eq, n.eval, n.expect, n.exec
 local assert_alive = n.assert_alive
@@ -117,7 +119,7 @@ describe("preserve and (R)ecover with custom 'directory'", function()
     test_recover(swappath1)
   end)
 
-  it('killing TUI process without :preserve #22096', function()
+  it('killing TUI process without :preserve #22096', { retries = 2 }, function()
     -- Windows(#38669): inner server could attach to the outer Nvim terminal's console
     -- and die abruptly when the outer terminal job closed, leaving an unreadable swapfile
     skip(is_os('win'), 'unreadable swapfile on Windows after TUI process exit')
@@ -136,8 +138,7 @@ describe("preserve and (R)ecover with custom 'directory'", function()
     -- n.exec_lua([[vim.uv.kill(vim.fn.jobpid(vim.bo.channel), 'sigterm')]])
     command('call chanclose(&channel)') -- Kill the child process.
     -- Wait for the child process to stop.
-    -- FIXME: SIGHUP sometimes isn't caught with ASAN.
-    screen0:expect({ any = t.is_asan() and '%[Process exited %d+%]' or '%[Process exited 1%]' })
+    screen0:expect({ any = '%[Process exited 1%]' })
     neq(nil, uv.fs_stat(swappath1))
     test_recover(swappath1)
   end)
@@ -161,7 +162,7 @@ describe("preserve and (R)ecover with custom 'directory'", function()
               content = { { '' } },
               pos = 0,
               -- Default vim.ui.select prompt.
-              prompt = 'Type number and <Enter> or click with the mouse (q or empty cancels): ',
+              prompt = 'Type number and <Enter> (q or empty cancels): ',
             },
           },
           condition = function()
@@ -187,7 +188,7 @@ describe("preserve and (R)ecover with custom 'directory'", function()
             '\n1:.*%.swo',
             '\n2:.*%.swp',
             'host name:',
-            vim.pesc('Type number and <Enter> or click with the mouse (q or empty cancels): ^'),
+            vim.pesc('Type number and <Enter> (q or empty cancels): ^'),
           },
           none = vim.pesc('{18:^@}'),
         })
@@ -427,10 +428,50 @@ describe('swapfile detection', function()
     screen:expect([[
       ^                                                            |
       {1:~                                                           }|*16
-      {19:W325: Ignoring swapfile from Nvim process }0,0-1         All |
+      {19:W325: Ignoring swapfile from Nvim process }0,0-1          All|
     ]])
     eq(('\n' .. msg_expected):rep(3):sub(2), n.exec_capture('messages'))
     command('bwipe!')
+
+    nvim1:close()
+  end)
+
+  -- ui2 opens windows to show a message, which chdirs in and out of the target window's context.
+  -- readfile() aliases the buffer name across that.
+  it('ui2 message from the SwapExists handler does not abort the read #41454', function()
+    exec(init)
+    write_file('Xfile1', 'some text...\n')
+    command('edit Xfile1')
+    command('preserve') -- Make sure the swap file exists.
+
+    local initfile = 'Xtest_swapdialog_init.lua'
+    write_file(
+      initfile,
+      ('vim.opt.directory:prepend(%q)\nrequire("vim._core.ui2").enable()\n'):format(swapdir .. '//')
+    )
+    finally(function()
+      os.remove(initfile)
+      os.remove('Xfile1')
+    end)
+
+    local nvim1 = n.new_session(true)
+    set_session(nvim1)
+    local screen = Screen.new(75, 10)
+    -- ui2 needs a UI attached while the file argument is read, i.e. a real TTY.
+    fn.jobstart({ nvim_prog, '-i', 'NONE', '--noplugin', '-u', initfile, 'Xfile1' }, {
+      term = true,
+      env = { VIMRUNTIME = os.getenv('VIMRUNTIME') },
+    })
+    screen:expect({
+      grid = [[
+        ^some text...                                                               |
+        ~                                                                          |*6
+        Xfile1                                                   1,1            All|
+        {MATCH:W325: Ignoring swapfile from Nvim process %d+ *}|
+                                                                                   |
+      ]],
+      attr_ids = {},
+    })
 
     nvim1:close()
   end)

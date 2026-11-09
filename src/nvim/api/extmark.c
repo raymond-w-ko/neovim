@@ -191,7 +191,7 @@ static Array extmark_to_array(MTPair extmark, bool id, bool add_dict, bool hl_na
 /// Gets the position (0-indexed) of an |extmark|.
 ///
 /// @param buf  Buffer id, or 0 for current buffer
-/// @param ns_id  Namespace id from |nvim_create_namespace()|
+/// @param ns_id  |namespace| id
 /// @param id  Extmark id
 /// @param opts  Optional parameters. Keys:
 ///          - details: Whether to include the details dict
@@ -232,31 +232,29 @@ nvim_buf_get_extmark_by_id(Buffer buf, Integer ns_id, Integer id, Dict(get_extma
   return extmark_to_array(extmark, false, details, hl_name, arena);
 }
 
-/// Gets |extmarks| in "traversal order" from a |charwise| region defined by
-/// buffer positions (inclusive, 0-indexed |api-indexing|).
+/// Gets |extmarks| in "traversal order" from a |charwise| region defined by buffer positions
+/// (inclusive, 0-indexed |api-indexing|).
 ///
 /// Region can be given as (row,col) tuples, or valid extmark ids (whose
 /// positions define the bounds). 0 and -1 are understood as (0,0) and (-1,-1)
 /// respectively, thus the following are equivalent:
 ///
 /// ```lua
-/// vim.api.nvim_buf_get_extmarks(0, my_ns, 0, -1, {})
-/// vim.api.nvim_buf_get_extmarks(0, my_ns, {0,0}, {-1,-1}, {})
+/// vim.api.nvim_buf_get_extmarks(0, my_ns, 0, -1)
+/// vim.api.nvim_buf_get_extmarks(0, my_ns, {0,0}, {-1,-1})
 /// ```
 ///
 /// If `end` is less than `start`, marks are returned in reverse order.
 /// (Useful with `limit`, to get the first marks prior to a given position.)
 ///
-/// Note: For a reverse range, `limit` does not actually affect the traversed
-/// range, just how many marks are returned
-///
-/// Note: when using extmark ranges (marks with a end_row/end_col position)
-/// the `overlap` option might be useful. Otherwise only the start position
-/// of an extmark will be considered.
-///
-/// Note: legacy signs placed through the |:sign| commands are implemented
-/// as extmarks and will show up here. Their details array will contain a
-/// `sign_name` field.
+/// Note:
+/// - For a reverse range, `limit` does not actually affect the traversed range, just how many marks
+///   are returned
+/// - When using extmark ranges (marks with a end_row/end_col position) the `overlap` option might
+///   be useful. Otherwise only the start position of an extmark will be considered.
+/// - The |:marks| command can list extmarks.
+/// - Legacy signs placed through the |:sign| commands are implemented as extmarks. Their details
+///   array will contain a `sign_name` field.
 ///
 /// Example:
 ///
@@ -265,18 +263,18 @@ nvim_buf_get_extmark_by_id(Buffer buf, Integer ns_id, Integer id, Dict(get_extma
 /// local pos = api.nvim_win_get_cursor(0)
 /// local ns  = api.nvim_create_namespace('my-plugin')
 /// -- Create new extmark at line 1, column 1.
-/// local m1  = api.nvim_buf_set_extmark(0, ns, 0, 0, {})
+/// local m1  = api.nvim_buf_set_extmark(0, ns, 0, 0)
 /// -- Create new extmark at line 3, column 1.
-/// local m2  = api.nvim_buf_set_extmark(0, ns, 2, 0, {})
+/// local m2  = api.nvim_buf_set_extmark(0, ns, 2, 0)
 /// -- Get extmarks only from line 3.
-/// local ms  = api.nvim_buf_get_extmarks(0, ns, {2,0}, {2,0}, {})
+/// local ms  = api.nvim_buf_get_extmarks(0, ns, {2,0}, {2,0})
 /// -- Get all marks in this buffer + namespace.
-/// local all = api.nvim_buf_get_extmarks(0, ns, 0, -1, {})
+/// local all = api.nvim_buf_get_extmarks(0, ns, 0, -1)
 /// vim.print(ms)
 /// ```
 ///
 /// @param buf  Buffer id, or 0 for current buffer
-/// @param ns_id  Namespace id from |nvim_create_namespace()| or -1 for all namespaces
+/// @param ns_id  |namespace| id, or -1 for all namespaces
 /// @param start  Start of range: a 0-indexed (row, col) or valid extmark id
 /// (whose position defines the bound). |api-indexing|
 /// @param end  End of range (inclusive): a 0-indexed (row, col) or valid
@@ -396,15 +394,16 @@ ArrayOf(DictAs(get_extmark_item)) nvim_buf_get_extmarks(Buffer buf, Integer ns_i
 /// range (no highlighting).
 ///
 /// @param buf  Buffer id, or 0 for current buffer
-/// @param ns_id  Namespace id from |nvim_create_namespace()|
+/// @param ns_id  |namespace| id
 /// @param line  Line where to place the mark, 0-based. |api-indexing|
 /// @param col  Column where to place the mark, 0-based. |api-indexing|
 /// @param opts  Optional parameters:
-///               - conceal: (boolean|string)
-///                   - string: Single char or empty string, enables conceal similar to |:syn-conceal|.
-///                     Non-empty char is used as |:syn-cchar|. Highlighted with "hl_group" if
-///                     defined, else defaults to |hl-Conceal|.
-///                   - boolean: true is equivalent to "", false removes any existing conceal.
+///               - conceal: (boolean|string) Conceals the range ("extmark-conceal") like
+///                 |:syn-conceal|: a single char behaves like |:syn-cchar| (highlighted with
+///                 "hl_group", default |hl-Conceal|); empty string or `true` conceals without
+///                 cchar; `false` reveals text that lower-priority conceal hides. Lines 'wrap' at
+///                 their (non-ephemeral) concealed width (takes precedence over legacy
+///                 |:syn-conceal|, |matchadd()|).
 ///               - conceal_lines: (string) Line-level conceal. When set to an empty string (other
 ///                 values reserved for future use), the lines in the extmark range are not drawn;
 ///                 the next non-concealed line is drawn in their place. Requires 'conceallevel' >=
@@ -459,7 +458,8 @@ ArrayOf(DictAs(get_extmark_item)) nvim_buf_get_extmarks(Buffer buf, Integer ns_i
 ///                 display of the text, except 'tabstop' is used for hard tabs. The 'wrap' and
 ///                 'linebreak' options do not take effect, so the number of extra screen lines will
 ///                 match the list-size (but see `virt_lines_overflow`). By default lines are placed
-///                 below the marked line.
+///                 below the marked line. Special case: If the last `text_chunk` is empty,
+///                 the corresponding `hl` will extend to the end of the line.
 ///               - virt_lines_above: Place virtual lines above instead.
 ///               - virt_lines_leftcol: Place virtual lines in the leftmost column of the window,
 ///                 bypassing sign and number columns.
@@ -476,7 +476,8 @@ ArrayOf(DictAs(get_extmark_item)) nvim_buf_get_extmarks(Buffer buf, Integer ns_i
 ///                 hidden because of scrolling with 'nowrap' or 'smoothscroll'. Currently only
 ///                 affects "overlay" virt_text.
 ///               - virt_text_pos: Position of virtual text:
-///                 - "eol": Right after EOL character (default).
+///                 - "eol": One cell after the line text or its displayed 'listchars' EOL character
+///                   (default).
 ///                 - "eol_right_align": Display right-aligned in the window unless the virtual text
 ///                   is longer than the space available. If the virtual text is too long, it is
 ///                   truncated to fit in the window after the EOL character. If the line is
@@ -610,13 +611,21 @@ Integer nvim_buf_set_extmark(Buffer buf, Integer ns_id, Integer line, Integer co
       String conceal_str = opts->conceal.data.string;
       hl.flags |= kSHConceal;
       if (conceal_str.size > 0) {
-        int ch;
-        hl.conceal_char = utfc_ptr2schar(conceal_str.data, &ch);
-        VALIDATE(hl.conceal_char && vim_isprintc(ch), "%s", "conceal char must be printable", {
+        StrCharInfo ci = utf_ptr2StrCharInfo(conceal_str.data);
+        ClusterInfo cli = utf_ClusterInfo(ci);
+        VALIDATE(ci.chr.value >= 0x20 && cli.cells <= 2, "%s", "conceal char must be printable", {
           goto error;
         });
+        hl.conceal_char = schar_from_cluster(ci, cli);
       }
     }
+  }
+
+  if (opts->_conceal_continuation) {
+    VALIDATE(hl.flags & kSHConceal, "%s", "_conceal_continuation requires conceal", {
+      goto error;
+    });
+    hl.flags |= kSHConcealCont;
   }
 
   if (HAS_KEY(opts, set_extmark, conceal_lines)) {
@@ -849,7 +858,7 @@ Integer nvim_buf_set_extmark(Buffer buf, Integer ns_id, Integer line, Integer co
       goto error;
     }
 
-    uint16_t decor_flags = 0;
+    uint32_t decor_flags = 0;
 
     DecorVirtText *decor_alloc = NULL;
     if (kv_size(virt_text.data.virt_text)) {
@@ -891,6 +900,9 @@ Integer nvim_buf_set_extmark(Buffer buf, Integer ns_id, Integer line, Integer co
       }
     }
 
+    if (hl.flags & kSHConceal) {
+      decor_flags |= MT_FLAG_DECOR_CONCEAL;
+    }
     if (hl.flags & kSHConcealLines) {
       decor_flags |= MT_FLAG_DECOR_CONCEAL_LINES;
     }
@@ -939,7 +951,7 @@ error:
 /// Removes an |extmark|.
 ///
 /// @param buf Buffer id, or 0 for current buffer
-/// @param ns_id Namespace id from |nvim_create_namespace()|
+/// @param ns_id |namespace| id
 /// @param id Extmark id
 /// @param[out] err   Error details, if any
 /// @return true if the extmark was found, else false
@@ -1021,7 +1033,7 @@ void nvim_buf_clear_namespace(Buffer buf, Integer ns_id, Integer line_start, Int
 ///
 /// Note: Callbacks will not run for |window-hidden|, as they are not redrawn.
 ///
-/// @param ns_id  Namespace id from |nvim_create_namespace()|
+/// @param ns_id  |namespace| id
 /// @param opts  Table of callbacks:
 ///             - on_buf: called for each buffer being redrawn (once per edit,
 ///               before window callbacks)
@@ -1083,6 +1095,7 @@ void nvim_set_decoration_provider(Integer ns_id, Dict(set_decoration_provider) *
     { "_on_hl_def", &opts->_on_hl_def, &p->hl_def },
     { "_on_spell_nav", &opts->_on_spell_nav, &p->spell_nav },
     { "_on_conceal_line", &opts->_on_conceal_line, &p->conceal_line },
+    { "_on_conceal", &opts->_on_conceal, &p->conceal },
     { NULL, NULL, NULL },
   };
 
@@ -1099,6 +1112,32 @@ void nvim_set_decoration_provider(Integer ns_id, Dict(set_decoration_provider) *
   p->state = kDecorProviderActive;
   p->hl_valid++;
   p->hl_cached = false;
+}
+
+/// @nodoc
+/// Enables (or disables) the `_on_conceal` decoration providers for `buf`: measuring a row runs
+/// them first, so rows not yet drawn are measured concealed. Each enable needs one disable.
+void nvim__buf_set_conceal_provider(Buffer buf, Boolean enabled, Error *err)
+  FUNC_API_LUA_ONLY
+{
+  buf_T *b = find_buffer_by_handle(buf, err);
+  if (b == NULL) {
+    return;
+  }
+  int const count = b->b_conceal_providers + (enabled ? 1 : -1);
+  VALIDATE(count >= 0, "%s", "Conceal provider is not enabled", {
+    return;
+  });
+  b->b_conceal_providers = count;
+  // Only the first enable and the last disable change the layout.
+  if (count != (enabled ? 1 : 0)) {
+    return;
+  }
+  FOR_ALL_TAB_WINDOWS(tp, wp) {
+    if (wp->w_buffer == b) {
+      changed_window_setting(wp);
+    }
+  }
 }
 
 /// Gets the line and column of an |extmark|.
@@ -1252,6 +1291,7 @@ void nvim__ns_set(Integer ns_id, Dict(ns_opts) *opts, Error *err)
 
       win_T *wp = find_window_by_handle((Window)win, err);
       if (!wp) {
+        set_destroy(ptr_t, &windows);
         return;
       }
 

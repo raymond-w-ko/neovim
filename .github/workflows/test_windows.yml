@@ -21,7 +21,7 @@ jobs:
       matrix:
         test: [functional, old]
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -67,6 +67,10 @@ jobs:
           TEST_TIMEOUT: 600
         run: |
           $ErrorActionPreference = 'Continue'
+          # Keep an MSYS process (Git's usr/bin) alive, so the MSYS runtime initializes its shared
+          # state only once. Else a test that kills an MSYS process during that init (CTRL-C) can
+          # make the next one stall 15s and die: "fatal error - add_item (...) failed, errno 1".
+          Start-Process -WindowStyle Hidden (Get-Command sleep.exe).Source infinity
           # `-k 0` tells ninja to continue running all targets even if some fail.
           cmake --build build --target functionaltest-parallel -j 2 -- -k 0
           $exitCode = $LASTEXITCODE
@@ -74,12 +78,14 @@ jobs:
           exit $exitCode
 
       - if: ${{ matrix.test == 'old' }}
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
           update: true
-          install: unzip
+          install: >-
+            diffutils
+            unzip
           pacboy: >-
-            make:p gcc:p diffutils:p
+            make:p gcc:p
           release: false
 
       - if: ${{ matrix.test == 'old' }}

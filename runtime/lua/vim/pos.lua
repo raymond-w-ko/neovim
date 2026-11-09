@@ -55,6 +55,28 @@ function M.__index(pos, key)
   return M[key]
 end
 
+---@private
+---@param pos vim.Pos
+---@param key any
+---@param value any
+function M.__newindex(pos, key, value)
+  if key == 'row' then
+    validate('row', value, 'number')
+    pos[1] = value
+  elseif key == 'col' then
+    validate('col', value, 'number')
+    pos[2] = value
+  elseif key == 'buf' then
+    validate('buf', value, 'number')
+    if value == 0 then
+      value = api.nvim_get_current_buf()
+    end
+    pos[3] = value
+  else
+    rawset(pos, key, value)
+  end
+end
+
 ---@package
 ---@param buf integer
 ---@param row integer
@@ -138,10 +160,6 @@ function M.lsp(buf, pos, position_encoding)
   validate('pos', pos, 'table')
   validate('position_encoding', position_encoding, 'string')
 
-  if buf == 0 then
-    buf = api.nvim_get_current_buf()
-  end
-
   local row, col = util.from_lsp(buf, pos, position_encoding)
   return M.new(buf, row, col)
 end
@@ -166,7 +184,8 @@ end
 --- Creates a new |vim.Pos| from cursor position (see |api-indexing|).
 ---
 --- If {pos} is omitted, the first argument is treated as {win} instead of {buf},
---- and the current cursor position of {win} is used.
+--- and the current cursor position of {win} is used. If {win} is also omitted,
+--- it defaults to the current window.
 ---
 --- Example:
 --- ```lua
@@ -179,19 +198,16 @@ end
 ---@param buf integer
 ---@param pos [integer, integer] (lnum, col) tuple
 ---@return vim.Pos
----@overload fun(win: integer): vim.Pos
+---@overload fun(win?: integer): vim.Pos
 function M.cursor(buf, pos)
   validate('pos', pos, 'table', true)
 
   if pos then
     validate('buf', buf, 'number')
-    if buf == 0 then
-      buf = api.nvim_get_current_buf()
-    end
   else
     local win = buf
-    validate('win', win, 'number')
-    if win == 0 then
+    validate('win', win, 'number', true)
+    if win == 0 or win == nil then
       win = api.nvim_get_current_win()
     end
 
@@ -210,7 +226,7 @@ end
 ---
 --- -- Convert to mark position, you can call it in a method style.
 --- local lnum, col = pos:to_mark()
---- vim.api.nvim_buf_set_mark(0, 'M', lnum, col, {})
+--- vim.api.nvim_buf_set_mark(0, 'M', lnum, col)
 --- ```
 ---@param pos vim.Pos
 ---@return integer lnum, integer col
@@ -223,7 +239,7 @@ end
 ---
 --- Example:
 --- ```lua
---- local mark_info = vim.api.nvim_get_mark('M', {})
+--- local mark_info = vim.api.nvim_get_mark('M')
 --- local lnum, col, buf, name = unpack(mark_info)
 ---
 --- if lnum == 0 and col == 0 and buf == 0 then
@@ -240,10 +256,6 @@ function M.mark(buf, lnum, col)
   validate('buf', buf, 'number')
   validate('lnum', lnum, 'number')
   validate('col', col, 'number')
-
-  if buf == 0 then
-    buf = api.nvim_get_current_buf()
-  end
 
   return M.new(buf, util.from_mark(lnum, col))
 end
@@ -278,10 +290,6 @@ function M.extmark(buf, row, col)
   validate('buf', buf, 'number')
   validate('row', row, 'number')
   validate('col', col, 'number')
-
-  if buf == 0 then
-    buf = api.nvim_get_current_buf()
-  end
 
   return M.new(buf, row, col)
 end
@@ -322,8 +330,9 @@ function M.offset(buf, offset)
 
   local lnum = vim.list.bisect(
     setmetatable({}, {
-      __index = function(_, lnum)
-        return api.nvim_buf_get_offset(buf, lnum - 1)
+      --- @param idx integer
+      __index = function(_, idx)
+        return api.nvim_buf_get_offset(buf, idx - 1)
       end,
     }),
     offset,
@@ -341,6 +350,6 @@ setmetatable(M, {
     return M.new(...)
   end,
 })
----@cast M +fun(buf: integer, row: integer, col: integer): vim.Pos
+---@cast M vim.Pos & fun(buf: integer, row: integer, col: integer): vim.Pos
 
 return M

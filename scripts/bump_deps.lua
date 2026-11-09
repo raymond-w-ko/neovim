@@ -16,7 +16,8 @@ local repos = {
   'neovim/unibilium',
   'juliastrings/utf8proc',
   'tree-sitter/tree-sitter',
-  'tree-sitter/tree-sitter-c',
+  'tree-sitter-grammars/tree-sitter-c',
+  'tree-sitter-grammars/tree-sitter-diff',
   'tree-sitter-grammars/tree-sitter-lua',
   'tree-sitter-grammars/tree-sitter-vim',
   'neovim/tree-sitter-vimdoc',
@@ -31,8 +32,6 @@ local zig_mode = {
   uncrustify = false,
   wasmtime = false,
   libuv = false,
-  unibilium = 'nested',
-  utf8proc = 'nested',
 }
 
 local dependency_table = {} --- @type table<string, string>

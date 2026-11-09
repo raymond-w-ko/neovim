@@ -75,6 +75,8 @@ const char *get_appname(bool namelike)
     xstrlcpy(NameBuff, "nvim", sizeof(NameBuff));
   }
 
+  TO_SLASH(NameBuff);
+
   if (namelike) {
     // Appname may be a relative path, replace slashes to make it name-like.
     memchrsub(NameBuff, '/', '-', sizeof(NameBuff));
@@ -94,10 +96,6 @@ bool appname_is_valid(void)
       || strequal(appname, "\\")
       || strequal(appname, ".")
       || strequal(appname, "..")
-#ifdef BACKSLASH_IN_FILENAME
-      || strstr(appname, "\\..") != NULL
-      || strstr(appname, "..\\") != NULL
-#endif
       || strstr(appname, "/..") != NULL
       || strstr(appname, "../") != NULL) {
     return false;
@@ -118,7 +116,7 @@ static char *xdg_remove_duplicate(char *ret, const char *sep)
     // Check if the directory is not already in the list
     bool is_duplicate = false;
     for (size_t i = 0; i < data.size; i++) {
-      if (path_fnamecmp(kv_A(data, i), token) == 0) {
+      if (path_equal(kv_A(data, i), token, kPathCmpLiteral)) {
         is_duplicate = true;
         break;
       }
